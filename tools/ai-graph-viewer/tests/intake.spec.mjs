@@ -15,7 +15,7 @@ test('compiles planning successor through backend without a client draft or auto
   const current = snapshot();
   current.phase = 'planning'; current.gates = []; current.status = 'passed';
   current.nodes = current.nodes.map(node => ({...node, status: 'passed', capabilities: allDenied}));
-  current.capabilities = {...allDenied, requestReplan: allowed};
+  current.capabilities = {...allDenied, requestReplan: {...allowed, label:'Показать план реализации'}};
   const fixture = await mockApi(page, current);
   await page.goto(`/#session=${token}`);
   await page.getByRole('button', {name: 'Показать план реализации'}).click();
@@ -124,4 +124,23 @@ test('dirty first install requires exact snapshot consent and explicit new-file 
   expect(body.snapshotHash).toBe(context.bootstrap.snapshotHash);
   expect(body.includeUntracked).toEqual(['src/new.ts']);
   expect(body.permissions).toBeUndefined();
+});
+
+
+test('replan labels and visibility come from backend capabilities', async ({page}) => {
+  const current = snapshot();
+  current.phase = 'planning';
+  current.nodes = current.nodes.map(node => ({...node, capabilities:allDenied}));
+  current.capabilities = allDenied;
+  const fixture = await mockApi(page, current);
+  await page.goto(`/#session=${token}`);
+  await expect(page.locator('.graph-node').first()).toBeVisible();
+  await expect(page.getByRole('button', {name:'Новая версия плана'})).toHaveCount(0);
+  await expect(page.locator('.next-action')).toHaveCount(0);
+  fixture.current().capabilities = {...allDenied, requestReplan:{...allowed,label:'Повторить планирование'}};
+  fixture.current().nodes[0].capabilities = {...allDenied, requestReplan:{...allowed,label:'Повторить планирование'}};
+  fixture.current().revision += 1;
+  await expect(page.locator('.next-action').getByRole('button', {name:'Повторить планирование'})).toBeVisible();
+  await expect(page.locator('.detail-actions').getByRole('button', {name:'Повторить планирование'})).toBeVisible();
+  await expect(page.getByRole('button', {name:'Показать план реализации'})).toHaveCount(0);
 });

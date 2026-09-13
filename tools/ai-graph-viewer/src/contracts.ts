@@ -23,6 +23,7 @@ export type CapabilityName =
   | 'rerunCheck';
 
 export interface Capability {
+  label?: string;
   allowed: boolean;
   reason: string | null;
 }

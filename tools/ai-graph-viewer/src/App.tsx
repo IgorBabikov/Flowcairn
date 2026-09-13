@@ -1050,7 +1050,7 @@ export function App() {
     await sendOperation(operation);
   }
 
-  const planningActionLabel = snapshot?.status === 'failed' ? 'Составить план заново' : 'Показать план реализации';
+  const planningActionLabel = getCapability(snapshot?.capabilities ?? {}, 'requestReplan').label ?? labels.replan;
   const composing = showCreate || (!snapshot && !selectedRunId);
   const composer = <TaskComposer
     context={project ? {
@@ -1339,7 +1339,7 @@ export function App() {
                     if (found) openGate(found);
                   }}
                   onReplan={requestReplan}
-                  replanLabel={snapshot?.phase === 'planning' ? planningActionLabel : labels.replan}
+                  replanLabel={getCapability(selectedNode.capabilities, 'requestReplan').label ?? labels.replan}
                 />
               ) : (
                 <p className="empty-copy">{labels.selectNode}</p>
