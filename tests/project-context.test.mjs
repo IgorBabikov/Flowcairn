@@ -2,12 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync, symlinkSync, linkSync } from 'node:fs';
 import os from 'node:os';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { discoverProjectContext, verifyProjectContext, readContextFile } from '../scripts/ai-graph/lib/project-context.mjs';
 
 function fixture(t) {
   const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'flowcairn-context-')));
   t.after(() => rmSync(root, { recursive: true, force: true }));
+  execFileSync('/usr/bin/git', ['init', '--initial-branch=main'], { cwd: root, stdio: 'ignore' });
   const write = (file, text) => { mkdirSync(path.dirname(path.join(root, file)), { recursive: true }); writeFileSync(path.join(root, file), text); };
   const pkg = (file, dependencies = {}, extra = {}) => write(file, JSON.stringify({ dependencies, ...extra }));
   return { root, write, pkg };
@@ -76,7 +78,7 @@ test('scope and file reader reject traversal, secrets, missing parents and all l
   const f = fixture(t); f.write('real/package.json', '{}');
   for (const scope of ['../outside', '/tmp', '.env', 'credentials.json', '.ssh/config', 'src//file'])
     assert.throws(() => discoverProjectContext(f.root, { scope: [scope] }), { code: 'CONTEXT_PATH_UNSAFE' });
-  assert.throws(() => discoverProjectContext(f.root, { scope: ['missing/deeper/file'] }), { code: 'CONTEXT_SCOPE_UNKNOWN' });
+  assert.deepEqual(discoverProjectContext(f.root, { scope: ['missing/deeper/file'] }).domains, ['engineering']);
   symlinkSync(path.join(f.root, 'real'), path.join(f.root, 'linked'));
   assert.throws(() => discoverProjectContext(f.root, { scope: ['linked/package.json'] }), { code: 'CONTEXT_LINK_UNSAFE' });
   symlinkSync(path.join(f.root, 'real/package.json'), path.join(f.root, 'package.json'));
@@ -85,16 +87,13 @@ test('scope and file reader reject traversal, secrets, missing parents and all l
   assert.throws(() => readContextFile(f.root, 'hard.json'), { code: 'CONTEXT_FILE_UNSAFE' });
 });
 
-test('size, manifest syntax and workspace pattern limits fail explicitly', (t) => {
+test('size, manifest syntax and unsafe workspace patterns fail explicitly', (t) => {
   const f = fixture(t); f.write('package.json', 'x'.repeat(65537));
   assert.throws(() => discoverProjectContext(f.root), { code: 'CONTEXT_LIMIT' });
   f.write('package.json', '{bad');
   assert.throws(() => discoverProjectContext(f.root), { code: 'CONTEXT_MANIFEST_INVALID' });
-  f.pkg('package.json', {}, { workspaces: ['apps/**'] });
-  assert.throws(() => discoverProjectContext(f.root), { code: 'CONTEXT_WORKSPACE_UNSUPPORTED' });
-  f.pkg('package.json', {}, { workspaces: ['apps/*'] });
-  for (let i = 0; i < 129; i++) mkdirSync(path.join(f.root, 'apps', `p${i}`), { recursive: true });
-  assert.throws(() => discoverProjectContext(f.root), { code: 'CONTEXT_LIMIT' });
+  f.pkg('package.json', {}, { workspaces: ['../outside'] });
+  assert.throws(() => discoverProjectContext(f.root), { code: 'WORKSPACES_PATH' });
 });
 
 
@@ -110,4 +109,29 @@ test('declared unrelated workspace manifests are not read for a narrow node', (t
   const result = discoverProjectContext(f.root, { scope: ['apps/web/src'], manifestPaths: ['apps/web/package.json', 'apps/api/package.json'] });
   assert.deepEqual(result.domains, ['frontend']);
   assert.ok(!result.evidence.some((item) => item.path === 'apps/api/package.json'));
+});
+
+
+test('shared workspace discovery supports nested/excluded patterns and pnpm manifests', (t) => {
+  const f = fixture(t); f.pkg('package.json', {}, { workspaces: ['apps/**', '!apps/ignored'] });
+  f.pkg('apps/deep/web/package.json', { vue: '*' }); f.pkg('apps/ignored/package.json', { express: '*' });
+  assert.deepEqual(discoverProjectContext(f.root, { scope: ['apps'] }).domains, ['frontend']);
+  f.pkg('package.json'); f.write('pnpm-workspace.yaml', 'packages:\n  - apps/**\n  - "!apps/ignored"\n');
+  const result = discoverProjectContext(f.root, { scope: ['apps'] });
+  assert.deepEqual(result.domains, ['frontend']);
+  assert.ok(result.evidence.find((e) => e.path === 'pnpm-workspace.yaml').hash);
+});
+
+
+test('task directory trailing slash and new nested files resolve through the nearest safe package', (t) => {
+  const f = fixture(t); f.pkg('apps/web/package.json', { vue: '*' }); f.write('apps/web/src/main.js', '');
+  const directory = discoverProjectContext(f.root, { scope: ['apps/web/src/'] });
+  assert.deepEqual(directory.scope, ['apps/web/src']);
+  assert.deepEqual(directory.domains, ['frontend']);
+  const created = discoverProjectContext(f.root, { scope: ['apps/web/src/components/auth/Register.tsx'] });
+  assert.deepEqual(created.domains, ['frontend']);
+  assert.throws(() => discoverProjectContext(f.root, { scope: ['apps/web/src//'] }), { code: 'CONTEXT_PATH_UNSAFE' });
+  assert.throws(() => discoverProjectContext(f.root, { scope: ['apps/web/src/new/../../escape'] }), { code: 'CONTEXT_PATH_UNSAFE' });
+  symlinkSync(path.join(f.root, 'apps/web/src'), path.join(f.root, 'alias'));
+  assert.throws(() => discoverProjectContext(f.root, { scope: ['alias/new/deep/file'] }), { code: 'CONTEXT_LINK_UNSAFE' });
 });

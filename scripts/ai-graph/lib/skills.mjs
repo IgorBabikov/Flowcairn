@@ -30,7 +30,7 @@ export function validateProjectSkills(projectSkills = []) {
   return projectSkills;
 }
 
-function validateSkillText(text, expectedName) {
+function validateSkillText(text, expectedName = undefined) {
   const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text)?.[1];
   if (!frontmatter) fail('SKILL_INVALID', 'Отсутствует frontmatter Skill');
   let metadata;
@@ -39,9 +39,10 @@ function validateSkillText(text, expectedName) {
     if (document.errors.length || document.warnings.length) fail('SKILL_INVALID', 'Некорректный YAML frontmatter');
     metadata = document.toJS({ maxAliasCount: 0 });
   } catch { fail('SKILL_INVALID', 'Некорректный YAML frontmatter'); }
-  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata) || metadata.name !== expectedName ||
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata) || typeof metadata.name !== 'string' || !/^[a-z][a-z0-9-]{1,63}$/.test(metadata.name) || (expectedName !== undefined && metadata.name !== expectedName) ||
     typeof metadata.description !== 'string' || !metadata.description.trim() || metadata.description.length > 1024)
     fail('SKILL_INVALID', 'Некорректные name/description Skill');
+  return metadata;
 }
 
 export function loadSkill(root, name, { projectSkills = [] } = {}) {
@@ -113,4 +114,64 @@ export function renderSkillInstructions(skills) {
   }).join('\n\n');
   if (Buffer.byteLength(rendered) > MAX_SKILLS_PROMPT_BYTES) fail('SKILLS_CONTEXT_TOO_LARGE', `Суммарный контекст Skills превышает ${MAX_SKILLS_PROMPT_BYTES} байт`);
   return rendered;
+}
+
+
+/** Metadata-only candidate preview. Supply the trusted rules scanner output, never client JSON.
+ * Bodies remain local; discovery does not register Skills or grant execution/egress permission.
+ */
+export function discoverProjectSkillCandidates(root, { instructionManifest }) {
+  if (!instructionManifest || instructionManifest.version !== 1 || instructionManifest.complete !== true ||
+    !Array.isArray(instructionManifest.files) || instructionManifest.files.length > 256 ||
+    !/^[a-f0-9]{64}$/.test(instructionManifest.fingerprint))
+    fail('SKILL_DISCOVERY_INCOMPLETE', 'Нужен полный trusted instruction inventory');
+  const records = instructionManifest.files.filter((file) => file.kind === 'project-skill');
+  if (records.length > 64 || new Set(records.map((file) => file.path)).size !== records.length)
+    fail('SKILL_DISCOVERY_LIMIT', 'Слишком много кандидатов Skills или повторяющиеся пути');
+  const candidates = [];
+  let totalBytes = 0;
+  for (const record of records) {
+    safeContextPath(record.path);
+    safeContextPath(record.scope, true);
+    if (!record.path.endsWith('/SKILL.md') || !/^[a-f0-9]{64}$/.test(record.sha256) || !Number.isSafeInteger(record.bytes) || record.bytes < 1)
+      fail('SKILL_DISCOVERY_INVALID', 'Некорректные metadata кандидата Skill');
+    const common = { path: record.path, hash: record.sha256, bytes: record.bytes, scope: record.scope };
+    if (record.bytes > MAX_SKILL_BYTES) {
+      candidates.push({ ...common, id: null, name: null, description: '', eligible: false, reason: 'SKILL_TOO_LARGE' });
+      continue;
+    }
+    totalBytes += record.bytes;
+    if (totalBytes > 256 * 1024) fail('SKILL_DISCOVERY_LIMIT', 'Metadata discovery превышает лимит');
+    const loaded = readContextFile(root, record.path, { maxBytes: MAX_SKILL_BYTES });
+    if (loaded.hash !== record.sha256 || Buffer.byteLength(loaded.text) !== record.bytes)
+      fail('SKILL_DISCOVERY_DRIFT', 'Кандидат Skill изменился после discovery');
+    let metadata;
+    try { metadata = validateSkillText(loaded.text); } catch {
+      candidates.push({ ...common, id: null, name: null, description: '', eligible: false, reason: 'SKILL_INVALID' });
+      continue;
+    }
+    const id = `project-${metadata.name}`;
+    const reserved = BUILTIN_SKILL_IDS.includes(id);
+    candidates.push({ ...common, id, name: metadata.name, description: metadata.description, eligible: !reserved, reason: reserved ? 'SKILL_ID_RESERVED' : null });
+  }
+  const counts = new Map();
+  for (const item of candidates) if (item.id) counts.set(item.id, (counts.get(item.id) ?? 0) + 1);
+  for (const item of candidates) if (item.id && counts.get(item.id) > 1) { item.eligible = false; item.reason = 'SKILL_ID_COLLISION'; }
+  candidates.sort((a, b) => a.path.localeCompare(b.path));
+  const body = { version: 1, instructionFingerprint: instructionManifest.fingerprint, candidates };
+  return { ...body, fingerprint: hashObject(body) };
+}
+
+/** Create exact pinned data after the caller obtains explicit selection/consent. No writes. */
+export function createProjectSkillManifest(root, { instructionManifest, expectedFingerprint, selectedPaths }) {
+  if (!Array.isArray(selectedPaths) || selectedPaths.length > 4 || new Set(selectedPaths).size !== selectedPaths.length)
+    fail('PROJECT_SKILLS_SELECTION', 'Выберите не более четырех разных Skills');
+  const preview = discoverProjectSkillCandidates(root, { instructionManifest });
+  if (preview.fingerprint !== expectedFingerprint) fail('SKILL_DISCOVERY_DRIFT', 'Список кандидатов изменился; обновите выбор');
+  const manifest = selectedPaths.map((file) => {
+    const candidate = preview.candidates.find((item) => item.path === file);
+    if (!candidate?.eligible) fail('PROJECT_SKILLS_SELECTION', 'Выбран неизвестный или неподходящий Skill');
+    return { id: candidate.id, path: candidate.path, hash: candidate.hash, scope: [candidate.scope], actions: [...knownActions] };
+  });
+  return validateProjectSkills(manifest);
 }

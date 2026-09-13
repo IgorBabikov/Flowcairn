@@ -1,6 +1,7 @@
-import { constants, closeSync, fstatSync, lstatSync, openSync, readSync, realpathSync, opendirSync } from 'node:fs';
+import { constants, closeSync, fstatSync, lstatSync, openSync, readSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { GraphError, hashObject, sha256 } from './io.mjs';
+import { discoverWorkspaceManifests } from '../../../bin/workspaces.mjs';
 
 const MAX_FILE_BYTES = 64 * 1024;
 const MAX_FILES = 128;
@@ -84,14 +85,22 @@ export function readContextFile(root, relative, { maxBytes = MAX_FILE_BYTES, opt
 function checkedScope(root, scope) {
   if (!Array.isArray(scope) || !scope.length || scope.length > 32) fail('CONTEXT_SCOPE_INVALID', 'Нужен ограниченный scope узла');
   return sorted(scope.map((entry) => {
-    const safe = safeContextPath(entry, true);
+    const normalized = typeof entry === 'string' ? entry.replace(/\/$/, '') : entry;
+    const safe = safeContextPath(normalized, true);
     if (safe !== '.') {
-      // New files are allowed only below a real parent. Existing aliases are always rejected.
+      // New nested paths inherit the nearest existing ancestor; every existing component
+      // is still inspected, so absence never permits traversal or a directory alias.
       const result = inspectPath(root, safe, true);
       if (!result) {
-        const parent = path.posix.dirname(safe);
-        if (parent !== '.' && !inspectPath(root, parent, true)?.stat.isDirectory())
-          fail('CONTEXT_SCOPE_UNKNOWN', 'Scope не имеет существующего родительского каталога');
+        let parent = path.posix.dirname(safe);
+        while (parent !== '.') {
+          const existing = inspectPath(root, parent, true);
+          if (existing) {
+            if (!existing.stat.isDirectory()) fail('CONTEXT_SCOPE_UNKNOWN', 'Предок scope должен быть каталогом');
+            break;
+          }
+          parent = path.posix.dirname(parent);
+        }
       }
     }
     return safe;
@@ -121,7 +130,7 @@ function jsonManifest(text) {
 }
 
 /**
- * Inspect only known manifest names, ancestors of node scope, and declared npm workspace roots.
+ * Inspect only known manifest names, ancestors of node scope, and the shared installer workspace inventory.
  * Unsupported ecosystems remain engineering; callers can supply exact additional manifest paths.
  * The result contains hashes and classifications, never raw manifest data or absolute paths.
  */
@@ -133,7 +142,7 @@ export function discoverProjectContext(root, { scope = ['.'], manifestPaths = []
   const packages = [], evidence = [];
   let totalBytes = 0;
   const add = (file) => {
-    if (!['package.json', 'pubspec.yaml'].includes(path.posix.basename(file))) return;
+    if (!['package.json', 'pubspec.yaml', 'pnpm-workspace.yaml'].includes(path.posix.basename(file))) return;
     candidates.add(file);
     if (candidates.size > MAX_FILES) fail('CONTEXT_LIMIT', 'Discovery превышает предел файлов');
   };
@@ -149,57 +158,34 @@ export function discoverProjectContext(root, { scope = ['.'], manifestPaths = []
       directory = path.posix.dirname(directory);
     }
   }
+  add('pnpm-workspace.yaml');
   const process = (file) => {
     const loaded = readContextFile(canonical, file, { optional: !declared.includes(file) });
     evidence.push({ path: file, hash: loaded?.hash ?? null });
     if (!loaded) return null;
     totalBytes += Buffer.byteLength(loaded.text);
     if (totalBytes > MAX_DISCOVERY_BYTES) fail('CONTEXT_LIMIT', 'Discovery превышает предел контекста');
+    if (file === 'pnpm-workspace.yaml') return null;
     const directory = path.posix.dirname(file);
     const data = file.endsWith('package.json') ? jsonManifest(loaded.text) : null;
     const domains = data ? packageDomains(data) : (/^\s*flutter:\s*(?:#.*)?\r?\n\s+sdk:\s*flutter\s*$/m.test(loaded.text) ? ['mobile'] : []);
     packages.push({ path: file, scope: directory, domains: domains.length ? domains : ['engineering'] });
     return data;
   };
-  // Workspace declarations are data only. We deliberately support literal paths and one-level *.
-  const processed = new Set();
-  for (const file of candidates) {
-    if (processed.has(file)) continue;
-    processed.add(file);
-    const data = process(file);
-    if (!data?.workspaces) continue;
-    const workspaces = Array.isArray(data.workspaces) ? data.workspaces : data.workspaces.packages;
-    if (!Array.isArray(workspaces) || workspaces.length > 32) fail('CONTEXT_MANIFEST_INVALID', 'Некорректный workspace manifest');
-    for (const pattern of workspaces) {
-      if (typeof pattern !== 'string' || !pattern || /[!{}[\]?]/.test(pattern) || pattern.includes('**') || (pattern.match(/\*/g) ?? []).length > 1 || (pattern.includes('*') && !pattern.endsWith('/*')))
-        fail('CONTEXT_WORKSPACE_UNSUPPORTED', 'Укажите точные manifestPaths для сложных workspace patterns');
-      const base = path.posix.dirname(file);
-      const local = pattern.endsWith('/*') ? pattern.slice(0, -2) : pattern;
-      safeContextPath(local);
-      const directory = base === '.' ? local : `${base}/${local}`;
-      if (!scopes.some((s) => overlaps(s, directory))) continue;
-      if (!pattern.includes('*')) { add(`${directory}/package.json`); continue; }
-      const inspected = inspectPath(canonical, directory, true);
-      if (!inspected) continue;
-      if (!inspected.stat.isDirectory()) fail('CONTEXT_MANIFEST_INVALID', 'Workspace должен быть каталогом');
-      // Directory enumeration is bounded too; no recursive source scan.
-      const handle = opendirSync(inspected.file);
-      let count = 0;
-      try {
-        for (let child = handle.readSync(); child; child = handle.readSync()) {
-          if (++count > MAX_FILES) fail('CONTEXT_LIMIT', 'Workspace directory превышает предел discovery');
-          const workspace = `${directory}/${child.name}`;
-          if (!scopes.some((s) => overlaps(s, workspace))) continue;
-          if (child.isSymbolicLink()) fail('CONTEXT_LINK_UNSAFE', 'Workspace symlink запрещен');
-          if (child.isDirectory()) add(`${workspace}/package.json`);
-        }
-      } finally { handle.closeSync(); }
-    }
+  // Reuse the installer workspace contract; no second glob/YAML interpretation.
+  const rootPackage = candidates.has('package.json') ? process('package.json') : null;
+  process('pnpm-workspace.yaml');
+  const manager = evidence.find((entry) => entry.path === 'pnpm-workspace.yaml')?.hash ? 'pnpm' : 'npm';
+  for (const file of discoverWorkspaceManifests(canonical, rootPackage ?? {}, manager)) {
+    if (scopes.some((entry) => overlaps(entry, path.posix.dirname(file)))) add(file);
+  }
+  for (const file of [...candidates].sort()) {
+    if (file !== 'package.json' && file !== 'pnpm-workspace.yaml') process(file);
   }
   const relevant = packages.filter((pkg) => scopes.some((s) => {
     if (within(pkg.scope, s)) return true;
     if (!within(s, pkg.scope)) return false;
-    return !packages.some((other) => other.scope !== pkg.scope && within(other.scope, pkg.scope) && within(s, other.scope));
+    return !packages.some((other) => other.scope !== pkg.scope && within(other.scope, pkg.scope) && overlaps(s, other.scope));
   }));
   const domains = sorted(relevant.flatMap((pkg) => pkg.domains));
   const body = {
