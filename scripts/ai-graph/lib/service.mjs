@@ -808,6 +808,16 @@ export class WorkflowService {
           for (const name of ['run', 'retry', 'rerunCheck'])
             collection[name] = { allowed: false, reason: readiness.reason };
     }
+    const planner = plan.nodes.find((node) => node.action.id === 'ai-plan');
+    const replanCapability = {
+      ...capabilities.run.requestReplan,
+      label: plan.stage === 'planning'
+        ? (planner && state.nodes[planner.id].status === 'passed' ? 'Показать план реализации' : 'Повторить планирование')
+        : 'Новая версия плана',
+    };
+    capabilities.run.requestReplan = replanCapability;
+    // Replan changes the whole immutable plan, so node details must expose the same boundary.
+    for (const node of Object.values(capabilities.nodes)) node.requestReplan = { ...replanCapability };
     return capabilities;
   }
   #challenge(state, nodeId, expiresAt) {

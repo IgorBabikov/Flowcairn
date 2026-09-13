@@ -5,6 +5,7 @@ import { GraphError, hashObject, sha256 } from './io.mjs';
 import { RelativePath } from './schemas.mjs';
 import { isSensitivePath, isInstructionPath, overlaps } from './registry.mjs';
 import { projectContextPaths } from './project.mjs';
+import { ownedBootstrapFiles } from './bootstrap.mjs';
 
 function git(root, args) {
   const result = spawnSync('/usr/bin/git', ['-c', 'core.fsmonitor=false', ...args], {
@@ -39,12 +40,14 @@ export function projectSummary(service) {
   const changed = git(service.root, ['diff', 'HEAD', '--name-only', '-z']).split('\0').filter(Boolean);
   const untracked = git(service.root, ['ls-files', '--others', '--exclude-standard', '-z']).split('\0').filter(Boolean);
   if (changed.length + untracked.length > 128) throw new GraphError('SNAPSHOT_LIMIT', 'Слишком много измененных файлов для первого snapshot');
-  const changedPaths = changed.filter(safe).sort(), untrackedCandidates = untracked.filter(safe).sort();
-  const identities = [...new Set([...changedPaths, ...untrackedCandidates])].map((file) => sourceIdentity(service.root, file));
-  if (identities.reduce((sum, file) => sum + file.size, 0) > 32 * 1024 * 1024) throw new GraphError('SNAPSHOT_LIMIT', 'Snapshot preview превышает 32 MiB');
   const firstTask = !existsSync(path.join(service.root, '.ai-orchestrator/state.json'));
-  const bootstrap = { firstTask, required: firstTask && identities.length > 0, changedPaths, untrackedCandidates,
-    snapshotHash: hashObject({ firstTask, identities, head: git(service.root, ['rev-parse', 'HEAD']).trim() }) };
+  const requiredUntracked = firstTask ? ownedBootstrapFiles(service.root).filter((file) => untracked.includes(file.path)) : [];
+  const requiredPaths = new Set(requiredUntracked.map((file) => file.path));
+  const changedPaths = changed.filter(safe).sort(), untrackedCandidates = untracked.filter(safe).filter((file) => !requiredPaths.has(file)).sort();
+  const identities = [...new Set([...changedPaths, ...untrackedCandidates, ...requiredPaths])].map((file) => sourceIdentity(service.root, file));
+  if (identities.reduce((sum, file) => sum + file.size, 0) > 32 * 1024 * 1024) throw new GraphError('SNAPSHOT_LIMIT', 'Snapshot preview превышает 32 MiB');
+  const bootstrap = { firstTask, required: firstTask && identities.length > 0, changedPaths, untrackedCandidates, requiredUntracked,
+    snapshotHash: hashObject({ firstTask, identities, requiredUntracked, head: git(service.root, ['rev-parse', 'HEAD']).trim() }) };
   const excluded = ['.flowcairn.json', '.agents', '.codex', '.cursor', '.claude', ...profile.outputPaths];
   const scopeCandidates = [...new Set(files.filter((file) => !isInstructionPath(file) && !excluded.some((entry) => overlaps(file, entry)))
     .map((file) => file.includes('/') ? file.split('/')[0] : file))].sort();

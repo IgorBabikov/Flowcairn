@@ -3,10 +3,11 @@ import { randomUUID } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { GraphError, hashObject, sha256 } from './io.mjs';
+import { GraphError, hashObject } from './io.mjs';
 import { loadProjectProfile, RUNTIME_ROOT } from './project.mjs';
 import { Id, TaskInputSchema } from './schemas.mjs';
 import { WorkflowService, sanitizeText } from './service.mjs';
+import { ownedBootstrapFiles } from './bootstrap.mjs';
 const OWNER_FILE = '.ai-orchestrator/flowcairn-install.json';
 const PROFILE = '.flowcairn.json';
 const CHECKS = ['typecheck', 'lint', 'tests', 'build'];
@@ -52,17 +53,6 @@ function existsNoFollow(file) {
     if (error.code === 'ENOENT') return false;
     throw error;
   }
-}
-function readProjectFile(root, relative, max) {
-  for (
-    let cursor = path.dirname(path.join(root, relative));
-    cursor !== root;
-    cursor = path.dirname(cursor)
-  ) {
-    if (!cursor.startsWith(root + path.sep) || lstatSync(cursor).isSymbolicLink())
-      fail('UNSAFE_FILE', 'Путь manifest содержит ссылку или выходит за проект.');
-  }
-  return readRegular(path.join(root, relative), max);
 }
 function writeNew(file, content, mode = 0o600) {
   const fd = openSync(file, 'wx', mode);
@@ -153,18 +143,7 @@ export async function createTask(input, taskInput, options = {}) {
     const untracked = git(root, ['ls-files', '--others', '--exclude-standard', '-z'])
       .split('\0')
       .filter(Boolean);
-    const installation = JSON.parse(
-      readProjectFile(root, OWNER_FILE, 1024 * 1024).toString('utf8'),
-    );
-    const owned = [
-      ...(sha256(readRegular(path.join(root, PROFILE))) === installation.profileHash
-        ? [PROFILE]
-        : []),
-      ...(existsNoFollow(path.join(root, '.gitignore')) &&
-      sha256(readRegular(path.join(root, '.gitignore'))) === installation.ignoreAfterHash
-        ? ['.gitignore']
-        : []),
-    ];
+    const owned = ownedBootstrapFiles(root).map((file) => file.path);
     const changed = git(root, ['diff', 'HEAD', '--name-only', '-z']).split('\0').filter(Boolean);
     if (!options.snapshot && changed.some((file) => !owned.includes(file)))
       fail(

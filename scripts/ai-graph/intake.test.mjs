@@ -46,6 +46,9 @@ test('first UI intake snapshots approved package/lock/rules changes and excludes
   assert.equal(preview.bootstrap.required, true);
   assert.ok(preview.bootstrap.changedPaths.includes('package.json'));
   assert.ok(preview.bootstrap.untrackedCandidates.includes('package-lock.json'));
+  assert.equal(preview.bootstrap.untrackedCandidates.includes('.flowcairn.json'), false);
+  assert.deepEqual(preview.bootstrap.requiredUntracked.map((file) => file.path), ['.flowcairn.json']);
+  assert.match(preview.bootstrap.requiredUntracked[0].hash, /^[a-f0-9]{64}$/);
   assert.equal(preview.scopeCandidates.includes('scratch.txt'), false);
   const body = { prompt: 'Исправь значение в src/main.mjs', operationId: 'intake-bootstrap', contextHash: preview.contextHash,
     snapshot: true, snapshotHash: preview.bootstrap.snapshotHash, includeUntracked: ['package-lock.json'] };
@@ -54,6 +57,8 @@ test('first UI intake snapshots approved package/lock/rules changes and excludes
   assert.deepEqual(snapshot.gates[0].requiredPermissions, ['ai.read']);
   const state = s.store.readRun(snapshot.runId), source = verifySourceBundle(state.sourceBundle);
   assert.ok(source.entries.some((entry) => entry.path === 'package-lock.json'));
+  const requiredProfile = source.entries.find((entry) => entry.path === '.flowcairn.json');
+  assert.equal(requiredProfile.worktree.sha256, preview.bootstrap.requiredUntracked[0].hash);
   assert.equal(source.entries.some((entry) => entry.path === 'scratch.txt'), false);
   assert.equal(readFileSync(path.join(f.root, 'scratch.txt'), 'utf8'), 'Do not include this file in AI context');
   assert.equal(f.git('rev-parse', 'HEAD'), initialHead);
@@ -67,4 +72,13 @@ test('snapshot consent is rejected when the actual bytes change at the same path
   await assert.rejects(s.intake({ prompt: 'Исправь значение', operationId: 'intake-stale-bytes', contextHash: preview.contextHash,
     snapshot: true, snapshotHash: preview.bootstrap.snapshotHash, includeUntracked: [] }), (error) => error.code === 'STALE_CONTEXT');
   assert.equal(s.store.listRunIds().length, 0);
+});
+
+test('modified installer profile loses required ownership and is shown as an optional candidate', async (t) => {
+  const f = fixture(t), s = await service(f.root, f.profile);
+  const file = path.join(f.root, '.flowcairn.json');
+  writeFileSync(file, readFileSync(file, 'utf8') + '\n');
+  const preview = s.project();
+  assert.equal(preview.bootstrap.requiredUntracked.some((item) => item.path === '.flowcairn.json'), false);
+  assert.equal(preview.bootstrap.untrackedCandidates.includes('.flowcairn.json'), true);
 });

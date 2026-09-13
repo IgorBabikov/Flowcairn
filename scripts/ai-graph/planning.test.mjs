@@ -91,6 +91,8 @@ test('planning needs exact AI read consent; promotion creates immutable separate
   const f = await fixture(t, { maxReplans: 0 });
   const original = f.snapshot;
   assert.equal(original.phase, 'planning');
+  assert.equal(original.capabilities.requestReplan.allowed, false);
+  assert.equal(original.nodes.every((node) => node.capabilities.requestReplan.allowed === false), true);
   assert.equal(f.calls(), 0);
   assert.deepEqual(original.gates[0].requiredPermissions, ['ai.read']);
   await assert.rejects(f.service.command(original.runId, 'run', request(original)), (e) => e.code === 'CONTROL_DENIED');
@@ -100,6 +102,8 @@ test('planning needs exact AI read consent; promotion creates immutable separate
   assert.equal(planned.nodes.find((n) => n.id === 'plan-task').status, 'passed');
   assert.equal(planned.gates.length, 0);
   assert.equal(planned.capabilities.requestReplan.allowed, true);
+  assert.equal(planned.capabilities.requestReplan.label, 'Показать план реализации');
+  assert.equal(planned.nodes.every((node) => node.capabilities.requestReplan.allowed === true), true);
   const compileRequest = request(planned);
   const next = await f.service.command(planned.runId, 'replan', compileRequest);
   assert.equal(next.phase, 'execution');
@@ -146,6 +150,7 @@ for (const verdict of ['fail', 'uncertain']) test(`planning ${verdict} never pro
   assert.equal(planned.status, verdict === 'fail' ? 'failed' : 'uncertain');
   assert.equal(planned.nodes.find((n) => n.id === 'plan-task').capabilities.retry.allowed, false);
   if (verdict === 'fail') {
+    assert.equal(planned.capabilities.requestReplan.label, 'Повторить планирование');
     const next = await f.service.command(planned.runId, 'replan', request(planned));
     assert.equal(next.phase, 'planning');
     assert.deepEqual(next.gates[0].requiredPermissions, ['ai.read']);
