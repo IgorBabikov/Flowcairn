@@ -39,7 +39,8 @@
     "typecheck": "tsc -p scripts/ai-graph/tsconfig.json && tsc -p tools/ai-graph-viewer/tsconfig.json",
     "lint": "eslint --config tools/ai-graph-viewer/eslint.graph.config.mjs scripts/ai-graph tools/ai-graph-viewer/controller.mjs tools/ai-graph-viewer/server.mjs bin",
     "check:public": "node scripts/check-public.mjs",
-    "test:ui": "playwright test --config tools/ai-graph-viewer/playwright.config.mjs"
+    "test:ui": "playwright test --config tools/ai-graph-viewer/playwright.config.mjs",
+    "check:package": "node scripts/check-package.mjs"
   },
   "dependencies": {
     "picomatch": "4.0.7",

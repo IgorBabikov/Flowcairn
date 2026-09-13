@@ -41,4 +41,4 @@ jobs:
       - name: Проверка публичного состава
         run: npm run check:public
       - name: Состав устанавливаемого архива
-        run: npm pack --dry-run
+        run: npm run check:package
