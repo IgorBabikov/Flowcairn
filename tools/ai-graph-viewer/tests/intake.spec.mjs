@@ -144,3 +144,28 @@ test('replan labels and visibility come from backend capabilities', async ({page
   await expect(page.locator('.detail-actions').getByRole('button', {name:'Повторить планирование'})).toBeVisible();
   await expect(page.getByRole('button', {name:'Показать план реализации'})).toHaveCount(0);
 });
+
+
+test('long task gets the full graph header width and expands with keyboard on desktop and mobile', async ({page}) => {
+  const current = snapshot();
+  const goal = 'Исправить поиск в списке задач: при пустом запросе показывать все результаты, при вводе учитывать название и описание, сохранить текущую сортировку и проверить существующие сценарии. '.repeat(3);
+  current.task.goal = goal;
+  await mockApi(page, current);
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({width, height:900});
+    await page.goto(`/#session=${token}`);
+    const header = page.locator('.graph-header');
+    const summary = page.locator('.graph-goal summary');
+    await expect(summary).toBeVisible();
+    const dimensions = await summary.evaluate(element => ({width:element.getBoundingClientRect().width, height:element.querySelector('span').getBoundingClientRect().height, lineHeight:parseFloat(getComputedStyle(element).lineHeight)}));
+    const panel = await header.boundingBox();
+    expect(dimensions.width).toBeGreaterThan(panel.width - 65);
+    expect(dimensions.height).toBeLessThanOrEqual(dimensions.lineHeight * 2 + 1);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await summary.focus();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.graph-goal p')).toBeVisible();
+    await expect(page.locator('.graph-goal p')).toHaveText(goal.trim());
+    await expect(page.getByRole('button', {name:'Весь граф',exact:true})).toBeVisible();
+  }
+});

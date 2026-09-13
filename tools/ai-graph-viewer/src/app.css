@@ -443,35 +443,40 @@ button {
   grid-template-rows: auto 1fr;
 }
 .graph-header {
-  display: flex;
-  justify-content: space-between;
-  gap: 20px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
   padding: 13px 16px;
   border-block-end: 1px solid var(--border);
 }
 .graph-header p {
-  max-width: 65ch;
+  max-width: none;
+  overflow-wrap: anywhere;
   margin: 4px 0 0;
   color: var(--muted);
   font-size: 0.76rem;
   line-height: 1.35;
 }
 .graph-tools {
-  display: grid;
-  justify-items: end;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
   gap: 7px;
 }
 .graph-facts {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 14px;
   color: var(--muted);
   font-size: 0.7rem;
   font-variant-numeric: tabular-nums;
-  white-space: nowrap;
+  white-space: normal;
 }
 .graph-view-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 7px;
 }
 code,
@@ -1225,3 +1230,8 @@ dialog::backdrop {
 .bootstrap-context summary { cursor: pointer; }
 .bootstrap-context li { overflow-wrap: anywhere; }
 .bootstrap-context > p { font-size: 0.8rem; margin-top: 10px; }
+
+.graph-goal { min-width: 0; margin-top: 4px; color: var(--muted); font-size: 0.76rem; line-height: 1.35; }
+.graph-goal summary { cursor: pointer; }
+.graph-goal summary span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
+.graph-goal[open] summary span { -webkit-line-clamp: 1; }

@@ -1206,7 +1206,10 @@ export function App() {
           <div className="graph-header">
             <div>
               <h2>{labels.graph}</h2>
-              <p>{snapshot?.task?.goal ?? (selectedRunId ? labels.loading : labels.noRuns)}</p>
+              <details className="graph-goal">
+                <summary><span>{snapshot?.task?.goal ?? (selectedRunId ? labels.loading : labels.noRuns)}</span></summary>
+                <p>{snapshot?.task?.goal ?? (selectedRunId ? labels.loading : labels.noRuns)}</p>
+              </details>
             </div>
             {snapshot && (
               <div className="graph-tools">
