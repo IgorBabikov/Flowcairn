@@ -26,7 +26,7 @@ Flowcairn полезен для ограниченных задач в суще�
 В каталоге своего проекта:
 
 ```bash
-npm install --save-dev https://github.com/IgorBabikov/flowcairn/releases/download/v0.1.0/flowcairn-0.1.0.tgz
+npm install --save-dev https://github.com/IgorBabikov/flowcairn/releases/download/v0.1.1/flowcairn-0.1.1.tgz
 npx --no-install flowcairn init --provider codex --model MODEL
 npx --no-install flowcairn doctor
 npx --no-install flowcairn checks prepare

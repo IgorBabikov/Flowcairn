@@ -16,6 +16,7 @@ import {
 } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { initializeProject, createTask, parseOptions } from '../bin/flowcairn.mjs';
 
 function fixture(t) {
@@ -207,4 +208,87 @@ test('init includes child manifests from a pnpm YAML-only workspace', (t) => {
     'pnpm-workspace.yaml',
     'packages/app/package.json',
   ]);
+});
+
+function linkedCli(t) {
+  const project = fixture(t);
+  const runtimeRoot = realpathSync(fileURLToPath(new URL('..', import.meta.url)));
+  const binDirectory = path.join(project.root, 'node_modules/.bin');
+  mkdirSync(binDirectory, { recursive: true });
+  symlinkSync(runtimeRoot, path.join(project.root, 'node_modules/flowcairn'), 'dir');
+  symlinkSync('../flowcairn/bin/flowcairn.mjs', path.join(binDirectory, 'flowcairn'));
+  return { ...project, runtimeRoot, cli: 'node_modules/.bin/flowcairn' };
+}
+
+test('relative npm bin symlink runs version and init with observable effects', (t) => {
+  const { root, git, runtimeRoot, cli } = linkedCli(t);
+  const head = git('rev-parse', 'HEAD');
+  const instructions = readFileSync(path.join(root, 'AGENTS.md'));
+  const version = JSON.parse(readFileSync(path.join(runtimeRoot, 'package.json'), 'utf8')).version;
+  const run = (...args) =>
+    execFileSync(process.execPath, [cli, ...args], {
+      cwd: root,
+      encoding: 'utf8',
+      timeout: 15000,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  assert.equal(run('--version').trim(), version);
+  const result = JSON.parse(run('init', '--provider', 'openai', '--model', options.model));
+  assert.equal(result.ok, true);
+  assert.equal(result.result.created, true);
+  const profile = JSON.parse(readFileSync(path.join(root, '.flowcairn.json'), 'utf8'));
+  assert.equal(profile.ai.model, options.model);
+  assert.equal(existsSync(path.join(root, '.ai-orchestrator/flowcairn-install.json')), true);
+  assert.match(readFileSync(path.join(root, '.gitignore'), 'utf8'), /\.ai-orchestrator\//);
+  assert.equal(git('rev-parse', 'HEAD'), head);
+  assert.deepEqual(readFileSync(path.join(root, 'AGENTS.md')), instructions);
+});
+
+test('offline npx resolves the local npm bin symlink and runs the CLI', (t) => {
+  const npx = path.resolve(
+    path.dirname(process.execPath),
+    '../lib/node_modules/npm/bin/npx-cli.js',
+  );
+  if (!existsSync(npx)) {
+    t.skip('This Node distribution has no bundled npx');
+    return;
+  }
+  const { root, runtimeRoot } = linkedCli(t);
+  const expectedVersion = JSON.parse(
+    readFileSync(path.join(runtimeRoot, 'package.json'), 'utf8'),
+  ).version;
+  const version = execFileSync(
+    process.execPath,
+    [npx, '--offline', '--no-install', 'flowcairn', '--version'],
+    {
+      cwd: root,
+      encoding: 'utf8',
+      timeout: 15000,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        PATH: `${path.dirname(process.execPath)}:/usr/bin:/bin`,
+        npm_config_offline: 'true',
+        npm_config_update_notifier: 'false',
+        npm_config_cache: path.join(root, 'node_modules/.cache/npm'),
+      },
+    },
+  );
+  assert.equal(version.trim(), expectedVersion);
+});
+
+test('import remains inert when argv entry is missing or does not exist', (t) => {
+  const { root } = fixture(t);
+  const entry = new URL('../bin/flowcairn.mjs', import.meta.url).href;
+  for (const value of [undefined, path.join(root, 'missing-entry.mjs')]) {
+    const script = `process.argv[1] = ${JSON.stringify(value) ?? 'undefined'}; await import(${JSON.stringify(entry)}); process.stdout.write('imported');`;
+    const output = execFileSync(process.execPath, ['--input-type=module', '-e', script], {
+      cwd: root,
+      encoding: 'utf8',
+      timeout: 15000,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    assert.equal(output, 'imported');
+    assert.equal(existsSync(path.join(root, '.flowcairn.json')), false);
+  }
 });

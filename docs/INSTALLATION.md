@@ -19,13 +19,13 @@ Flowcairn устанавливается как инструмент разра�
 В каталоге проекта:
 
 ```bash
-npm install --save-dev https://github.com/IgorBabikov/flowcairn/releases/download/v0.1.0/flowcairn-0.1.0.tgz
+npm install --save-dev https://github.com/IgorBabikov/flowcairn/releases/download/v0.1.1/flowcairn-0.1.1.tgz
 ```
 
 Для pnpm-проекта используйте его менеджер:
 
 ```bash
-pnpm add -D https://github.com/IgorBabikov/flowcairn/releases/download/v0.1.0/flowcairn-0.1.0.tgz
+pnpm add -D https://github.com/IgorBabikov/flowcairn/releases/download/v0.1.1/flowcairn-0.1.1.tgz
 ```
 
 Это tarball GitHub Release `v0.1.0`, не команда установки опубликованного npm-пакета. Проверьте имя репозитория и версию перед установкой. Если asset недоступен, не подменяйте его одноименным сторонним пакетом: проверьте [релиз](https://github.com/IgorBabikov/flowcairn/releases/tag/v0.1.0).

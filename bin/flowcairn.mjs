@@ -637,7 +637,16 @@ export async function main(tokens = process.argv.slice(2)) {
   process.stdout.write(JSON.stringify({ ok: true, command, result }, null, 2) + '\n');
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+function isMainModule() {
+  if (!process.argv[1]) return false;
+  try {
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+if (isMainModule()) {
   try {
     await main();
   } catch (error) {
