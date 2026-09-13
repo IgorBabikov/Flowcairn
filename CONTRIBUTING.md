@@ -11,7 +11,7 @@
 Нужен Node.js 22:
 
 ```bash
-npm ci
+npm ci --ignore-scripts
 npm run build
 npm run typecheck
 npm run lint
@@ -19,6 +19,8 @@ npm test
 ```
 
 Некоторые тесты используют временные локальные каталоги, loopback-сервер и браузер. Docker/реальные AI-проверки имеют отдельные предпосылки и не должны незаметно запускать платные внешние вызовы.
+
+Собранный интерфейс хранится в Git, чтобы пакет из `main` устанавливался без lifecycle scripts. После правки UI выполните `npm run build` и включите обновленные `tools/ai-graph-viewer/dist` в тот же commit. CI проверяет совпадение сборки с исходниками.
 
 Меняйте только нужный scope. Сохраняйте границы runtimeRoot/projectRoot, immutable state, fail-closed permissions, idempotency и доказательства остановки. Не ослабляйте validator ради зеленого теста.
 

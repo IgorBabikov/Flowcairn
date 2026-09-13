@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 
 const viewerDirectory = fileURLToPath(new URL('.', import.meta.url));
 
-const fixtureUrl = 'http://127.0.0.1:4329';
+const fixtureUrl = `http://127.0.0.1:${process.env.FLOWCAIRN_FIXTURE_PORT ?? 4329}`;
 const configuredUrl = process.env.FLOWCAIRN_TEST_URL;
 const baseURL = configuredUrl ? new URL(configuredUrl).origin : fixtureUrl;
 

@@ -85,11 +85,17 @@ export function isWithin(candidate, scope) {
 export function overlaps(a, b) {
   return isWithin(a, b) || isWithin(b, a);
 }
+// Portable deny rules also cover aliases on case-insensitive/Unicode-normalizing filesystems.
+// Positive write scopes remain exact; this can only narrow access.
+function isForbidden(candidate, scopes) {
+  const normalized = candidate.normalize('NFC').toLowerCase();
+  return scopes.some((scope) => isWithin(normalized, scope.normalize('NFC').toLowerCase()));
+}
 export function pathAllowed(candidate, task) {
   return (
-    candidate !== '.flowcairn.json' &&
+    candidate.normalize('NFC').toLowerCase() !== '.flowcairn.json' &&
     task.scope.some((scope) => isWithin(candidate, scope)) &&
-    !task.forbiddenPaths.some((scope) => isWithin(candidate, scope))
+    !isForbidden(candidate, task.forbiddenPaths)
   );
 }
 
@@ -120,9 +126,5 @@ export function contextPathAllowed(candidate, task) {
     pathAllowed(candidate, task) ||
     task.contextPaths.some((scope) => isWithin(candidate, scope)) ||
     REQUIRED_AI_CONTEXT_PATHS.includes(candidate);
-  return (
-    declared &&
-    !task.forbiddenPaths.some((scope) => isWithin(candidate, scope)) &&
-    !isSensitivePath(candidate)
-  );
+  return declared && !isForbidden(candidate, task.forbiddenPaths) && !isSensitivePath(candidate);
 }

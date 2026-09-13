@@ -269,20 +269,28 @@ export function compilePlan(task, { runtimeHash, skills, version = 1, parentPlan
     'workspace-check',
     'workspace-check',
     'Проверить изменения',
-    'Изменения ограничены утвержденным scope',
+    'Изменения ограничены утвержденными файлами и каталогами',
     [previous],
   );
   previous = 'workspace-check';
   for (const check of requiredChecks(task)) {
-    add(check, `check-${check}`, check, `Пройдена проверка ${check}`, [previous]);
+    const title = {
+      tests: 'Проверить тесты',
+      typecheck: 'Проверить типы',
+      lint: 'Проверить стиль кода',
+      build: 'Собрать проект',
+      'graph-tests': 'Проверить работу графа',
+      'shared-build': 'Собрать общие пакеты',
+    }[check];
+    add(check, `check-${check}`, title, 'Проверка успешно завершена', [previous]);
     previous = check;
   }
-  add('review', 'ai-review', 'Независимое review', 'Нет блокирующих замечаний', [previous]);
+  add('review', 'ai-review', 'Провести независимое ревью', 'Нет блокирующих замечаний', [previous]);
   add(
     'handoff',
     'artifact-handoff',
     'Подготовить результат',
-    'Evidence и изменения собраны для приемки',
+    'Доказательства выполнения и изменения собраны для приемки',
     ['review'],
   );
   add(

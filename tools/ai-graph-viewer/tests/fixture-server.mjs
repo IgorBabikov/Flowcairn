@@ -23,7 +23,7 @@ const server = createServer((request, response) => {
   response.end(readFileSync(path.join(root, file[0])));
 });
 
-server.listen(4329, '127.0.0.1');
+server.listen(Number(process.env.FLOWCAIRN_FIXTURE_PORT ?? 4329), '127.0.0.1');
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => server.close(() => process.exit(0)));
 }

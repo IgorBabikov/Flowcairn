@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { PassThrough } from 'node:stream';
 import {
   chmodSync,
   existsSync,
@@ -17,7 +18,13 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { initializeProject, createTask, parseOptions } from '../bin/flowcairn.mjs';
+import {
+  initializeProject,
+  initializeCommand,
+  createTask,
+  parseOptions,
+} from '../bin/flowcairn.mjs';
+import { WorkflowService } from '../scripts/ai-graph/lib/service.mjs';
 
 function fixture(t) {
   const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'flowcairn-install-')));
@@ -120,7 +127,6 @@ test('task registration works in a clean main repo without tool source or host d
     acceptance: ['Заголовок объясняет назначение'],
     checks: [],
   };
-  await assert.rejects(createTask(root, task), { code: 'DIRTY_ROOT' });
   git('add', '.flowcairn.json', '.gitignore');
   git('commit', '-m', 'fixture setup');
   const snapshot = await createTask(root, task, { run: 'run-first-task' });
@@ -233,7 +239,9 @@ test('relative npm bin symlink runs version and init with observable effects', (
       stdio: ['ignore', 'pipe', 'pipe'],
     });
   assert.equal(run('--version').trim(), version);
-  const result = JSON.parse(run('init', '--provider', 'openai', '--model', options.model));
+  const result = JSON.parse(
+    run('init', '--provider', 'openai', '--model', options.model, '--json'),
+  );
   assert.equal(result.ok, true);
   assert.equal(result.result.created, true);
   const profile = JSON.parse(readFileSync(path.join(root, '.flowcairn.json'), 'utf8'));
@@ -291,4 +299,328 @@ test('import remains inert when argv entry is missing or does not exist', (t) =>
     assert.equal(output, 'imported');
     assert.equal(existsSync(path.join(root, '.flowcairn.json')), false);
   }
+});
+
+const firstTask = {
+  id: 'ORCH-BOOTSTRAP',
+  goal: 'Уточнить заголовок',
+  instructions: 'Уточнить заголовок документа',
+  scope: ['README.md'],
+  acceptance: ['Заголовок понятен'],
+  checks: [],
+};
+
+test('TTY init asks for a model; non-TTY, JSON and dry-run never prompt or write without it', async (t) => {
+  for (const flags of [{}, { json: true }, { 'dry-run': true }]) {
+    const { root } = fixture(t);
+    await assert.rejects(
+      initializeCommand(
+        root,
+        { provider: 'openai', ...flags },
+        { input: { isTTY: false }, output: { isTTY: false } },
+      ),
+      { code: 'MODEL_REQUIRED' },
+    );
+    assert.equal(existsSync(path.join(root, '.flowcairn.json')), false);
+    assert.equal(existsSync(path.join(root, '.ai-orchestrator')), false);
+  }
+  const { root } = fixture(t);
+  const input = new PassThrough(),
+    output = new PassThrough();
+  input.isTTY = output.isTTY = true;
+  let transcript = '';
+  output.on('data', (bytes) => {
+    transcript += bytes.toString();
+  });
+  const pending = initializeCommand(root, { provider: 'openai' }, { input, output });
+  input.write('configured-test-model\n');
+  const installed = await pending;
+  assert.equal(installed.profile.ai.model, options.model);
+  assert.match(transcript, /не API-ключ/);
+  const before = transcript;
+  assert.equal((await initializeCommand(root, {}, { input, output })).created, false);
+  assert.equal(transcript, before);
+  input.destroy();
+  output.destroy();
+});
+
+test('init rejects ambiguous managers, invalid model and detached HEAD without creating files', (t) => {
+  const { root, git } = fixture(t);
+  writeFileSync(path.join(root, 'package-lock.json'), '{}');
+  writeFileSync(path.join(root, 'pnpm-lock.yaml'), 'lockfileVersion: 9');
+  assert.throws(() => initializeProject(root, options), { code: 'PACKAGE_MANAGER' });
+  assert.equal(existsSync(path.join(root, '.flowcairn.json')), false);
+  assert.throws(() => initializeProject(root, { ...options, model: 'sk-do-not-save-this' }), {
+    code: 'AI_CONFIG',
+  });
+  assert.equal(existsSync(path.join(root, '.ai-orchestrator')), false);
+  git('checkout', '--detach');
+  assert.throws(() => initializeProject(root, { ...options, 'package-manager': 'npm' }), {
+    code: 'BRANCH_REQUIRED',
+  });
+});
+
+test('first graph snapshots exact installer files with no commit, AI, binding or permissions', async (t) => {
+  const { root, git } = fixture(t);
+  const head = git('rev-parse', 'HEAD');
+  initializeProject(root, options);
+  const dirty = git('status', '--porcelain');
+  const index = readFileSync(path.join(root, '.git/index'));
+  const snapshot = await createTask(root, firstTask, { run: 'run-bootstrap' });
+  const service = await WorkflowService.open({ root });
+  const state = service.store.readRun('run-bootstrap');
+  assert.equal(service.snapshot('run-bootstrap').integrity.valid, true);
+  assert.equal(snapshot.status, 'waiting-for-human');
+  assert.ok(snapshot.nodes.every((node) => node.attempt === 0));
+  assert.deepEqual(state.permissions, []);
+  assert.equal(state.binding, null);
+  assert.equal(
+    JSON.parse(readFileSync(path.join(root, '.ai-orchestrator/state.json'))).bootstrapSourceHash,
+    state.sourceHash,
+  );
+  assert.equal(git('rev-parse', 'HEAD'), head);
+  assert.equal(git('status', '--porcelain'), dirty);
+  assert.deepEqual(readFileSync(path.join(root, '.git/index')), index);
+  await assert.rejects(createTask(root, { ...firstTask, id: 'ORCH-NEXT' }), { code: 'DIRTY_ROOT' });
+});
+
+test('first graph requires explicit tracked snapshot and rejects foreign or modified owned untracked files', async (t) => {
+  const { root } = fixture(t);
+  initializeProject(root, options);
+  writeFileSync(path.join(root, 'AGENTS.md'), 'Owner changes remain\n');
+  await assert.rejects(createTask(root, firstTask), { code: 'DIRTY_ROOT' });
+  assert.equal(existsSync(path.join(root, '.ai-orchestrator/state.json')), false);
+  writeFileSync(path.join(root, 'foreign.txt'), 'Owner data\n');
+  await assert.rejects(createTask(root, firstTask, { snapshot: true }), {
+    code: 'UNTRACKED_FILES',
+  });
+  assert.equal(existsSync(path.join(root, '.ai-orchestrator/state.json')), false);
+  const snapshot = await createTask(
+    root,
+    { ...firstTask, includeUntracked: ['foreign.txt'] },
+    { snapshot: true, run: 'run-explicit-snapshot' },
+  );
+  assert.equal(snapshot.integrity.valid, true);
+  assert.equal(readFileSync(path.join(root, 'foreign.txt'), 'utf8'), 'Owner data\n');
+  assert.equal(readFileSync(path.join(root, 'AGENTS.md'), 'utf8'), 'Owner changes remain\n');
+  const b = fixture(t);
+  initializeProject(b.root, options);
+  writeFileSync(
+    path.join(b.root, '.flowcairn.json'),
+    readFileSync(path.join(b.root, '.flowcairn.json'), 'utf8') + ' ',
+  );
+  await assert.rejects(createTask(b.root, firstTask), { code: 'UNTRACKED_FILES' });
+  assert.equal(existsSync(path.join(b.root, '.ai-orchestrator/state.json')), false);
+});
+
+test('first graph refuses sensitive untracked files even when explicitly requested', async (t) => {
+  const { root } = fixture(t);
+  initializeProject(root, options);
+  writeFileSync(path.join(root, '.env'), 'TEST_ONLY=not-a-secret\n');
+  await assert.rejects(createTask(root, { ...firstTask, includeUntracked: ['.env'] }));
+  assert.equal(existsSync(path.join(root, '.ai-orchestrator/state.json')), false);
+});
+
+test('mutation after source capture is refused before registry or run is created', async (t) => {
+  const { root } = fixture(t);
+  initializeProject(root, options);
+  const originalOpen = WorkflowService.open;
+  let opened;
+  t.mock.method(WorkflowService, 'open', async (...args) => {
+    const service = await originalOpen.apply(WorkflowService, args);
+    opened = service;
+    const capture = service.adapters.capture;
+    service.adapters.capture = async (...input) => {
+      const source = await capture(...input);
+      writeFileSync(path.join(root, 'AGENTS.md'), 'Concurrent owner change\n');
+      return source;
+    };
+    return service;
+  });
+  await assert.rejects(createTask(root, firstTask, { run: 'run-raced' }), {
+    code: 'SOURCE_SNAPSHOT_MISMATCH',
+  });
+  assert.equal(existsSync(path.join(root, '.ai-orchestrator/state.json')), false);
+  assert.equal(readFileSync(path.join(root, 'AGENTS.md'), 'utf8'), 'Concurrent owner change\n');
+  assert.deepEqual(opened.store.listRunIds(), []);
+});
+
+test('actual npm tarball install provides executable bin and offline npx init/task in a monorepo', (t) => {
+  const { root, git } = fixture(t);
+  const npm = path.resolve(
+    path.dirname(process.execPath),
+    '../lib/node_modules/npm/bin/npm-cli.js',
+  );
+  const npx = path.resolve(
+    path.dirname(process.execPath),
+    '../lib/node_modules/npm/bin/npx-cli.js',
+  );
+  assert.ok(existsSync(npm) && existsSync(npx), 'Package verification requires Node with npm/npx');
+  const runtimeRoot = realpathSync(fileURLToPath(new URL('..', import.meta.url)));
+  const env = {
+    ...process.env,
+    PATH: `${path.dirname(process.execPath)}:/usr/bin:/bin`,
+    npm_config_update_notifier: 'false',
+  };
+  const npmRun = (cwd, ...args) =>
+    execFileSync(process.execPath, [npm, ...args], {
+      cwd,
+      env,
+      encoding: 'utf8',
+      timeout: 60000,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  const packed = JSON.parse(
+    npmRun(runtimeRoot, 'pack', '--ignore-scripts', '--json', '--pack-destination', root),
+  );
+  const tarball = path.join(root, packed[0].filename);
+  const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
+  pkg.workspaces = ['packages/*'];
+  pkg.scripts.postinstall = "node -e \"require('node:fs').writeFileSync('forbidden-hook', 'ran')\"";
+  writeFileSync(path.join(root, 'package.json'), JSON.stringify(pkg));
+  mkdirSync(path.join(root, 'packages/app'), { recursive: true });
+  writeFileSync(
+    path.join(root, 'packages/app/package.json'),
+    '{"name":"fixture-workspace","version":"1.0.0"}',
+  );
+  git('add', 'package.json', 'packages/app/package.json');
+  git('commit', '-m', 'fixture workspace');
+  const head = git('rev-parse', 'HEAD');
+  const instructions = readFileSync(path.join(root, 'AGENTS.md'));
+  // npm ci warms tarball content, not registry packuments. Use the repository's
+  // locked production entries so this regression needs only that same npm cache.
+  const runtimeLock = JSON.parse(readFileSync(path.join(runtimeRoot, 'package-lock.json'), 'utf8'));
+  const runtimePackage = runtimeLock.packages[''];
+  pkg.devDependencies = { flowcairn: `file:${tarball}` };
+  writeFileSync(path.join(root, 'package.json'), JSON.stringify(pkg));
+  writeFileSync(
+    path.join(root, 'package-lock.json'),
+    JSON.stringify({
+      name: pkg.name,
+      version: pkg.version,
+      lockfileVersion: 3,
+      requires: true,
+      packages: {
+        '': {
+          name: pkg.name,
+          version: pkg.version,
+          workspaces: pkg.workspaces,
+          devDependencies: pkg.devDependencies,
+        },
+        ...Object.fromEntries(
+          Object.entries(runtimeLock.packages)
+            .filter(([key, entry]) => key !== '' && !entry.dev)
+            .map(([key, entry]) => [key, { ...entry, dev: true }]),
+        ),
+        'node_modules/flowcairn': {
+          version: packed[0].version,
+          resolved: `file:${tarball}`,
+          integrity: packed[0].integrity,
+          dev: true,
+          dependencies: runtimePackage.dependencies,
+          bin: runtimePackage.bin,
+          engines: runtimePackage.engines,
+        },
+        'node_modules/fixture-workspace': { resolved: 'packages/app', link: true },
+        'packages/app': { name: 'fixture-workspace', version: '1.0.0' },
+      },
+    }),
+  );
+  npmRun(root, 'ci', '--ignore-scripts', '--offline', '--no-audit', '--no-fund');
+  rmSync(tarball);
+  assert.equal(existsSync(path.join(root, 'forbidden-hook')), false);
+  assert.equal(lstatSync(path.join(root, 'node_modules/.bin/flowcairn')).isSymbolicLink(), true);
+  const direct = execFileSync(path.join(root, 'node_modules/.bin/flowcairn'), ['--version'], {
+    cwd: root,
+    env,
+    encoding: 'utf8',
+  });
+  assert.equal(direct.trim(), packed[0].version);
+  const run = (...args) =>
+    spawnSync(process.execPath, [npx, '--offline', '--no', 'flowcairn', ...args], {
+      cwd: root,
+      env,
+      encoding: 'utf8',
+      timeout: 20000,
+    });
+  const missing = run('init', '--provider', 'openai');
+  assert.equal(missing.status, 2);
+  assert.equal(JSON.parse(missing.stderr).error.code, 'MODEL_REQUIRED');
+  assert.equal(existsSync(path.join(root, '.flowcairn.json')), false);
+  const help = run('init', '--help');
+  assert.equal(help.status, 0, help.stderr);
+  assert.match(help.stdout, /В терминале init спросит ID модели/);
+  assert.equal(existsSync(path.join(root, '.flowcairn.json')), false);
+  const installed = run('init', '--provider', 'openai', '--model', options.model, '--json');
+  assert.equal(installed.status, 0, installed.stderr);
+  assert.deepEqual(JSON.parse(installed.stdout).result.profile.manifests, [
+    'package.json',
+    'package-lock.json',
+    'packages/app/package.json',
+  ]);
+  const repeated = run('init');
+  assert.equal(repeated.status, 0, repeated.stderr);
+  assert.match(repeated.stdout, /Проект уже настроен/);
+  const created = run(
+    'task',
+    '--id',
+    firstTask.id,
+    '--goal',
+    firstTask.goal,
+    '--scope',
+    'README.md',
+    '--accept',
+    firstTask.acceptance[0],
+    '--snapshot',
+    '--include-untracked',
+    'package-lock.json',
+    '--run',
+    'run-npm-install',
+    '--json',
+  );
+  assert.equal(created.status, 0, created.stderr);
+  const snapshot = JSON.parse(created.stdout).result;
+  assert.equal(snapshot.status, 'waiting-for-human');
+  assert.equal(snapshot.integrity.valid, true);
+  assert.ok(snapshot.nodes.every((node) => node.attempt === 0));
+  assert.equal(git('rev-parse', 'HEAD'), head);
+  assert.deepEqual(readFileSync(path.join(root, 'AGENTS.md')), instructions);
+});
+
+test('task JSON accepts the documented explicit untracked CLI list without calling AI', (t) => {
+  const { root } = fixture(t);
+  initializeProject(root, options);
+  writeFileSync(path.join(root, 'new.txt'), 'kept source');
+  const spec = path.join(root, '.ai-orchestrator/input.json');
+  writeFileSync(
+    spec,
+    JSON.stringify({
+      id: 'ORCH-FILE',
+      goal: 'Проверить файл',
+      instructions: 'Прочитать файл',
+      scope: ['new.txt'],
+      acceptance: ['Файл учтен'],
+      checks: [],
+    }),
+  );
+  const result = JSON.parse(
+    execFileSync(
+      process.execPath,
+      [
+        fileURLToPath(new URL('../bin/flowcairn.mjs', import.meta.url)),
+        'task',
+        '--file',
+        spec,
+        '--include-untracked',
+        'new.txt',
+        '--snapshot',
+        '--json',
+      ],
+      { cwd: root, encoding: 'utf8' },
+    ),
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.result.status, 'waiting-for-human');
+  assert.ok(result.result.nodes.every((node) => node.attempt === 0));
+  assert.equal(readFileSync(path.join(root, 'new.txt'), 'utf8'), 'kept source');
 });

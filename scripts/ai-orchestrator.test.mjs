@@ -1345,3 +1345,40 @@ test('profile-change flag cannot replace an active goal', (t) => {
     'RUN_ACTIVE',
   );
 });
+
+test('legacy task data cannot select arbitrary programs or out-of-scope host checks', (t) => {
+  const { base, repo } = fixture(t);
+  for (const checks of [
+    [['/usr/bin/env']],
+    [['/bin/sh', '-c', 'true']],
+    [['/bin/test', '-f', '../outside']],
+    [['/bin/test', '-f', 'other/file']],
+    [['/usr/bin/git', 'config', '--list']],
+  ]) {
+    const specPath = path.join(base, 'denied-check.json');
+    writeFileSync(specPath, JSON.stringify(taskSpec('ORCH-DENIED', { checks })));
+    const result = cli(repo, 'add', { owner: OWNER, spec: specPath }, { fail: true });
+    assert.ok(['CHECK_NOT_ALLOWED', 'INVALID_SPEC'].includes(result.error.code));
+    assert.deepEqual(cli(repo, 'status').tasks, []);
+  }
+});
+
+test('legacy checks are revalidated from saved state before execution or receipts change', (t) => {
+  const { base, repo } = fixture(t);
+  addTasks(base, repo, [taskSpec('ORCH-OLD')]);
+  const statePath = path.join(repo, '.ai-orchestrator/state.json');
+  const state = JSON.parse(readFileSync(statePath, 'utf8'));
+  for (const checks of [[['/usr/bin/true']], []]) {
+    state.tasks[0].checks = checks;
+    writeFileSync(statePath, JSON.stringify(state));
+    const before = readFileSync(statePath);
+    const result = cli(
+      repo,
+      'check',
+      { owner: OWNER, task: 'ORCH-OLD', attempt: 1, phase: 'worker' },
+      { fail: true },
+    );
+    assert.equal(result.error.code, 'CHECK_NOT_ALLOWED');
+    assert.deepEqual(readFileSync(statePath), before);
+  }
+});

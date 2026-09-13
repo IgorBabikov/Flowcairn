@@ -214,3 +214,15 @@ test('enforces source.write permission and the 1 MiB batch cap', (t) => {
   assert.equal(existsSync(path.join(root, 'src/file-0.txt')), false);
   assert.deepEqual(temporaryFiles(root), []);
 });
+
+test('forbidden directory aliases are refused before creating any files', (t) => {
+  const { root, before, node, task } = fixture(t);
+  for (const candidate of ['src/FORBIDDEN/new.txt', 'src/Forbidden/new.txt']) {
+    assert.throws(
+      () =>
+        applyProposedEdits(root, before, node, task, [edit(candidate, null, 'bounded fixture')]),
+      /scope/,
+    );
+    assert.equal(existsSync(path.join(root, candidate)), false);
+  }
+});

@@ -227,3 +227,13 @@ test('deep untrusted inputs fail before recursive schema parsing', () => {
     (e) => e.code === 'INPUT_LIMIT',
   );
 });
+
+test('compiled operator stages are Russian while check identifiers stay stable', () => {
+  const { task } = fixture();
+  task.checks = ['typecheck', 'lint', 'tests', 'build'];
+  const { plan } = compilePlan(task, { runtimeHash: hash, skills });
+  for (const node of plan.nodes) assert.match(node.title, /[А-Яа-я]/u);
+  for (const check of task.checks)
+    assert.equal(plan.nodes.find((node) => node.id === check).action.id, `check-${check}`);
+  assertPlanHash(plan, hashObject(plan));
+});

@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   closeSync,
+  cpSync,
   constants,
   fstatSync,
   fsyncSync,
@@ -19,6 +20,7 @@ import { pathToFileURL } from 'node:url';
 
 const INPUT = '/input';
 const WORKSPACE = '/workspace';
+const PREPARED_WORKSPACE = '/opt/flowcairn/workspace';
 const CONTRACT = '/contract.json';
 const NODE = '/usr/local/bin/node';
 const PNPM = '/opt/corepack/v1/pnpm/11.8.0/bin/pnpm.cjs';
@@ -155,6 +157,20 @@ export function registeredContainerCheck(actionId, { packageManager }) {
 
 export function registeredContainerCommands(actionId, flags) {
   return Object.freeze([registeredContainerCheck(actionId, flags)]);
+}
+
+/** Copy the immutable image seed into the size/inode-limited writable mount. */
+export function seedPreparedWorkspace({ seed, workspace }) {
+  const source = physicalRoot(seed, 'PREPARED');
+  const target = physicalRoot(workspace, 'WORKSPACE');
+  if (source === target || target.startsWith(`${source}${path.sep}`)) fail('INVALID_WORKSPACE');
+  cpSync(source, target, {
+    recursive: true,
+    dereference: false,
+    verbatimSymlinks: true,
+    force: false,
+    errorOnExist: true,
+  });
 }
 
 export function copyFingerprintSource({ input, workspace, files }) {
@@ -337,12 +353,14 @@ export async function main({
   input = INPUT,
   workspace = WORKSPACE,
   contractFile = CONTRACT,
+  preparedWorkspace = PREPARED_WORKSPACE,
   actionId = process.argv[2],
 } = {}) {
   const contract = readContract(contractFile);
   if (actionId !== contract.actionId) fail('CONTRACT_ACTION_MISMATCH');
   const commands = registeredContainerCommands(contract.actionId, contract);
   const deadline = Date.now() + contract.timeoutMs;
+  seedPreparedWorkspace({ seed: preparedWorkspace, workspace });
   copyFingerprintSource({ input, workspace, files: contract.files });
   let exitCode = 0;
   let summary = null;

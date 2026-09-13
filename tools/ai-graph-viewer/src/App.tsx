@@ -13,6 +13,7 @@ import {
   type NodeProps,
 } from '@xyflow/react';
 import { api, sessionToken, watchRevisions } from './api';
+import { humanText, nodeTitle, statusHint, StatusIcon } from './presentation';
 import type {
   ApiError,
   Artifact,
@@ -58,29 +59,29 @@ type SnapshotRefresh = {
 const COPY = {
   ru: {
     title: 'Flowcairn',
-    subtitle: 'План, права и доказательства одного локального Executor.',
+    subtitle: 'План, права и результаты выполнения.',
     runs: 'Запуски',
     active: 'Активные',
     archive: 'История',
-    create: 'Новый run',
-    noRuns: 'Запусков пока нет. Создайте задачу с точным scope и acceptance.',
+    create: 'Новый запуск',
+    noRuns: 'Запусков пока нет. Создайте задачу с границами работ и критериями приемки.',
     loading: 'Загружаем сохраненное состояние…',
     retryLoad: 'Повторить загрузку',
     graph: 'Граф выполнения',
     fitAll: 'Весь граф',
     focusCurrent: 'Текущий этап',
     details: 'Детали',
-    selectNode: 'Выберите этап, чтобы увидеть права, evidence и доступные действия.',
+    selectNode: 'Выберите этап, чтобы увидеть права, результаты и доступные действия.',
     run: 'Запустить',
     retry: 'Повторить',
     recover: 'Восстановить',
     stop: 'Остановить',
-    rerunCheck: 'Перезапустить check',
+    rerunCheck: 'Повторить проверку',
     replan: 'Новая версия плана',
-    receipt: 'Открыть receipt',
+    receipt: 'Открыть отчет',
     history: 'Изменения',
     plan: 'План',
-    evidence: 'Evidence',
+    evidence: 'Результаты',
     overview: 'Обзор',
     attempt: 'Попытка',
     duration: 'Длительность',
@@ -88,7 +89,7 @@ const COPY = {
     read: 'Чтение',
     write: 'Запись',
     permissions: 'Права',
-    skills: 'Skills',
+    skills: 'Инструкции',
     dependencies: 'Зависимости',
     changes: 'Измененные файлы',
     checks: 'Проверки',
@@ -96,7 +97,7 @@ const COPY = {
     unavailable: 'Недоступно',
     integrity: 'Целостность',
     healthy: 'Подтверждена',
-    runner: 'Runner',
+    runner: 'Исполнитель',
     compare: 'Сравнить план',
     noDiff: 'Структура планов совпадает.',
     compareLoading: 'Загружаем план для сравнения…',
@@ -105,7 +106,7 @@ const COPY = {
     language: 'English',
     theme: 'Сменить тему',
     live: 'Состояние обновляется с сервера',
-    disconnected: 'Live-канал недоступен; работает опрос каждые 2 секунды.',
+    disconnected: 'Канал обновлений недоступен; опрашиваем сервер каждые 2 секунды.',
     operationFailed: 'Операция не подтверждена',
     retrySame: 'Повторить тот же запрос',
     dismiss: 'Закрыть',
@@ -113,32 +114,32 @@ const COPY = {
     approve: 'Подтвердить план',
     accept: 'Принять результат',
     reject: 'Отклонить',
-    confirmation: 'Я проверил scope, риски, evidence и последствия.',
+    confirmation: 'Я проверил границы задачи, риски, результаты и последствия.',
     reason: 'Причина отклонения',
     submitDecision: 'Зафиксировать решение',
     cancel: 'Отмена',
-    scope: 'Scope',
+    scope: 'Границы задачи',
     risks: 'Риски',
     consequences: 'Последствия',
-    planHash: 'Hash плана',
-    draftTitle: 'Draft новой версии',
-    draftHint: 'Редактируется только копия nodes. Активный план остается неизменяемым.',
+    planHash: 'Хеш плана',
+    draftTitle: 'Черновик новой версии',
+    draftHint: 'Редактируется только копия этапов. Активный план остается неизменяемым.',
     validateReplan: 'Отправить на серверную проверку',
-    invalidJson: 'Исправьте JSON draft перед отправкой.',
-    createTitle: 'Новый локальный run',
+    invalidJson: 'Исправьте JSON черновика перед отправкой.',
+    createTitle: 'Новый локальный запуск',
     createHint:
-      'Сначала зарегистрируйте задачу: flowcairn task --file task.json. Укажите ее ID. Создание run сохраняет план и исходное состояние проекта; действия запускаются отдельно.',
+      'Сначала зарегистрируйте задачу: flowcairn task --file task.json. Укажите ее ID. Создание запуска сохраняет план и исходное состояние проекта; действия запускаются отдельно.',
     taskId: 'ID зарегистрированной задачи',
     goal: 'Цель',
     instructions: 'Полная инструкция',
-    acceptance: 'Acceptance, пункт на строку',
+    acceptance: 'Критерии приемки, пункт на строку',
     forbidden: 'Запрещенные пути, по одному на строку',
-    includeUntracked: 'Разрешенные untracked пути',
-    createRun: 'Создать run',
+    includeUntracked: 'Разрешенные новые файлы',
+    createRun: 'Создать запуск',
     status: 'Статус',
     revision: 'Ревизия',
     updated: 'Обновлен',
-    taskHash: 'Hash задачи',
+    taskHash: 'Хеш задачи',
     missingSession: 'Нет локальной сессии управления',
     missingSessionHint: 'Запустите flowcairn ui --root PROJECT и откройте ссылку из терминала.',
   },
@@ -226,22 +227,27 @@ const COPY = {
     updated: 'Updated',
     taskHash: 'Task hash',
     missingSession: 'Local control session is missing',
-    missingSessionHint: 'Run flowcairn ui --root PROJECT and open the URL printed in your terminal.',
+    missingSessionHint:
+      'Run flowcairn ui --root PROJECT and open the URL printed in your terminal.',
   },
 } as const;
 
 const STATUS: Record<Locale, Record<RunStatus, string>> = {
   ru: {
-    pending: 'Ожидает',
+    idle: 'Не начат',
+    waiting: 'Ожидает решения',
+    pending: 'В очереди',
     ready: 'Готов к запуску',
     running: 'Выполняется',
     'waiting-for-human': 'Нужно решение',
-    passed: 'Пройден',
+    passed: 'Завершен',
     failed: 'Ошибка',
-    uncertain: 'Нужна проверка',
+    uncertain: 'Результат неизвестен',
     stale: 'Устарел',
   },
   en: {
+    idle: 'Idle',
+    waiting: 'Waiting',
     pending: 'Pending',
     ready: 'Ready',
     running: 'Running',
@@ -257,10 +263,10 @@ function operationId(prefix = 'ui'): string {
   return `${prefix}-${crypto.randomUUID()}`;
 }
 
-function formatDuration(value: number | null | undefined): string {
+function formatDuration(value: number | null | undefined, locale: Locale = 'ru'): string {
   if (value == null) return '—';
-  if (value < 1000) return `${Math.round(value)} ms`;
-  return `${(value / 1000).toFixed(value < 10_000 ? 1 : 0)} s`;
+  if (value < 1000) return `${Math.round(value)} ${locale === 'ru' ? 'мс' : 'ms'}`;
+  return `${(value / 1000).toFixed(value < 10_000 ? 1 : 0)} ${locale === 'ru' ? 'с' : 's'}`;
 }
 
 function formatDate(value: string | null | undefined, locale: Locale): string {
@@ -321,7 +327,7 @@ function useModalLifecycle(onClose: () => void) {
 }
 
 function getCapability(set: Partial<Record<CapabilityName, Capability>>, name: CapabilityName) {
-  return set[name] ?? { allowed: false, reason: 'Capability отсутствует в snapshot' };
+  return set[name] ?? { allowed: false, reason: 'Сервер не сообщил о доступности действия' };
 }
 
 function relevantNodeId(snapshot: Snapshot): string | null {
@@ -366,7 +372,7 @@ function ActionButton({
       className={compact ? 'button compact' : 'button'}
       disabled={!capability.allowed}
       onClick={onClick}
-      title={capability.allowed ? undefined : (capability.reason ?? undefined)}
+      title={capability.allowed ? undefined : humanText(capability.reason) || undefined}
       type="button"
     >
       {children}
@@ -393,10 +399,18 @@ function GraphNodeCard({ data }: NodeProps<Node<GraphNodeData, 'operator'>>) {
           data.onOpen();
         }
       }}
+      aria-label={`${nodeTitle(data, data.locale)}: ${STATUS[data.locale][data.status]}`}
       role="button"
       tabIndex={0}
     >
-      <NodeToolbar className="node-toolbar" isVisible={data.selected} position={Position.Top}>
+      <NodeToolbar
+        className="node-toolbar"
+        isVisible={
+          data.selected &&
+          actions.some(([, name]) => getCapability(data.capabilities, name).allowed)
+        }
+        position={Position.Top}
+      >
         {actions.map(([action, capabilityName, label]) => {
           const capability = getCapability(data.capabilities, capabilityName);
           return capability.allowed ? (
@@ -416,17 +430,20 @@ function GraphNodeCard({ data }: NodeProps<Node<GraphNodeData, 'operator'>>) {
       </NodeToolbar>
       <Handle type="target" position={Position.Left} isConnectable={false} />
       <div className="node-heading">
-        <span className={`status-mark status-${data.status}`} aria-hidden="true" />
+        <StatusIcon status={data.status} />
         <span className="node-mode">{data.mode === 'write' ? labels.write : labels.read}</span>
       </div>
-      <strong>{data.title}</strong>
-      <span className="node-status">{STATUS[data.locale][data.status] ?? data.status}</span>
+      <strong>{nodeTitle(data, data.locale)}</strong>
+      <span className="node-status">{STATUS[data.locale][data.status]}</span>
+      <span className="node-hint">{statusHint(data.status, data.locale)}</span>
       <div className="node-meta">
         <span>
           {labels.attempt}: {data.attempt}
         </span>
-        <span>{formatDuration(data.durationMs)}</span>
-        <span>{data.receiptIds.length} receipts</span>
+        <span>{formatDuration(data.durationMs, data.locale)}</span>
+        <span>
+          {data.receiptIds.length} {data.locale === 'ru' ? 'отчетов' : 'receipts'}
+        </span>
       </div>
       <Handle type="source" position={Position.Right} isConnectable={false} />
     </article>
@@ -467,6 +484,8 @@ function layoutNodes(
     return {
       id: item.id,
       type: 'operator',
+      className: `execution-node status-${item.status}`,
+      style: { '--node-status-color': `var(--status-${item.status})` } as React.CSSProperties,
       position: { x: level * 310, y: index * 190 - (peers.length - 1) * 95 },
       draggable: false,
       selectable: true,
@@ -484,6 +503,13 @@ function layoutNodes(
 export function App() {
   const [locale, setLocale] = useState<Locale>('ru');
   const labels = COPY[locale];
+  useEffect(() => {
+    const update = () =>
+      document.documentElement.toggleAttribute('data-page-hidden', document.hidden);
+    update();
+    document.addEventListener('visibilitychange', update);
+    return () => document.removeEventListener('visibilitychange', update);
+  }, []);
   const authenticated = Boolean(sessionToken());
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [serviceCapabilities, setServiceCapabilities] = useState<ServiceCapabilities>({});
@@ -806,15 +832,25 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [locale, selectedNodeId, snapshot],
   );
-  const graphEdges: Edge[] = useMemo(
-    () =>
-      (snapshot?.edges ?? []).map((edge) => ({
+  const graphEdges: Edge[] = useMemo(() => {
+    const byId = new Map(snapshot?.nodes.map((node) => [node.id, node]));
+    return (snapshot?.edges ?? []).map((edge) => {
+      // activeNodeId also points to gates/ready steps; only committed statuses indicate work.
+      const active = Boolean(
+        snapshot?.integrity.valid &&
+        !['stale', 'uncertain'].includes(snapshot.status) &&
+        byId.get(edge.target)?.status === 'running' &&
+        byId.get(edge.source)?.status === 'passed' &&
+        byId.get(edge.target)?.needs.includes(edge.source),
+      );
+      return {
         ...edge,
-        animated: snapshot?.activeNodeId === edge.target,
-        style: { strokeWidth: 2 },
-      })),
-    [snapshot],
-  );
+        animated: active,
+        className: active ? 'dependency-active' : 'dependency-idle',
+        style: { strokeWidth: active ? 2.5 : 1.5 },
+      };
+    });
+  }, [snapshot]);
   const currentGraphNodeId = snapshot ? relevantNodeId(snapshot) : null;
 
   const focusGraphNode = useCallback(
@@ -845,7 +881,7 @@ export function App() {
         )
       : getCapability(snapshot.capabilities, capabilityName);
     if (!capability.allowed) {
-      setNotice(capability.reason ?? labels.unavailable);
+      setNotice(humanText(capability.reason, locale) || labels.unavailable);
       return;
     }
     const key = `${snapshot.runId}:${action}:${nodeId ?? 'run'}`;
@@ -969,7 +1005,8 @@ export function App() {
   async function openReceipt(hash: string) {
     if (!snapshot || !selectedNode) return;
     const capability = getCapability(selectedNode.capabilities, 'openReceipt');
-    if (!capability.allowed) return setNotice(capability.reason ?? labels.unavailable);
+    if (!capability.allowed)
+      return setNotice(humanText(capability.reason, locale) || labels.unavailable);
     try {
       setEvidence({
         type: 'receipt',
@@ -1017,10 +1054,10 @@ export function App() {
   async function createRun(spec: TaskInput) {
     const capability = serviceCapabilities.create ?? {
       allowed: false,
-      reason: 'Capability отсутствует',
+      reason: 'Сервер не сообщил о доступности действия',
     };
     if (!capability.allowed || inFlightRef.current)
-      return setNotice(capability.reason ?? labels.unavailable);
+      return setNotice(humanText(capability.reason, locale) || labels.unavailable);
     const existing = pending?.kind === 'create' ? pending : null;
     const operation: PendingCreateOperation = existing ?? {
       kind: 'create',
@@ -1232,6 +1269,19 @@ export function App() {
                 minZoom={0.08}
                 nodeTypes={NODE_TYPES}
                 nodes={graphNodes}
+                onlyRenderVisibleElements
+                ariaLabelConfig={
+                  locale === 'ru'
+                    ? {
+                        'node.a11yDescription.default':
+                          'Нажмите Enter или пробел, чтобы выбрать этап. Escape снимает выбор.',
+                        'controls.zoomIn.ariaLabel': 'Приблизить',
+                        'controls.zoomOut.ariaLabel': 'Отдалить',
+                        'controls.fitView.ariaLabel': 'Показать весь граф',
+                        'minimap.ariaLabel': 'Мини-карта графа',
+                      }
+                    : {}
+                }
                 nodesConnectable={false}
                 nodesDraggable={false}
                 onInit={setFlowInstance}
@@ -1240,7 +1290,7 @@ export function App() {
               >
                 <Background color="var(--flow-grid)" gap={24} size={1} />
                 <MiniMap
-                  ariaLabel={locale === 'ru' ? 'Мини-карта Graph' : 'Graph minimap'}
+                  ariaLabel={locale === 'ru' ? 'Мини-карта графа' : 'Graph minimap'}
                   pannable
                   zoomable
                   nodeColor={(node) => `var(--status-${String(node.data.status)})`}
@@ -1250,7 +1300,7 @@ export function App() {
             ) : selectedRunId && !snapshot ? (
               <LoadingState label={labels.loading} />
             ) : snapshot && !snapshot.integrity.valid ? (
-              <p role="alert">{snapshot.integrity.reason}</p>
+              <p role="alert">{humanText(snapshot.integrity.reason, locale)}</p>
             ) : (
               <EmptyGraph labels={labels} />
             )}
@@ -1347,7 +1397,8 @@ export function App() {
           onSubmit={(nodes, binding) => {
             const current = snapshotRef.current;
             const capability = getCapability(current?.capabilities ?? {}, 'requestReplan');
-            if (!capability.allowed) return setNotice(capability.reason ?? labels.unavailable);
+            if (!capability.allowed)
+              return setNotice(humanText(capability.reason, locale) || labels.unavailable);
             const operation: PendingControlOperation = {
               kind: 'control',
               key: `${binding.runId}:replan`,
@@ -1449,7 +1500,7 @@ function RunHealth({ snapshot, locale }: { snapshot: Snapshot; locale: Locale })
       <dl>
         <dt>{labels.integrity}</dt>
         <dd className={snapshot.integrity.valid ? 'positive' : 'negative'}>
-          {snapshot.integrity.valid ? labels.healthy : snapshot.integrity.reason}
+          {snapshot.integrity.valid ? labels.healthy : humanText(snapshot.integrity.reason, locale)}
         </dd>
         <dt>{labels.runner} AI</dt>
         <dd>
@@ -1457,15 +1508,17 @@ function RunHealth({ snapshot, locale }: { snapshot: Snapshot; locale: Locale })
             ? locale === 'ru'
               ? 'Провайдер настроен'
               : 'Provider configured'
-            : (snapshot.runner?.ai.reason ?? labels.unavailable)}
+            : humanText(snapshot.runner?.ai.reason, locale) || labels.unavailable}
         </dd>
-        <dt>{labels.runner} checks</dt>
+        <dt>
+          {labels.runner} {labels.checks.toLowerCase()}
+        </dt>
         <dd>
           {snapshot.runner?.checks.available
             ? locale === 'ru'
               ? 'Доступны'
               : 'Available'
-            : (snapshot.runner?.checks.reason ?? labels.unavailable)}
+            : humanText(snapshot.runner?.checks.reason, locale) || labels.unavailable}
         </dd>
         <dt>{labels.updated}</dt>
         <dd>{formatDate(snapshot.updatedAt, locale)}</dd>
@@ -1505,12 +1558,13 @@ function NodeDetails({
     <article className="node-details">
       <header>
         <span className={`status-chip status-${node.status}`}>{STATUS[locale][node.status]}</span>
-        <h2>{node.title}</h2>
-        <p>{node.outcome}</p>
+        <h2>{nodeTitle(node, locale)}</h2>
+        <p>{humanText(node.outcome, locale)}</p>
       </header>
       {node.reason && (
         <div className="runtime-reason" role="status">
-          Runtime: {node.reason}
+          {locale === 'ru' ? 'Причина остановки' : 'Runtime reason'}:{' '}
+          {humanText(node.reason, locale)}
         </div>
       )}
       <div className="detail-actions">
@@ -1539,13 +1593,13 @@ function NodeDetails({
         <dt>{locale === 'ru' ? 'Действие' : 'Action'}</dt>
         <dd>{node.action.id}</dd>
         <dt>{locale === 'ru' ? 'Тип действия' : 'Action type'}</dt>
-        <dd>{node.action.kind}</dd>
+        <dd>{humanText(node.action.kind, locale)}</dd>
         <dt>{labels.mode}</dt>
         <dd>{node.mode === 'write' ? labels.write : labels.read}</dd>
         <dt>{labels.attempt}</dt>
         <dd>{node.attempt}</dd>
         <dt>{labels.duration}</dt>
-        <dd>{formatDuration(node.durationMs)}</dd>
+        <dd>{formatDuration(node.durationMs, locale)}</dd>
         <dt>{labels.dependencies}</dt>
         <dd>{node.needs.join(', ') || labels.none}</dd>
         <dt>{labels.permissions}</dt>
@@ -1579,9 +1633,10 @@ function NodeDetails({
             <div className="check-row" key={check.id}>
               <b>{check.id}</b>
               <span>
-                {check.passed ? 'PASS' : 'FAIL'} · {formatDuration(check.durationMs)}
+                {check.passed ? STATUS[locale].passed : STATUS[locale].failed} ·{' '}
+                {formatDuration(check.durationMs, locale)}
               </span>
-              <small>{check.summary}</small>
+              <small>{humanText(check.summary, locale)}</small>
             </div>
           ))}
         </section>
@@ -1607,10 +1662,12 @@ function EvidenceList({
   if (!node && planning.length === 0) return <p className="empty-copy">{labels.selectNode}</p>;
   return (
     <div className="evidence-list">
-      <h2>{node?.title ?? labels.evidence}</h2>
+      <h2>{node ? nodeTitle(node, locale) : labels.evidence}</h2>
       {node?.receiptIds.map((hash, index) => (
         <button key={hash} onClick={() => onReceipt(hash)} type="button">
-          <span>Receipt {index + 1}</span>
+          <span>
+            {locale === 'ru' ? 'Отчет' : 'Receipt'} {index + 1}
+          </span>
           <code>{hash.slice(0, 12)}</code>
         </button>
       ))}
@@ -1967,7 +2024,7 @@ function CreateRunDialog({
           <button
             className="button primary"
             disabled={!capability.allowed || busy}
-            title={capability.allowed ? undefined : (capability.reason ?? undefined)}
+            title={capability.allowed ? undefined : humanText(capability.reason) || undefined}
             type="submit"
           >
             {busy ? '…' : labels.createRun}
@@ -2102,7 +2159,7 @@ const GateDialog = React.forwardRef<
         <header>
           <div>
             <h2 id="gate-title">{labels.gateTitle}</h2>
-            <p>{gate.title}</p>
+            <p>{node ? nodeTitle(node, locale) : humanText(gate.title, locale)}</p>
           </div>
           <button className="button quiet" onClick={onClose} type="button">
             {labels.cancel}
@@ -2160,7 +2217,7 @@ const GateDialog = React.forwardRef<
           <button
             className={reject ? 'button danger' : 'button primary'}
             disabled={!confirmed || !capability.allowed || busy || (reject && !reason.trim())}
-            title={capability.allowed ? undefined : (capability.reason ?? undefined)}
+            title={capability.allowed ? undefined : humanText(capability.reason) || undefined}
             type="submit"
           >
             {busy ? '…' : labels.submitDecision}
