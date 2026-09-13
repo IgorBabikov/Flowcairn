@@ -445,7 +445,7 @@ function registeredHostCheck(command, scope) {
     if (command[0] === '/usr/bin/git' && command[1] === 'diff' && command[2] === '--check')
       return ['/usr/bin/git', 'diff', '--check'];
     if (
-      command[0] === '/bin/test' &&
+      ['/bin/test', '/usr/bin/test'].includes(command[0]) &&
       command[1] === '-f' &&
       typeof command[2] === 'string' &&
       !/[\0\r\n]/.test(command[2])
