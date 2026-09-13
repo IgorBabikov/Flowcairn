@@ -292,10 +292,10 @@ function verifyBootstrapSource(root, rawBundlePath) {
     .map((entry) => entry.path)
     .sort(comparePath);
   const actualUntracked = currentUntrackedPaths(root);
-  if (JSON.stringify(actualUntracked) !== JSON.stringify(expectedUntracked)) {
+  if (expectedUntracked.some((file) => !actualUntracked.includes(file))) {
     throw new CliError(
       'SOURCE_SNAPSHOT_MISMATCH',
-      'Current untracked paths do not match the bootstrap source bundle',
+      'Selected untracked paths are missing from the current checkout',
     );
   }
 
@@ -308,7 +308,7 @@ function verifyBootstrapSource(root, rawBundlePath) {
     });
     if (
       current.manifest.sourceHash !== manifest.sourceHash ||
-      JSON.stringify(currentUntrackedPaths(root)) !== JSON.stringify(expectedUntracked)
+      JSON.stringify(currentUntrackedPaths(root)) !== JSON.stringify(actualUntracked)
     ) {
       throw new CliError(
         'SOURCE_SNAPSHOT_MISMATCH',

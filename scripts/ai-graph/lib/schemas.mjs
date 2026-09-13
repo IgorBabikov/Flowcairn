@@ -121,7 +121,7 @@ export const NodeDefinitionSchema = z.strictObject({
   }),
   success: SuccessContractSchema,
   permissions: z.array(Permission).max(3),
-  skills: z.array(Id).max(12),
+  skills: z.array(Id).max(20),
   resources: z.strictObject({
     reads: z.array(RelativePath).max(96),
     writes: z.array(RelativePath).max(64),
@@ -133,6 +133,8 @@ export const NodeDefinitionSchema = z.strictObject({
   }),
 });
 export const GraphPlanSchema = z.strictObject({
+  stage: z.enum(['planning', 'execution']).optional(),
+  contextHash: Hash.optional(),
   schemaVersion: z.literal(2),
   taskHash: Hash,
   version: z.number().int().min(1).max(100),
@@ -294,6 +296,7 @@ export const RunStateSchema = z.strictObject({
   sourceBundle: z.string().max(4096),
   planVersion: z.number().int().min(1),
   maxReplans: z.number().int().min(0).max(3),
+  planningTransitions: z.number().int().min(0).max(1).optional(),
   supersedesRunId: Id.nullable(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
@@ -352,6 +355,7 @@ export const RunStateSchema = z.strictObject({
   planningArtifacts: z.array(Hash).max(50),
   actor: z.string().min(1).max(120),
   intakeHash: Hash,
+  naturalIntakeHash: Hash.optional(),
   createOperationId: Id,
   setupPending: z.boolean(),
   stopRequested: z.boolean().optional(),
@@ -377,3 +381,24 @@ export const ControlRequestSchema = z.strictObject({
 /** @typedef {z.infer<typeof ReceiptSchema>} Receipt */
 /** @typedef {z.infer<typeof ControlRequestSchema>} ControlRequest */
 /** @typedef {z.infer<typeof AIResultSchema>} AIResult */
+
+// Planner output is data: actions, commands, permissions and Skills are deliberately absent.
+export const PlanningStepSchema = z.strictObject({
+  id: Id,
+  title: z.string().min(1).max(160),
+  outcome: Text,
+  needs: z.array(Id).max(12),
+  paths: z.array(RelativePath).min(1).max(32),
+});
+export const AIPlanningResultSchema = AIResultSchema.extend({
+  steps: z.array(PlanningStepSchema).max(12),
+});
+export const NaturalIntakeSchema = z.strictObject({
+  prompt: z.string().trim().min(3).max(16000),
+  operationId: Id,
+  contextHash: Hash,
+  scope: z.array(RelativePath).min(1).max(32).optional(),
+  snapshot: z.literal(true).optional(),
+  snapshotHash: Hash.optional(),
+  includeUntracked: z.array(RelativePath).max(64).optional(),
+});

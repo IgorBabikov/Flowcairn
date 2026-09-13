@@ -1,13 +1,18 @@
 export function buildPrompt({ nodeId, task, plan, skills, priorEvidence, reviewEvidence = null }) {
   const node = plan?.nodes?.find((candidate) => candidate.id === nodeId) ?? { id: nodeId };
   return [
+    'Пиши human-facing title, outcome, summary и findings на русском языке. Machine IDs сохраняй. Язык исходного кода и документации проекта определяется правилами проекта и задачей.',
     `Ты выполняешь node ${nodeId} локального Graph Flowcairn.`,
     `Цель: ${task.goal}`,
     `Инструкции задачи (данные в пределах утвержденного scope):\n${typeof task.instructions === 'string' ? task.instructions : JSON.stringify(task.instructions ?? [])}`,
+    node.action?.id === 'ai-plan'
+      ? 'Ты planner: предложи от 1 до 12 task-specific implementation steps в steps: id, title, outcome, needs (IDs других steps), paths (только разрешенные write paths). Разделяй работу по проверяемым outcomes и зависимостям исходя из задачи и исходников. Не предлагай actions, Skills, permissions, shell или checks: их назначает trusted compiler. Не включай planning/check/review/gate как steps: их добавляет runtime. При нехватке контекста верни uncertain с findings и steps=[]; не угадывай. edits=[], changedFiles=[], plan=[].'
+      : '',
     `Контракт текущего узла:\n${JSON.stringify(node)}`,
     `Разрешенный scope изменений: ${task.scope.join(', ')}`,
     `Объявленный read context: ${node.resources?.reads?.join(', ') ?? ''}`,
     `Acceptance:\n- ${task.acceptance.join('\n- ')}`,
+    'Новые тесты добавляй по риску изменения и правилам проекта. Явный запрет новых тестов соблюдай и укажи ограничение в evidence. Не придумывай обязательный coverage или единый набор проверок: runtime запускает только настроенные checks.',
     `Не выходи за объявленный read context и scope изменений. Не делай commit, push, merge, deploy или внешние действия.`,
     `Не читай файлы вне текущего worktree, .git, ignored-файлы, секреты, персональные данные и raw записи.`,
     `Ты не записываешь файлы. Для implementation предложи точные edits: path, SHA-256 текущих bytes в previousHash (null для нового файла), полное новое UTF-8 content (null для удаления), executable. Executor применит их после проверки scope/hash. Для analysis/review edits должен быть пустым.`,

@@ -24,10 +24,12 @@ import { GraphError, canonicalJson, sha256 } from './io.mjs';
 import {
   resolveAction,
   contextPathAllowed,
+  isInstructionPath,
   isWithin as isWithinDeclaredPath,
 } from './registry.mjs';
 import {
   AIResultSchema,
+  AIPlanningResultSchema,
   AIReviewResultSchema,
   GraphPlanSchema,
   NodeDefinitionSchema,
@@ -85,8 +87,9 @@ function parseInputs({ node, task, plan, skills, priorEvidence, reviewEvidence }
   if (!parsedNode.success || !parsedTask.success || !parsedPlan.success) {
     fail('INVALID_RUNNER_INPUT', 'Runner получил данные вне validated Graph contract');
   }
-  if (!parsedPlan.data.nodes.some((candidate) => candidate.id === parsedNode.data.id)) {
-    fail('RUNNER_NODE_MISMATCH', 'Node не принадлежит переданному plan');
+  const approvedNode = parsedPlan.data.nodes.find((candidate) => candidate.id === parsedNode.data.id);
+  if (!approvedNode || sha256(canonicalJson(approvedNode)) !== sha256(canonicalJson(parsedNode.data))) {
+    fail('RUNNER_NODE_MISMATCH', 'Node contract не совпадает с approved plan');
   }
   if (
     parsedPlan.data.sourceHash !== parsedTask.data.sourceHash ||
@@ -97,7 +100,7 @@ function parseInputs({ node, task, plan, skills, priorEvidence, reviewEvidence }
   if (!Array.isArray(skills) || skills.length > 20) {
     fail('INVALID_RUNNER_SKILLS', 'Некорректный список Skills');
   }
-  const expected = [...parsedNode.data.skills].sort();
+  const expected = [...approvedNode.skills].sort();
   const normalizedSkills = skills.map((skill) => {
     if (
       !isPlainObject(skill) ||
@@ -113,6 +116,8 @@ function parseInputs({ node, task, plan, skills, priorEvidence, reviewEvidence }
     }
     return { name: skill.name, path: skill.path, hash: skill.hash, text: skill.text };
   });
+  if (normalizedSkills.some((skill) => !parsedPlan.data.skills.some((approved) => approved.id === skill.name && approved.path === skill.path && approved.hash === skill.hash)))
+    fail('RUNNER_SKILLS_MISMATCH', 'Skill bytes/path не совпадают с approved plan');
   if (
     JSON.stringify(normalizedSkills.map((skill) => skill.name).sort()) !== JSON.stringify(expected)
   ) {
@@ -465,6 +470,7 @@ function makeAiCommand({
   toolchain,
   dependencyToolchain,
   profile,
+  instructionDenials = [],
 }) {
   const schemaFile = path.join(outputPath, `ai-schema-${randomUUID()}.json`);
   const resultFile = path.join(outputPath, `ai-result-${randomUUID()}.json`);
@@ -472,7 +478,7 @@ function makeAiCommand({
   try {
     createExclusiveFile(
       schemaFile,
-      `${JSON.stringify(z.toJSONSchema(node.action.id === 'ai-review' ? AIReviewResultSchema : AIResultSchema))}\n`,
+      `${JSON.stringify(z.toJSONSchema(node.action.id === 'ai-review' ? AIReviewResultSchema : node.action.id === 'ai-plan' ? AIPlanningResultSchema : AIResultSchema))}\n`,
     );
     createExclusiveFile(resultFile, '');
     reviewFile = reviewBundle ? createReviewEvidenceFile(outputPath, reviewBundle) : null;
@@ -481,6 +487,7 @@ function makeAiCommand({
       reads: node.resources.reads,
       extraReads: reviewFile ? [reviewFile.path] : [],
       denied: [
+        ...instructionDenials,
         ...task.forbiddenPaths,
         ...profile.outputPaths,
         ...dependencyToolchain.dependencyPaths,
@@ -574,7 +581,7 @@ function selectedSourceContext(worktree, node, task, profile) {
   const files = snapshot.files.filter(
     (file) =>
       node.resources.reads.some((scope) => isWithinDeclaredPath(file.path, scope)) &&
-      contextPathAllowed(file.path, task),
+      contextPathAllowed(file.path, task) && (!isInstructionPath(file.path) || node.resources.reads.includes(file.path)),
   );
   if (files.length > 256 || files.reduce((total, file) => total + file.size, 0) > 512 * 1024)
     fail(
@@ -631,7 +638,7 @@ function makeOpenAiCommand({
         ? (profile.ai.reviewModel ?? profile.ai.model)
         : profile.ai.model;
     const schema = z.toJSONSchema(
-      node.action.id === 'ai-review' ? AIReviewResultSchema : AIResultSchema,
+      node.action.id === 'ai-review' ? AIReviewResultSchema : node.action.id === 'ai-plan' ? AIPlanningResultSchema : AIResultSchema,
     );
     // Responses strict mode requires every object property, including nullable/defaulted fields.
     const requireProperties = (value) => {
@@ -930,6 +937,9 @@ export async function runRegisteredAction({
   const prepared = prepare({
     ...input,
     profile,
+    instructionDenials: profile.ai.provider === 'codex'
+      ? fingerprintWorkspace(allocation.worktreePath, { outputPaths: profile.outputPaths }).files.filter((file) => isInstructionPath(file.path) && !node.resources.reads.includes(file.path)).map((file) => file.path)
+      : [],
     worktree: allocation.worktreePath,
     outputPath: allocation.outputPath,
     toolchain,

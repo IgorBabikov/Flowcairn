@@ -171,16 +171,6 @@ test('dirty bootstrap requires one exact immutable source authorization', (t) =>
   assert.equal(wrongRoot.error.code, 'SOURCE_HEAD_MISMATCH');
   assert.equal(existsSync(path.join(other.repo, '.ai-orchestrator', 'state.json')), false);
 
-  writeFileSync(path.join(source.repo, 'unexpected.txt'), 'not present in source bundle\n');
-  const untrackedDrift = cli(
-    source.repo,
-    'init',
-    initOptions({ 'bootstrap-source-bundle': captured.bundlePath }),
-    { fail: true },
-  );
-  assert.equal(untrackedDrift.error.code, 'SOURCE_SNAPSHOT_MISMATCH');
-  rmSync(path.join(source.repo, 'unexpected.txt'));
-
   writeFileSync(path.join(source.repo, 'README.md'), 'drift after capture\n');
   const drift = cli(
     source.repo,
@@ -192,12 +182,15 @@ test('dirty bootstrap requires one exact immutable source authorization', (t) =>
   assert.equal(existsSync(path.join(source.repo, '.ai-orchestrator', 'state.json')), false);
 
   writeFileSync(path.join(source.repo, 'README.md'), 'authorized dirty source\n');
+  writeFileSync(path.join(source.repo, 'unexpected.txt'), 'unselected local scratch\n');
   const initialized = cli(
     source.repo,
     'init',
     initOptions({ 'bootstrap-source-bundle': captured.bundlePath }),
   );
   assert.equal(initialized.state.bootstrapSourceHash, captured.manifest.sourceHash);
+  assert.equal(readFileSync(path.join(source.repo, 'unexpected.txt'), 'utf8'), 'unselected local scratch\n');
+  assert.equal(captured.manifest.entries.some((entry) => entry.path === 'unexpected.txt'), false);
   addTasks(source.base, source.repo, taskSpec('ORCH-BOOT'));
 
   const unauthorizedFlag = cli(
