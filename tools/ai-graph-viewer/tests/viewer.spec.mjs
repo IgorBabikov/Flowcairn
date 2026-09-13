@@ -456,6 +456,7 @@ test('opens an eleven-node mobile graph on a readable active node and keeps fit-
   await mockApi(page, current);
   await page.goto(`/#session=${token}`);
   await expect(page.locator('.graph-node')).toHaveCount(11);
+  await expect(page.locator('.react-flow__minimap')).toBeHidden();
   await readableInGraph(page, 'Node 6');
 
   await page.getByRole('button', { name: 'Весь граф' }).click();

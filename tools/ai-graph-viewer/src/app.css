@@ -1012,6 +1012,9 @@ dialog::backdrop {
 }
 
 @media (max-width: 720px) {
+  .react-flow__minimap {
+    display: none;
+  }
   .topbar {
     align-items: flex-start;
     flex-direction: column;
