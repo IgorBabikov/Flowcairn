@@ -101,8 +101,11 @@ function workspacePatterns(root, pkg, manager) {
         fail('WORKSPACES_YAML', 'YAML workspace содержит ошибки или неподдерживаемые теги.');
       const data = doc.toJS({ maxAliasCount: 50 });
       assertJsonBounds(data, 10000);
-      if (!data || typeof data !== 'object' || Array.isArray(data) || !Array.isArray(data.packages))
-        fail('WORKSPACES_YAML', 'В pnpm-workspace.yaml нужен массив packages.');
+      if (!data || typeof data !== 'object' || Array.isArray(data))
+        fail('WORKSPACES_YAML', 'В pnpm-workspace.yaml нужен объект настроек.');
+      if (!Object.hasOwn(data, 'packages')) return [];
+      if (!Array.isArray(data.packages))
+        fail('WORKSPACES_YAML', 'Поле packages должно быть массивом.');
       return data.packages;
     } catch (error) {
       if (error instanceof GraphError && error.code === 'WORKSPACES_YAML') throw error;
