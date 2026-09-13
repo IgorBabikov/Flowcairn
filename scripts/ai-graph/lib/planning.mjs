@@ -11,7 +11,7 @@ export function compilePlanningPlan(task, context) {
   const baseline = compilePlan(task, context).plan;
   const approve = structuredClone(baseline.nodes.find((n) => n.action.id === 'human-approve'));
   approve.title = 'Разрешить AI-планирование';
-  approve.outcome = 'Оператор разрешил передачу указанного контекста выбранному AI для одного read-only planning';
+  approve.outcome = 'Подтверждение разрешит выбранному AI прочитать указанный контекст и составить план. Исходники останутся без изменений.';
   const planner = structuredClone(baseline.nodes.find((n) => n.action.id === 'ai-analyze'));
   const action = resolveAction('ai-plan');
   Object.assign(planner, {
