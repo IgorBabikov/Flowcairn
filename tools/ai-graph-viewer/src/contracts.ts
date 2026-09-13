@@ -1,4 +1,6 @@
 export type RunStatus =
+  | 'idle'
+  | 'waiting'
   | 'pending'
   | 'ready'
   | 'running'

@@ -4,12 +4,13 @@ FROM ${BASE_IMAGE}
 USER root
 ARG PACKAGE_MANAGER
 ENV COREPACK_HOME=/opt/corepack
-RUN mkdir -p /opt/corepack \
+RUN apk add --no-cache git \
+  && mkdir -p /opt/corepack \
   && corepack enable \
   && corepack prepare pnpm@11.8.0 --activate \
   && chmod -R a+rX /opt/corepack
 
-WORKDIR /workspace
+WORKDIR /opt/flowcairn/workspace
 COPY --chown=node:node manifests/ ./
 # Only dependency manifests enter this explicit networked preparation. Lifecycle scripts stay off.
 RUN if [ "$PACKAGE_MANAGER" = "npm" ]; then npm ci --ignore-scripts --no-audit --no-fund; \
@@ -18,7 +19,7 @@ RUN if [ "$PACKAGE_MANAGER" = "npm" ]; then npm ci --ignore-scripts --no-audit -
 
 COPY --chown=root:root container-check.mjs /opt/flowcairn/container-check.mjs
 RUN chmod 0555 /opt/flowcairn/container-check.mjs \
-  && chown -R node:node /workspace
+  && chown -R node:node /opt/flowcairn/workspace
 
 USER node
 ENTRYPOINT ["/usr/local/bin/node", "/opt/flowcairn/container-check.mjs"]

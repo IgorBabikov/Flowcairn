@@ -17,6 +17,7 @@ import test from 'node:test';
 import { DOCKER_CHECKS_TESTING, probeChecks } from './lib/docker-checks.mjs';
 import {
   copyFingerprintSource,
+  seedPreparedWorkspace,
   registeredContainerCheck,
   registeredContainerCommands,
   runBoundedCommand,
@@ -142,12 +143,20 @@ test('container create argv has fixed containment and no host write mount', () =
   assert.ok(args.includes('compress=false'));
   assert.ok(args.includes('COREPACK_HOME=/opt/corepack'));
   assert.equal(DOCKER_CHECKS_TESTING.intendedSecurity(input, '/contract.json').pidMode, '');
-  assert.ok(args.includes('type=volume,dst=/workspace'));
+  assert.equal(args.includes('type=volume,dst=/workspace'), false);
+  assert.ok(
+    args.includes(
+      '/workspace:rw,nosuid,nodev,size=1073741824,nr_inodes=131072,uid=1000,gid=1000,mode=0700',
+    ),
+  );
+  assert.match(
+    DOCKER_CHECKS_TESTING.intendedSecurity(input, '/contract.json').tmpfs['/workspace'],
+    /size=1073741824,nr_inodes=131072/,
+  );
   const mounts = args.filter((value) => value.startsWith('type='));
   assert.deepEqual(mounts, [
     'type=bind,src=/repo/.ai-orchestrator/worktrees/TASK/attempt-1,dst=/input,readonly',
     'type=bind,src=/repo/.ai-orchestrator/graph/output-attempt/contract.json,dst=/contract.json,readonly',
-    'type=volume,dst=/workspace',
   ]);
   assert.equal(args.at(-2), image.imageId);
   assert.equal(args.at(-1), 'check-tests');
@@ -832,4 +841,23 @@ test('rejects changed dependency manifests instead of installing during a check'
     () => DOCKER_CHECKS_TESTING.verifyDependencyInputs(root, description),
     (error) => error instanceof GraphError && error.code === 'CHECK_DEPENDENCIES_DRIFT',
   );
+});
+
+test('prepared workspace seed preserves relative workspace links and refuses overwrites', (t) => {
+  const root = temporary(t, 'flowcairn-seed-');
+  const seed = path.join(root, 'seed'),
+    workspace = path.join(root, 'workspace');
+  mkdirSync(path.join(seed, 'node_modules'), { recursive: true });
+  mkdirSync(path.join(seed, 'packages/lib'), { recursive: true });
+  mkdirSync(workspace);
+  writeFileSync(path.join(seed, 'packages/lib/package.json'), '{"name":"lib"}');
+  symlinkSync('../packages/lib', path.join(seed, 'node_modules/lib'));
+  seedPreparedWorkspace({ seed, workspace });
+  writeFileSync(path.join(workspace, 'packages/lib/index.js'), 'export const value = 1;');
+  assert.equal(
+    readFileSync(path.join(workspace, 'node_modules/lib/index.js'), 'utf8'),
+    'export const value = 1;',
+  );
+  assert.equal(exists(path.join(seed, 'packages/lib/index.js')), false);
+  assert.throws(() => seedPreparedWorkspace({ seed, workspace }));
 });

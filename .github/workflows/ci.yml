@@ -34,6 +34,10 @@ jobs:
         run: npm test
       - name: Сборка интерфейса
         run: npm run build
+      - name: Собранный интерфейс совпадает с исходниками
+        run: |
+          git ls-files --error-unmatch tools/ai-graph-viewer/dist/app.js tools/ai-graph-viewer/dist/app.css tools/ai-graph-viewer/dist/index.html
+          git diff --exit-code -- tools/ai-graph-viewer/dist
       - name: Chromium для проверки интерфейса
         run: npx --no-install playwright install --with-deps chromium
       - name: Браузерные сценарии без внешнего AI

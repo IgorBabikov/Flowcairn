@@ -857,12 +857,12 @@ function intendedSecurity(input, contractFile) {
     logDriver: 'local',
     logOptions: { compress: 'false', 'max-file': '1', 'max-size': '8m' },
     tmpfs: {
-      '/tmp': 'rw,noexec,nosuid,nodev,size=67108864,uid=1000,gid=1000,mode=0700',
+      '/tmp': 'rw,noexec,nosuid,nodev,size=67108864,nr_inodes=16384,uid=1000,gid=1000,mode=0700',
+      '/workspace': 'rw,nosuid,nodev,size=1073741824,nr_inodes=131072,uid=1000,gid=1000,mode=0700',
     },
     mounts: [
       { destination: '/contract.json', rw: false, source: contractFile, type: 'bind' },
       { destination: '/input', rw: false, source: input.worktree, type: 'bind' },
-      { destination: '/workspace', rw: true, source: null, type: 'volume' },
     ],
   };
 }
@@ -934,13 +934,13 @@ function createArguments({ input, image, contractFile, labels, name }) {
     '2g',
     '--read-only',
     '--tmpfs',
-    '/tmp:rw,noexec,nosuid,nodev,size=67108864,uid=1000,gid=1000,mode=0700',
+    '/tmp:rw,noexec,nosuid,nodev,size=67108864,nr_inodes=16384,uid=1000,gid=1000,mode=0700',
     '--mount',
     `type=bind,src=${input.worktree},dst=/input,readonly`,
     '--mount',
     `type=bind,src=${contractFile},dst=/contract.json,readonly`,
-    '--mount',
-    'type=volume,dst=/workspace',
+    '--tmpfs',
+    '/workspace:rw,nosuid,nodev,size=1073741824,nr_inodes=131072,uid=1000,gid=1000,mode=0700',
     '--workdir',
     '/workspace',
     '--user',

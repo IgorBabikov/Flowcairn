@@ -31,7 +31,7 @@ function chainSnapshot(overrides = {}) {
   current.nodes = Array.from({ length: 11 }, (_, index) =>
     graphNode({
       id: `node-${index}`,
-      title: `Node ${index + 1}`,
+      title: `Этап ${index + 1}`,
       needs: index === 0 ? [] : [`node-${index - 1}`],
       status: index === 0 ? 'passed' : 'ready',
       capabilities: allDenied,
@@ -77,7 +77,7 @@ test('renders backend state, confirms a gate, and retries one operation id', asy
   expect(page.url()).not.toContain('session=');
   expect(await page.evaluate(() => sessionStorage.getItem('flowcairn.graph.session'))).toBe(token);
 
-  await page.getByRole('tab', { name: 'Evidence' }).click();
+  await page.getByRole('tab', { name: 'Результаты' }).click();
   await page.getByRole('button', { name: /Plan evidence/ }).click();
   await expect(page.getByRole('dialog')).toContainText('<script>attack()</script>');
   await expect(page.locator('dialog script')).toHaveCount(0);
@@ -87,7 +87,7 @@ test('renders backend state, confirms a gate, and retries one operation id', asy
   await page.getByRole('button', { name: 'Подтвердить план' }).click();
   const gate = page.getByRole('dialog', { name: 'Подтвердите решение' });
   await expect(gate).toContainText('workspace.source.write');
-  await gate.getByRole('checkbox', { name: /проверил scope/ }).check();
+  await gate.getByRole('checkbox', { name: /проверил границы задачи/ }).check();
   await gate.getByRole('button', { name: 'Зафиксировать решение' }).click();
 
   await expect.poll(() => fixture.calls.filter((call) => call.action === 'gate').length).toBe(1);
@@ -95,7 +95,7 @@ test('renders backend state, confirms a gate, and retries one operation id', asy
   expect(gateBody.permissions).toEqual(['workspace.source.write']);
   expect(gateBody.challenge).toBe('challenge-fixture');
 
-  await page.getByRole('button', { name: /Implementation/ }).click();
+  await page.getByRole('button', { name: /Внесение изменений/ }).click();
   await page.getByRole('button', { name: 'Запустить', exact: true }).last().click();
   await expect(page.getByRole('button', { name: 'Повторить тот же запрос' })).toBeVisible();
   await page.getByRole('button', { name: 'Повторить тот же запрос' }).click();
@@ -109,8 +109,8 @@ test('shows the registered Flowcairn task contract from the create capability', 
 }) => {
   await mockApi(page);
   await page.goto(`/#session=${token}`);
-  await page.getByRole('button', { name: 'Новый run' }).click();
-  const dialog = page.getByRole('dialog', { name: 'Новый локальный run' });
+  await page.getByRole('button', { name: 'Новый запуск' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Новый локальный запуск' });
   await expect(dialog).toContainText('flowcairn task --file task.json');
   const id = dialog.getByLabel('ID зарегистрированной задачи');
   await expect(id).toHaveAttribute('pattern', '[A-Z][A-Z0-9-]{2,40}');
@@ -125,15 +125,15 @@ test('replays a lost create response with the exact same request', async ({ page
   await page.goto(`/#session=${token}`);
   await page.getByRole('tab', { name: 'Изменения' }).click();
   await expect(page.getByText('r3', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Новый run' }).click();
+  await page.getByRole('button', { name: 'Новый запуск' }).click();
 
-  const dialog = page.getByRole('dialog', { name: 'Новый локальный run' });
+  const dialog = page.getByRole('dialog', { name: 'Новый локальный запуск' });
   await dialog.getByLabel('ID зарегистрированной задачи').fill('TASK-202');
   await dialog.getByLabel('Цель').fill('Проверить стабильный create');
   await dialog.getByLabel('Полная инструкция').fill('Создать локальный run');
-  await dialog.getByLabel('Scope').fill('tools/ai-graph-viewer');
-  await dialog.getByLabel('Acceptance, пункт на строку').fill('Запрос можно безопасно повторить');
-  await dialog.getByRole('button', { name: 'Создать run' }).click();
+  await dialog.getByLabel('Границы задачи').fill('tools/ai-graph-viewer');
+  await dialog.getByLabel('Критерии приемки, пункт на строку').fill('Запрос можно безопасно повторить');
+  await dialog.getByRole('button', { name: 'Создать запуск' }).click();
 
   await expect(dialog.getByRole('alert')).toContainText('NETWORK_UNCERTAIN');
   await dialog.getByRole('button', { name: 'Повторить тот же запрос' }).click();
@@ -158,7 +158,7 @@ test('does not let a delayed snapshot replace a newer revision', async ({ page }
 
   const held = fixture.holdNextSnapshot();
   await held.captured;
-  await page.getByRole('button', { name: /Implementation/ }).click();
+  await page.getByRole('button', { name: /Внесение изменений/ }).click();
   await page.getByRole('button', { name: 'Запустить', exact: true }).last().click();
   await expect(page.getByTestId('run-revision')).toHaveText('4');
 
@@ -177,7 +177,7 @@ test('coalesces rapid toolbar clicks before React rerenders', async ({ page }) =
   });
   await page.goto(`/#session=${token}`);
 
-  const node = page.locator('.graph-node', { hasText: 'Implementation' });
+  const node = page.locator('.graph-node', { hasText: 'Внесение изменений' });
   await node.click();
   const button = page.locator('.node-toolbar').getByRole('button', { name: 'Запустить' });
   await expect(button).toBeVisible();
@@ -241,7 +241,7 @@ test('accepts a validated replan successor and resets run-scoped state', async (
   await expect(page.getByText('r3', { exact: true })).toBeVisible();
   await page.getByRole('tab', { name: 'Обзор' }).click();
   await page.getByRole('button', { name: 'Новая версия плана' }).click();
-  const draft = page.getByRole('dialog', { name: 'Draft новой версии' });
+  const draft = page.getByRole('dialog', { name: 'Черновик новой версии' });
   await draft.getByRole('button', { name: 'Отправить на серверную проверку' }).click();
 
   await expect(page.getByTestId('plan-version')).toHaveText('2');
@@ -305,17 +305,17 @@ test('uses native modal lifecycle and keeps toolbar keyboard activation', async 
   const fixture = await mockApi(page, runnableSnapshot(), { loseFirstRunResponse: false });
   await page.goto(`/#session=${token}`);
 
-  const create = page.getByRole('button', { name: 'Новый run' });
+  const create = page.getByRole('button', { name: 'Новый запуск' });
   await create.focus();
   await create.click();
-  const createDialog = page.getByRole('dialog', { name: 'Новый локальный run' });
+  const createDialog = page.getByRole('dialog', { name: 'Новый локальный запуск' });
   await expect(createDialog).toBeVisible();
   expect(await createDialog.evaluate((element) => element.matches(':modal'))).toBe(true);
   await page.keyboard.press('Escape');
   await expect(createDialog).toHaveCount(0);
   await expect(create).toBeFocused();
 
-  await page.getByRole('button', { name: /Implementation/ }).click();
+  await page.getByRole('button', { name: /Внесение изменений/ }).click();
   const toolbarRun = page.locator('.node-toolbar').getByRole('button', { name: 'Запустить' });
   await toolbarRun.focus();
   await page.keyboard.press('Enter');
@@ -329,13 +329,13 @@ test('draft and evidence dialogs are modal, closable with Escape, and labelled',
   await page.goto(`/#session=${token}`);
 
   await page.getByRole('button', { name: 'Новая версия плана' }).click();
-  const draft = page.getByRole('dialog', { name: 'Draft новой версии' });
+  const draft = page.getByRole('dialog', { name: 'Черновик новой версии' });
   expect(await draft.evaluate((element) => element.matches(':modal'))).toBe(true);
   await expect(draft.getByRole('textbox', { name: 'JSON nodes новой версии' })).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(draft).toHaveCount(0);
 
-  await page.getByRole('tab', { name: 'Evidence' }).click();
+  await page.getByRole('tab', { name: 'Результаты' }).click();
   await page.getByRole('button', { name: /Plan evidence/ }).click();
   const evidence = page.getByRole('dialog', { name: 'Plan evidence' });
   expect(await evidence.evaluate((element) => element.matches(':modal'))).toBe(true);
@@ -373,7 +373,7 @@ test('accepts a fail-closed snapshot without revision and stops catch-up', async
   });
   await page.goto(`/#session=${token}`);
 
-  await expect(page.locator('.run-health .negative')).toHaveText('Integrity не подтверждена');
+  await expect(page.locator('.run-health .negative')).toHaveText('Целостность данных не подтверждена');
   await expect(page.getByTestId('run-revision')).toHaveText('—');
   await page.waitForTimeout(500);
   expect(fixture.snapshotReads()).toBe(2);
@@ -455,11 +455,11 @@ test('opens an eleven-node mobile graph on a readable active node and keeps fit-
   current.nodes[5] = { ...current.nodes[5], status: 'running' };
   await mockApi(page, current);
   await page.goto(`/#session=${token}`);
-  await expect(page.locator('.graph-node')).toHaveCount(11);
+  await expect(page.locator('.graph-node.status-running')).toHaveCount(1);
   await expect(page.locator('.react-flow__minimap')).toBeHidden();
-  await readableInGraph(page, 'Node 6');
+  await readableInGraph(page, 'Этап 6');
 
-  await page.getByRole('button', { name: 'Весь граф' }).click();
+  await page.getByRole('button', { name: 'Весь граф', exact: true }).click();
   await page.waitForTimeout(250);
 
   const contained = await page.evaluate(() => {
@@ -482,7 +482,7 @@ test('opens an eleven-node mobile graph on a readable active node and keeps fit-
   expect(contained).toBe(true);
 
   await page.getByRole('button', { name: 'Текущий этап' }).click();
-  await readableInGraph(page, 'Node 6');
+  await readableInGraph(page, 'Этап 6');
 });
 
 test('focuses active, waiting, failed, and completed nodes again on run switch', async ({
@@ -558,21 +558,21 @@ test('focuses active, waiting, failed, and completed nodes again on run switch',
   });
 
   await page.goto(`/#session=${token}`);
-  await readableInGraph(page, 'Node 6');
+  await readableInGraph(page, 'Этап 6');
   await page.getByRole('button', { name: /TASK-WAITING/ }).click();
-  await readableInGraph(page, 'Node 4');
+  await readableInGraph(page, 'Этап 4');
   await page.getByRole('button', { name: /TASK-FAILED/ }).click();
-  await readableInGraph(page, 'Node 5');
-  await page.getByRole('button', { name: 'Весь граф' }).click();
+  await readableInGraph(page, 'Этап 5');
+  await page.getByRole('button', { name: 'Весь граф', exact: true }).click();
   await expect
     .poll(
-      async () => (await page.locator('.graph-node', { hasText: 'Node 5' }).boundingBox())?.width,
+      async () => (await page.locator('.graph-node', { hasText: 'Этап 5' }).boundingBox())?.width,
     )
     .toBeLessThan(100);
   await page.getByRole('button', { name: 'Текущий этап' }).click();
-  await readableInGraph(page, 'Node 5');
+  await readableInGraph(page, 'Этап 5');
   await page.getByRole('button', { name: /TASK-COMPLETED/ }).click();
-  await readableInGraph(page, 'Node 11');
+  await readableInGraph(page, 'Этап 11');
 });
 
 test('polling revision and locale changes preserve the operator viewport', async ({ page }) => {
@@ -580,10 +580,10 @@ test('polling revision and locale changes preserve the operator viewport', async
   current.nodes[5] = { ...current.nodes[5], status: 'running' };
   await mockApi(page, current, { advanceAfterFirstSnapshot: true });
   await page.goto(`/#session=${token}`);
-  await readableInGraph(page, 'Node 6');
+  await readableInGraph(page, 'Этап 6');
 
-  await page.getByRole('button', { name: 'Zoom Out' }).click();
-  await page.getByRole('button', { name: 'Zoom Out' }).click();
+  await page.getByRole('button', { name: 'Отдалить' }).click();
+  await page.getByRole('button', { name: 'Отдалить' }).click();
   const viewport = page.locator('.react-flow__viewport');
   const before = await viewport.evaluate((element) => element.getAttribute('style'));
   await page.getByRole('button', { name: 'English' }).click();
@@ -650,7 +650,7 @@ test('clears an expired gate request and refreshes capabilities', async ({ page 
 
   await page.getByRole('button', { name: 'Подтвердить план' }).click();
   const gate = page.getByRole('dialog', { name: 'Подтвердите решение' });
-  await gate.getByRole('checkbox', { name: /проверил scope/ }).check();
+  await gate.getByRole('checkbox', { name: /проверил границы задачи/ }).check();
   await gate.getByRole('button', { name: 'Зафиксировать решение' }).click();
 
   const error = page.getByRole('alert');
@@ -678,7 +678,7 @@ test('renders a fail-closed snapshot when optional evidence reads fail', async (
     schemaVersion: 2,
     runId: 'run-corrupt',
     status: 'stale',
-    integrity: { valid: false, reason: 'Integrity не подтверждена' },
+    integrity: { valid: false, reason: 'Целостность данных не подтверждена' },
     nodes: [],
     edges: [],
     gates: [],
@@ -715,7 +715,7 @@ test('renders a fail-closed snapshot when optional evidence reads fail', async (
     });
   });
   await page.goto(`/#session=${token}`);
-  await expect(page.locator('.run-health .negative')).toHaveText('Integrity не подтверждена');
+  await expect(page.locator('.run-health .negative')).toHaveText('Целостность данных не подтверждена');
   await expect(page.getByRole('heading', { name: 'Граф выполнения' }).first()).toBeVisible();
   await expect(page.locator('.error-banner')).toHaveCount(0);
 });

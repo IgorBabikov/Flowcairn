@@ -27,6 +27,8 @@
   --info: #356f83;
   --shadow: 0 14px 34px rgba(65, 43, 72, 0.11);
   --flow-grid: #d6ceda;
+  --status-idle: #827487;
+  --status-waiting: var(--status-waiting-for-human);
   --status-pending: #938697;
   --status-ready: #5c2d66;
   --status-running: #287288;
@@ -55,6 +57,7 @@
   --info: #8fc9dc;
   --shadow: 0 16px 38px rgba(0, 0, 0, 0.28);
   --flow-grid: #44394a;
+  --status-idle: #c4b8c7;
   --status-pending: #c4b8c7;
   --status-ready: #d5a8de;
   --status-running: #8fc9dc;
@@ -514,16 +517,17 @@ pre {
   width: 244px;
   min-height: 132px;
   padding: 14px;
-  border: 1px solid var(--border-strong);
+  border: 2px solid var(--node-status-color);
   border-radius: 14px;
   background: var(--surface);
   color: var(--text);
-  box-shadow: 0 8px 22px rgba(65, 43, 72, 0.08);
+  text-align: start;
   cursor: pointer;
+  transition: border-color 180ms ease-out, background-color 180ms ease-out;
 }
 .graph-node.selected {
-  border-color: var(--plum);
-  box-shadow: 0 11px 28px rgba(65, 43, 72, 0.16);
+  outline: 2px solid var(--plum);
+  outline-offset: 4px;
 }
 .graph-node > strong {
   display: block;
@@ -551,7 +555,7 @@ pre {
 .node-meta {
   flex-wrap: wrap;
   margin-block-start: 12px;
-  color: var(--faint);
+  color: var(--muted);
   font-size: 0.64rem;
   font-variant-numeric: tabular-nums;
 }
@@ -1125,4 +1129,44 @@ dialog::backdrop {
   .graph-node.selected {
     outline: 2px solid Highlight;
   }
+}
+
+/* Native Node classes and Edge.animated project committed snapshot state only. */
+.graph-node:focus-visible {
+  outline: 3px solid var(--text);
+  outline-offset: 5px;
+}
+.graph-node:hover {
+  border-color: var(--node-status-color);
+}
+.graph-node.status-idle, .graph-node.status-pending, .graph-node.status-stale {
+  border-style: dashed;
+}
+.graph-node.status-uncertain { border-style: double; border-width: 3px; }
+.graph-node.status-running {
+  background: color-mix(in srgb, var(--status-running) 6%, var(--surface));
+}
+.graph-node.status-running::before {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: 0 0 14px color-mix(in srgb, var(--status-running) 35%, transparent);
+  animation: execution-glow 2.8s ease-in-out infinite alternate;
+}
+@keyframes execution-glow { from { opacity: .35; } to { opacity: .85; } }
+.status-icon { width: 20px; height: 20px; flex: 0 0 auto; color: var(--node-status-color); }
+.graph-node .node-status { color: var(--text); font-weight: 650; }
+.node-hint { display: block; margin-top: 5px; color: var(--muted); font-size: .68rem; line-height: 1.4; }
+.react-flow__edge.dependency-active .react-flow__edge-path {
+  stroke: var(--status-running);
+  animation-duration: 1.6s;
+}
+.react-flow__edge.dependency-idle .react-flow__edge-path { animation: none; }
+[data-page-hidden] .graph-node::before,
+[data-page-hidden] .react-flow__edge-path { animation-play-state: paused !important; }
+@media (prefers-reduced-motion: reduce) {
+  .graph-node.status-running::before { animation: none; opacity: .5; }
+  .react-flow__edge.animated .react-flow__edge-path { animation: none; }
 }

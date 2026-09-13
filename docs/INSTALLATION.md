@@ -8,29 +8,30 @@ Flowcairn устанавливается как инструмент разра�
 
 - Node.js версии 22 и Git доступны в терминале.
 - Проект уже является Git-репозиторием с начальным commit.
-- Используется npm или pnpm, есть lockfile и scripts для нужных проверок.
+- Используется npm или pnpm, есть lockfile и scripts для нужных проверок. Для Docker lockfile должен входить в Git-снимок проекта; игнорируемый lockfile не переносится автоматически.
 - Docker Engine работает; есть место для образа, зависимостей и временных контейнеров.
 - Вы вправе передавать выбранный код выбранному AI-провайдеру. Для рабочего репозитория сначала проверьте политику компании.
 
 Первую попытку лучше выполнить на небольшом открытом или учебном проекте. Выбирайте задачу с одним проверяемым результатом.
 
-## Установить пакет релиза
+## Установить текущую версию
 
-В каталоге проекта:
-
-```bash
-npm install --save-dev https://github.com/IgorBabikov/flowcairn/releases/download/v0.1.1/flowcairn-0.1.1.tgz
-```
-
-Для pnpm-проекта используйте его менеджер:
+В корне проекта на macOS:
 
 ```bash
-pnpm add -D https://github.com/IgorBabikov/flowcairn/releases/download/v0.1.1/flowcairn-0.1.1.tgz
+npm install --save-dev "git+https://github.com/IgorBabikov/flowcairn.git#main" --ignore-scripts
+npx --no-install flowcairn init
 ```
 
-Это tarball GitHub Release `v0.1.1`, не команда установки опубликованного npm-пакета. Проверьте имя репозитория и версию перед установкой. Если asset недоступен, не подменяйте его одноименным сторонним пакетом: проверьте [релиз](https://github.com/IgorBabikov/flowcairn/releases/tag/v0.1.1).
+На Linux вместо обычного `init` выполните `npx --no-install flowcairn init --provider openai`; без TTY добавьте `--model MODEL_ID`. Затем настройте API-ключ, как описано ниже.
 
-Дальше примеры используют `npx --no-install`: команда запускает уже установленный Flowcairn и не должна искать новый пакет в registry.
+Для pnpm используйте `pnpm add -D "git+https://github.com/IgorBabikov/flowcairn.git#main" --ignore-scripts`, затем `pnpm exec flowcairn init`.
+
+Готовый интерфейс входит в Git. Сборка при установке и lifecycle scripts не нужны. Lockfile фиксирует Git-коммит: коллеги получают его через обычный `npm ci` или принятый pnpm-процесс. Сохраняйте package.json и lockfile по правилам своего проекта.
+
+Это версия из `main`, а не новый GitHub Release и не npm registry. Старый [релиз 0.1.1](https://github.com/IgorBabikov/flowcairn/releases/tag/v0.1.1) сохранен, но не включает текущие улучшения. Не устанавливайте одноименный сторонний пакет.
+
+В обычном терминале `init` спросит точный ID вашей модели. На macOS по умолчанию используется Codex; для OpenAI API укажите `--provider openai`. Без интерактивного терминала укажите `--model` явно. Flowcairn не угадывает доступные вашему аккаунту модели и не читает глобальные настройки с секретами. Для скриптов есть `--json`.
 
 ## Выбрать AI-провайдера
 
@@ -78,7 +79,9 @@ npx --no-install flowcairn checks prepare
 
 Прочитайте `.flowcairn.json`: integration branch, package manager, context, checks, manifests и output paths должны соответствовать вашему проекту. Не помечайте исходный код как build output. [Описание полей](CONFIGURATION.md).
 
-После проверки сохраните изменения установки своим обычным Git-процессом. **До создания задачи нужен чистый checkout**: незакоммиченные изменения не должны случайно потеряться при выделении worktree. Flowcairn не делает этот commit за вас.
+Для **первой** задачи есть два пути: сохранить изменения установки в Git или явно разрешить локальный исходный снимок флагом `task --snapshot`. Снимок сохраняет текущее состояние отслеживаемых файлов; автоматического коммита нет. Новые файлы нужно перечислить через `--include-untracked`, кроме файлов установки с совпавшими хешами. Например: `--include-untracked package-lock.json`, если новый lockfile не отслеживается Git.
+
+Перед `--snapshot` проверьте `git diff` и `git status`. Снимок и граф сами по себе не разрешают AI-вызовы или запись. **Следующие задачи требуют чистого checkout**. Первый снимок не превращается в автоматический способ скрывать произвольные изменения.
 
 ## После clone уже настроенного проекта
 
@@ -122,7 +125,7 @@ npx --no-install flowcairn ui --root PROJECT --port 4330
 ```bash
 git clone https://github.com/IgorBabikov/flowcairn.git
 cd flowcairn
-npm ci
+npm ci --ignore-scripts
 npm run build
 ```
 
