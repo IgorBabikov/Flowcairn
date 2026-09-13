@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync, spawn } from 'node:child_process';
+import { createServer } from 'node:net';
 import { PassThrough } from 'node:stream';
 import {
   chmodSync,
@@ -384,23 +385,20 @@ test('first graph snapshots exact installer files with no commit, AI, binding or
   await assert.rejects(createTask(root, { ...firstTask, id: 'ORCH-NEXT' }), { code: 'DIRTY_ROOT' });
 });
 
-test('first graph requires explicit tracked snapshot and rejects foreign or modified owned untracked files', async (t) => {
+test('first graph requires explicit tracked snapshot and captures only selected untracked files', async (t) => {
   const { root } = fixture(t);
   initializeProject(root, options);
   writeFileSync(path.join(root, 'AGENTS.md'), 'Owner changes remain\n');
   await assert.rejects(createTask(root, firstTask), { code: 'DIRTY_ROOT' });
   assert.equal(existsSync(path.join(root, '.ai-orchestrator/state.json')), false);
   writeFileSync(path.join(root, 'foreign.txt'), 'Owner data\n');
-  await assert.rejects(createTask(root, firstTask, { snapshot: true }), {
-    code: 'UNTRACKED_FILES',
-  });
-  assert.equal(existsSync(path.join(root, '.ai-orchestrator/state.json')), false);
-  const snapshot = await createTask(
-    root,
-    { ...firstTask, includeUntracked: ['foreign.txt'] },
-    { snapshot: true, run: 'run-explicit-snapshot' },
-  );
+  const snapshot = await createTask(root, firstTask, { snapshot: true, run: 'run-explicit-snapshot' });
   assert.equal(snapshot.integrity.valid, true);
+  const service = await WorkflowService.open({ root });
+  const state = service.store.readRun('run-explicit-snapshot');
+  const manifest = JSON.parse(readFileSync(path.join(state.sourceBundle, 'manifest.json')));
+  assert.equal(manifest.entries.some((entry) => entry.path === 'foreign.txt'), false);
+  service.close();
   assert.equal(readFileSync(path.join(root, 'foreign.txt'), 'utf8'), 'Owner data\n');
   assert.equal(readFileSync(path.join(root, 'AGENTS.md'), 'utf8'), 'Owner changes remain\n');
   const b = fixture(t);
@@ -411,6 +409,15 @@ test('first graph requires explicit tracked snapshot and rejects foreign or modi
   );
   await assert.rejects(createTask(b.root, firstTask), { code: 'UNTRACKED_FILES' });
   assert.equal(existsSync(path.join(b.root, '.ai-orchestrator/state.json')), false);
+  const c = fixture(t);
+  initializeProject(c.root, options);
+  writeFileSync(path.join(c.root, 'foreign.txt'), 'Explicitly selected\n');
+  await createTask(c.root, { ...firstTask, includeUntracked: ['foreign.txt'] }, { snapshot: true, run: 'run-selected-untracked' });
+  const selectedService = await WorkflowService.open({ root: c.root });
+  const selectedState = selectedService.store.readRun('run-selected-untracked');
+  const selectedManifest = JSON.parse(readFileSync(path.join(selectedState.sourceBundle, 'manifest.json')));
+  assert.equal(selectedManifest.entries.some((entry) => entry.path === 'foreign.txt'), true);
+  selectedService.close();
 });
 
 test('first graph refuses sensitive untracked files even when explicitly requested', async (t) => {
@@ -445,7 +452,7 @@ test('mutation after source capture is refused before registry or run is created
   assert.deepEqual(opened.store.listRunIds(), []);
 });
 
-test('actual npm tarball install provides executable bin and offline npx init/task in a monorepo', (t) => {
+test('actual npm tarball install provides executable bin and offline npx init/task in a monorepo', async (t) => {
   const { root, git } = fixture(t);
   const npm = path.resolve(
     path.dirname(process.execPath),
@@ -553,6 +560,27 @@ test('actual npm tarball install provides executable bin and offline npx init/ta
   assert.equal(existsSync(path.join(root, '.flowcairn.json')), false);
   const installed = run('init', '--provider', 'openai', '--model', options.model, '--json');
   assert.equal(installed.status, 0, installed.stderr);
+  const reservation = createServer();
+  await new Promise((resolve) => reservation.listen(0, '127.0.0.1', resolve));
+  const port = reservation.address().port;
+  await new Promise((resolve) => reservation.close(resolve));
+  const viewer = spawn(path.join(root, 'node_modules/.bin/flowcairn'), ['--no-open', '--port', String(port)], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
+  const closed = new Promise((resolve) => viewer.once('close', resolve));
+  try {
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(Error('Bare CLI did not start the installed viewer')), 10000);
+      let output = '';
+      viewer.stdout.on('data', (chunk) => {
+        output += chunk;
+        if (output.includes(`http://127.0.0.1:${port}/#session=`)) { clearTimeout(timer); resolve(); }
+      });
+      viewer.once('error', (error) => { clearTimeout(timer); reject(error); });
+      viewer.once('close', () => { clearTimeout(timer); reject(Error('Viewer exited before startup')); });
+    });
+    const page = await fetch(`http://127.0.0.1:${port}/`);
+    assert.equal(page.status, 200);
+    assert.match(await page.text(), /<html/i);
+  } finally { viewer.kill('SIGTERM'); await closed; }
   assert.deepEqual(JSON.parse(installed.stdout).result.profile.manifests, [
     'package.json',
     'package-lock.json',

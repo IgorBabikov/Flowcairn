@@ -50,6 +50,9 @@ function contextFixture(t) {
     writeFileSync(file, `${relative}\n`);
   }
   writeFileSync(
+    path.join(root, 'package.json'), JSON.stringify({ name: 'checks-fixture', version: '1.0.0' }),
+  );
+  writeFileSync(
     path.join(root, '.flowcairn.json'),
     JSON.stringify({
       version: 1,
@@ -354,11 +357,11 @@ test('container rejects source hash drift and symlinks', (t) => {
 test('container check registry maps only fixed pnpm scripts', () => {
   assert.deepEqual(registeredContainerCheck('check-typecheck', { packageManager: 'pnpm' }), {
     executable: '/usr/local/bin/node',
-    args: ['/opt/corepack/v1/pnpm/11.8.0/bin/pnpm.cjs', 'run', 'typecheck'],
+    args: ['/opt/flowcairn/package-manager.cjs', 'run', 'typecheck'],
   });
   assert.deepEqual(registeredContainerCheck('check-build', { packageManager: 'pnpm' }), {
     executable: '/usr/local/bin/node',
-    args: ['/opt/corepack/v1/pnpm/11.8.0/bin/pnpm.cjs', 'run', 'build'],
+    args: ['/opt/flowcairn/package-manager.cjs', 'run', 'build'],
   });
   assert.throws(
     () => registeredContainerCheck('ai-implement', { packageManager: 'pnpm' }),

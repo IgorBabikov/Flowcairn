@@ -3,18 +3,30 @@ FROM ${BASE_IMAGE}
 
 USER root
 ARG PACKAGE_MANAGER
+ARG PACKAGE_MANAGER_VERSION
 ENV COREPACK_HOME=/opt/corepack
 RUN apk add --no-cache git \
-  && mkdir -p /opt/corepack \
+  && mkdir -p /opt/corepack /opt/flowcairn \
   && corepack enable \
-  && corepack prepare pnpm@11.8.0 --activate \
+  && if [ "$PACKAGE_MANAGER" = "npm" ]; then \
+       if [ "$PACKAGE_MANAGER_VERSION" != "bundled" ]; then test "$(npm --version)" = "$PACKAGE_MANAGER_VERSION"; fi \
+       && ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /opt/flowcairn/package-manager.cjs; \
+     elif [ "$PACKAGE_MANAGER" = "pnpm" ]; then \
+       corepack prepare "pnpm@$PACKAGE_MANAGER_VERSION" --activate \
+       && ln -s "/opt/corepack/v1/pnpm/$PACKAGE_MANAGER_VERSION/bin/pnpm.cjs" /opt/flowcairn/package-manager.cjs; \
+     elif [ "$PACKAGE_MANAGER" = "yarn" ]; then \
+       corepack prepare "yarn@$PACKAGE_MANAGER_VERSION" --activate \
+       && ln -s "/opt/corepack/v1/yarn/$PACKAGE_MANAGER_VERSION/yarn.js" /opt/flowcairn/package-manager.cjs; \
+     else exit 1; fi \
+  && test -f /opt/flowcairn/package-manager.cjs \
   && chmod -R a+rX /opt/corepack
 
 WORKDIR /opt/flowcairn/workspace
 COPY --chown=node:node manifests/ ./
 # Only dependency manifests enter this explicit networked preparation. Lifecycle scripts stay off.
-RUN if [ "$PACKAGE_MANAGER" = "npm" ]; then npm ci --ignore-scripts --no-audit --no-fund; \
-    elif [ "$PACKAGE_MANAGER" = "pnpm" ]; then pnpm install --frozen-lockfile --ignore-scripts; \
+RUN if [ "$PACKAGE_MANAGER" = "npm" ]; then node /opt/flowcairn/package-manager.cjs ci --ignore-scripts --no-audit --no-fund; \
+    elif [ "$PACKAGE_MANAGER" = "pnpm" ]; then node /opt/flowcairn/package-manager.cjs install --frozen-lockfile --ignore-scripts; \
+    elif [ "$PACKAGE_MANAGER" = "yarn" ]; then YARN_NODE_LINKER=node-modules YARN_ENABLE_GLOBAL_CACHE=false node /opt/flowcairn/package-manager.cjs install --immutable --mode=skip-build; \
     else exit 1; fi
 
 COPY --chown=root:root container-check.mjs /opt/flowcairn/container-check.mjs
