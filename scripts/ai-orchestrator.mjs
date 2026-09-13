@@ -97,15 +97,15 @@ function nonNegativeInteger(options, key) {
 /**
  * @param {string} command
  * @param {string[]} args
- * @param {{cwd?: string, timeout?: number, allowFailure?: boolean}} options
+ * @param {{cwd?: string, timeout?: number, allowFailure?: boolean, env?: Record<string, string>}} options
  */
-function run(command, args, { cwd, timeout = 120_000, allowFailure = false } = {}) {
+function run(command, args, { cwd, timeout = 120_000, allowFailure = false, env } = {}) {
   const result = spawnSync(command, args, {
     cwd,
     encoding: 'utf8',
     timeout,
     maxBuffer: 20 * 1024 * 1024,
-    env: { ...process.env, CI: process.env.CI ?? 'true' },
+    env: env ?? { ...process.env, CI: process.env.CI ?? 'true' },
     shell: false,
   });
   const output = {
@@ -439,6 +439,28 @@ function stringArray(value, label, { nonEmpty = false } = {}) {
   });
 }
 
+/** Legacy task data selects only these inert host checks, never a program or shell. */
+function registeredHostCheck(command, scope) {
+  if (Array.isArray(command) && command.length === 3) {
+    if (command[0] === '/usr/bin/git' && command[1] === 'diff' && command[2] === '--check')
+      return ['/usr/bin/git', 'diff', '--check'];
+    if (
+      command[0] === '/bin/test' &&
+      command[1] === '-f' &&
+      typeof command[2] === 'string' &&
+      !/[\0\r\n]/.test(command[2])
+    ) {
+      const file = safeRelativePath(command[2], 'check path');
+      if (scope.some((prefix) => file === prefix || file.startsWith(`${prefix}/`)))
+        return ['/bin/test', '-f', file];
+    }
+  }
+  throw new CliError(
+    'CHECK_NOT_ALLOWED',
+    'Разрешены только git diff --check и проверка существования файла внутри scope. Произвольные команды из JSON не исполняются. Тесты и сборку запускайте через зарегистрированные проверки Graph.',
+  );
+}
+
 function validateTask(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     throw new CliError('INVALID_SPEC', 'Each task spec must be an object');
@@ -474,20 +496,7 @@ function validateTask(raw) {
   if (!Array.isArray(raw.checks) || raw.checks.length === 0) {
     throw new CliError('INVALID_SPEC', 'checks must contain at least one argv array');
   }
-  const checks = raw.checks.map((command, commandIndex) => {
-    if (!Array.isArray(command) || command.length === 0) {
-      throw new CliError('INVALID_SPEC', `checks[${commandIndex}] must be a non-empty argv array`);
-    }
-    return command.map((argument, argumentIndex) => {
-      if (typeof argument !== 'string' || (argumentIndex === 0 && argument === '')) {
-        throw new CliError(
-          'INVALID_SPEC',
-          `checks[${commandIndex}][${argumentIndex}] must be a string`,
-        );
-      }
-      return argument;
-    });
-  });
+  const checks = raw.checks.map((command) => registeredHostCheck(command, scope));
   if (typeof raw.model !== 'string' || raw.model.trim() === '') {
     throw new CliError('INVALID_SPEC', 'model must be a non-empty string');
   }
@@ -1499,6 +1508,9 @@ function runChecks(root, options) {
     const state = readState(root);
     assertOwner(state, owner);
     const task = getTask(state, required(options, 'task'));
+    if (!Array.isArray(task.checks) || task.checks.length === 0)
+      throw new CliError('CHECK_NOT_ALLOWED', 'Нет зарегистрированных проверок для выполнения.');
+    const commands = task.checks.map((command) => registeredHostCheck(command, task.scope));
     const attempt = getAttempt(task, required(options, 'attempt'));
     if (attempt !== latestAttempt(task))
       throw new CliError('STALE_ATTEMPT', 'Checks require the latest task attempt');
@@ -1535,12 +1547,21 @@ function runChecks(root, options) {
     atomicWrite(root, state);
     const logDirectory = path.join(pathsFor(root).logs, task.id.toLowerCase());
     mkdirSync(logDirectory, { recursive: true, mode: 0o700 });
-    for (let index = 0; index < task.checks.length; index += 1) {
-      const argv = task.checks[index];
+    for (let index = 0; index < commands.length; index += 1) {
+      const argv = commands[index];
       const result = run(argv[0], argv.slice(1), {
         cwd: target.worktree,
         timeout: task.checkTimeoutMs,
         allowFailure: true,
+        env: {
+          PATH: '/usr/bin:/bin',
+          HOME: '/var/empty',
+          CI: 'true',
+          LC_ALL: 'C',
+          GIT_CONFIG_NOSYSTEM: '1',
+          GIT_CONFIG_GLOBAL: '/dev/null',
+          GIT_OPTIONAL_LOCKS: '0',
+        },
       });
       const logPath = path.join(
         logDirectory,
