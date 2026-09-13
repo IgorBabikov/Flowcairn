@@ -148,6 +148,7 @@ for (const verdict of ['fail', 'uncertain']) test(`planning ${verdict} never pro
   const approved = await f.approve(f.snapshot);
   const planned = await f.service.command(approved.runId, 'run', request(approved));
   assert.equal(planned.status, verdict === 'fail' ? 'failed' : 'uncertain');
+  assert.equal(planned.nodes.find((node) => node.id === 'accept-result').reason, `Ожидается plan-task: ${verdict === 'fail' ? 'failed' : 'uncertain'}`);
   assert.equal(planned.nodes.find((n) => n.id === 'plan-task').capabilities.retry.allowed, false);
   if (verdict === 'fail') {
     assert.equal(planned.capabilities.requestReplan.label, 'Повторить планирование');

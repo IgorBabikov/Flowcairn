@@ -903,6 +903,10 @@ export class WorkflowService {
     const nodes = plan.nodes.map((definition) => {
       const node = state.nodes[definition.id],
         action = { kind: definition.success.kind };
+      const blockedDependency = definition.needs.find((id) => state.nodes[id].status !== 'passed');
+      const reason = node.status === 'pending' && blockedDependency
+        ? `Ожидается ${blockedDependency}: ${state.nodes[blockedDependency].status}`
+        : node.reason;
       return {
         id: definition.id,
         title: sanitizeText(definition.title),
@@ -918,7 +922,7 @@ export class WorkflowService {
         startedAt: node.startedAt,
         finishedAt: node.finishedAt,
         durationMs: node.durationMs,
-        reason: node.reason ? sanitizeText(node.reason) : null,
+        reason: reason ? sanitizeText(reason) : null,
         receiptIds: node.receipts,
         artifacts: node.artifacts.map((hash) => this.#artifactMetadata(hash)),
         changedFiles: node.changedFiles,
