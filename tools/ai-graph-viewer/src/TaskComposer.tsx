@@ -77,9 +77,16 @@ export function TaskComposer({ context, busy, pending, error, onSubmit, onRetry,
         </details>}
         {!scopeValid && <p role="status">Выберите области задачи: от 1 до 32.</p>}
         {bootstrap?.required && <section className="bootstrap-context" aria-label="Исходный снимок">
-          <details>
+          {!snapshotConfirmed && <p id="snapshot-consent-hint" role="status">Чтобы составить план, подтвердите исходный снимок изменений ниже.</p>}
+          <details open>
             <summary>Изменения перед началом работы</summary>
             {bootstrap.changedPaths.length > 0 && <ul>{bootstrap.changedPaths.map(path => <li key={path}>{path}</li>)}</ul>}
+            {!!bootstrap.requiredUntracked?.length && <>
+              <p>Служебные файлы установки входят в снимок обязательно:</p>
+              <ul aria-label="Обязательные файлы">{bootstrap.requiredUntracked.map(file => <li key={file.path}>
+                <span>{file.path}</span> · <code title={file.hash}>{file.hash.slice(0, 12)}</code>
+              </li>)}</ul>
+            </>}
             {bootstrap.untrackedCandidates.length > 0 && <>
               <p>Новые файлы: выберите только те, которые относятся к задаче.</p>
               <div className="scope-options">{bootstrap.untrackedCandidates.map(path => <label className="confirmation" key={path}>
@@ -103,7 +110,7 @@ export function TaskComposer({ context, busy, pending, error, onSubmit, onRetry,
         </div>}
         <footer>
           <span role="status">{busy ? 'Готовим задачу…' : 'Изменения начнутся после вашего решения.'}</span>
-          <button className="button primary" type="submit" disabled={busy || pending || !allowed || !prompt.trim() || !scopeValid || !snapshotConfirmed}>
+          <button className="button primary" type="submit" aria-describedby={!snapshotConfirmed ? 'snapshot-consent-hint' : undefined} disabled={busy || pending || !allowed || !prompt.trim() || !scopeValid || !snapshotConfirmed}>
             {busy ? 'Готовим задачу…' : 'Составить план'}
           </button>
         </footer>

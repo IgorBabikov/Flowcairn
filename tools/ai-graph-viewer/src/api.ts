@@ -122,7 +122,9 @@ export const api = {
     if (body.bootstrap && (typeof body.bootstrap.required !== 'boolean' ||
         typeof body.bootstrap.snapshotHash !== 'string' ||
         !Array.isArray(body.bootstrap.changedPaths) || !body.bootstrap.changedPaths.every(path => typeof path === 'string') ||
-        !Array.isArray(body.bootstrap.untrackedCandidates) || !body.bootstrap.untrackedCandidates.every(path => typeof path === 'string'))) {
+        !Array.isArray(body.bootstrap.untrackedCandidates) || !body.bootstrap.untrackedCandidates.every(path => typeof path === 'string') ||
+        (body.bootstrap.requiredUntracked !== undefined && (!Array.isArray(body.bootstrap.requiredUntracked) ||
+          !body.bootstrap.requiredUntracked.every(file => file && typeof file.path === 'string' && typeof file.hash === 'string'))))) {
       throw { code: 'INVALID_PROJECT', message: 'Список изменений поврежден. Обновите контекст.', retryable: true } satisfies ApiError;
     }
     return body;

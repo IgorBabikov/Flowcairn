@@ -97,13 +97,19 @@ test('large projects can narrow backend candidates without broadening write perm
 
 
 test('dirty first install requires exact snapshot consent and explicit new-file selection', async ({page}) => {
-  const context = {...projectContext, bootstrap: {firstTask:true, required:true, changedPaths:['package.json', 'AGENTS.md'], untrackedCandidates:['src/new.ts'], snapshotHash:'c'.repeat(64)}};
+  const context = {...projectContext, bootstrap: {firstTask:true, required:true, changedPaths:['package.json', 'AGENTS.md'], untrackedCandidates:['src/new.ts'], requiredUntracked:[{path:'.flowcairn.json', hash:'d'.repeat(64)}], snapshotHash:'c'.repeat(64)}};
   const fixture = await mockApi(page, snapshot(), {emptyUntilIntake:true, projectContext:context});
   await page.goto(`/#session=${token}`);
   await page.getByLabel('Задача', {exact:true}).fill('Исправить поиск');
   await expect(page.getByRole('button', {name:'Составить план'})).toBeDisabled();
-  await page.getByText('Изменения перед началом работы').click();
+  await expect(page.getByText('Чтобы составить план, подтвердите исходный снимок изменений ниже.')).toBeVisible();
+  await expect(page.getByRole('checkbox', {name:'Включить перечисленные изменения в исходный снимок'})).toBeVisible();
   await expect(page.getByRole('region', {name:'Исходный снимок'})).toContainText('package.json');
+  const mandatory = page.getByRole('list', {name:'Обязательные файлы'});
+  await expect(mandatory).toBeVisible();
+  await expect(mandatory).toContainText('.flowcairn.json');
+  await expect(mandatory).toContainText('dddddddddddd');
+  await expect(page.getByRole('checkbox', {name:'.flowcairn.json', exact:true})).toHaveCount(0);
   const file = page.getByRole('checkbox', {name:'src/new.ts', exact:true});
   await expect(file).not.toBeChecked();
   const consent = page.getByRole('checkbox', {name:'Включить перечисленные изменения в исходный снимок'});

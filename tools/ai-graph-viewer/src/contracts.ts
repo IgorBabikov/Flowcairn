@@ -275,6 +275,7 @@ export interface BootstrapContext {
   required: boolean;
   changedPaths: string[];
   untrackedCandidates: string[];
+  requiredUntracked?: Array<{ path: string; hash: string }>;
   snapshotHash: string;
 }
 export interface IntakeOptions {
