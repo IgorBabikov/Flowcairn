@@ -71,6 +71,9 @@ const reasons: Record<string, string> = {
   PROJECT_PROFILE_INVALID: 'Настройки проекта не прошли проверку',
   LOCAL_OPENAI_WORKER_READY_REAL_AI_UNVERIFIED:
     'Исполнитель настроен; реальный запуск AI еще не проверен',
+  analysis: 'Анализ задачи',
+  review: 'Ревью изменений',
+  handoff: 'Подготовка результата',
   checks: 'Проверка',
   implementation: 'Внесение изменений',
   ai: 'AI-этап',
