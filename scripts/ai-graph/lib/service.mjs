@@ -485,7 +485,8 @@ export class WorkflowService {
       parentPlanHash,
     };
     const compiled = (stage === 'planning' ? compilePlanningPlan : compilePlan)(task, context).plan;
-    const proposal = draft ? { ...compiled, nodes: draft.nodes, skills: context.skills.filter((skill) => draft.nodes.some((node) => node.skills.includes(skill.id))) } : compiled;
+    const staged = stage ? { ...compiled, stage } : compiled;
+    const proposal = draft ? { ...staged, nodes: draft.nodes, skills: context.skills.filter((skill) => draft.nodes.some((node) => node.skills.includes(skill.id))) } : staged;
     const validated = validatePlan(proposal, task, context),
       plan = validated.plan;
     const planHash = this.store.putObject('plans', plan);

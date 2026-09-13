@@ -169,6 +169,9 @@ test('review failure creates a bounded new fix version with full findings, fresh
   s = await f.service.command(s.runId, 'replan', request(s));
   assert.equal(s.phase, 'execution');
   assert.equal(s.planVersion, 3);
+  const fixedPlan = f.service.plan(s.runId);
+  assert.equal(fixedPlan.stage, 'execution');
+  assert.equal(s.nodes.filter((node) => node.action.id === 'ai-implement').length, 2, 'fix preserves semantic task steps');
   assert.equal(f.service.store.readRun(previousRunId).planHash, implementationHash);
   assert.equal(s.nodes.find((n) => n.action.id === 'check-tests').status, 'pending');
   assert.equal(s.nodes.every((n) => n.attempt === 0), true);
