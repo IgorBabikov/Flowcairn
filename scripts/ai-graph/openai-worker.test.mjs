@@ -309,7 +309,7 @@ test('OpenAI payload uses canonical trailing-slash scope/deny boundaries and com
     reviewBundle: { content, bytes: Buffer.byteLength(content), hash: hash(content) },
     outputPath,
     toolchain: { node: process.execPath, digest: 'a'.repeat(64) },
-    dependencyToolchain: { hash: 'b'.repeat(64) },
+    dependencyToolchain: { dependencyPaths: [], hash: 'b'.repeat(64) },
     profile,
   };
   for (const readScope of ['src', 'src/']) {

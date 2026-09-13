@@ -576,8 +576,21 @@ function makeAiCommand({
   }
 }
 
-function selectedSourceContext(worktree, node, task, profile) {
-  const snapshot = fingerprintWorkspace(worktree, { outputPaths: profile.outputPaths });
+function sourceFingerprint(worktree, profile, dependencyToolchain = { dependencyPaths: [] }) {
+  // Callers obtain dependencyToolchain from verifyToolchain; dependency links are checked there.
+  return fingerprintWorkspace(worktree, {
+    outputPaths: [...new Set([...profile.outputPaths, ...dependencyToolchain.dependencyPaths])],
+  });
+}
+
+function instructionDenials(worktree, node, profile, dependencyToolchain) {
+  return sourceFingerprint(worktree, profile, dependencyToolchain).files
+    .filter((file) => isInstructionPath(file.path) && !node.resources.reads.includes(file.path))
+    .map((file) => file.path);
+}
+
+function selectedSourceContext(worktree, node, task, profile, dependencyToolchain = { dependencyPaths: [] }) {
+  const snapshot = sourceFingerprint(worktree, profile, dependencyToolchain);
   const files = snapshot.files.filter(
     (file) =>
       node.resources.reads.some((scope) => isWithinDeclaredPath(file.path, scope)) &&
@@ -632,7 +645,7 @@ function makeOpenAiCommand({
       fail('AI_AUTH_REQUIRED', 'Задайте FLOWCAIRN_OPENAI_API_KEY');
     reviewFile = reviewBundle ? createReviewEvidenceFile(outputPath, reviewBundle) : null;
     if (reviewFile) verifyReviewEvidenceFile(reviewFile);
-    const source = selectedSourceContext(worktree, node, task, profile);
+    const source = selectedSourceContext(worktree, node, task, profile, dependencyToolchain);
     const model =
       node.action.id === 'ai-review'
         ? (profile.ai.reviewModel ?? profile.ai.model)
@@ -938,7 +951,7 @@ export async function runRegisteredAction({
     ...input,
     profile,
     instructionDenials: profile.ai.provider === 'codex'
-      ? fingerprintWorkspace(allocation.worktreePath, { outputPaths: profile.outputPaths }).files.filter((file) => isInstructionPath(file.path) && !node.resources.reads.includes(file.path)).map((file) => file.path)
+      ? instructionDenials(allocation.worktreePath, input.node, profile, dependencyToolchain)
       : [],
     worktree: allocation.worktreePath,
     outputPath: allocation.outputPath,
@@ -1363,6 +1376,7 @@ export const RUNNER_TESTING = Object.freeze({
   makeAiCommand,
   makeOpenAiCommand,
   selectedSourceContext,
+  instructionDenials,
   discoverCodex,
   cleanupPrepared,
 });
