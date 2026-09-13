@@ -4,6 +4,8 @@ import {
   Controls,
   Handle,
   MiniMap,
+  MarkerType,
+  useUpdateNodeInternals,
   NodeToolbar,
   Position,
   ReactFlow,
@@ -14,6 +16,7 @@ import {
 } from '@xyflow/react';
 import { api, sessionToken, watchRevisions } from './api';
 import { humanText, nodeTitle, statusHint, StatusIcon } from './presentation';
+import { graphLayout } from './graph-layout';
 import type {
   ApiError,
   Artifact,
@@ -351,6 +354,8 @@ function relevantNodeId(snapshot: Snapshot): string | null {
 type GraphNodeData = GraphNodeSnapshot &
   Record<string, unknown> & {
     locale: Locale;
+    sourcePosition: Position;
+    targetPosition: Position;
     selected: boolean;
     onOpen: () => void;
     onAction: (name: 'run' | 'retry' | 'rerun-check' | 'recover') => void;
@@ -381,6 +386,10 @@ function ActionButton({
 }
 
 function GraphNodeCard({ data }: NodeProps<Node<GraphNodeData, 'operator'>>) {
+  const updateNodeInternals = useUpdateNodeInternals();
+  useEffect(() => {
+    updateNodeInternals(data.id);
+  }, [data.id, data.sourcePosition, data.targetPosition, updateNodeInternals]);
   const labels = COPY[data.locale];
   const actions: Array<['run' | 'retry' | 'rerun-check' | 'recover', CapabilityName, string]> = [
     ['run', 'run', labels.run],
@@ -428,7 +437,7 @@ function GraphNodeCard({ data }: NodeProps<Node<GraphNodeData, 'operator'>>) {
           ) : null;
         })}
       </NodeToolbar>
-      <Handle type="target" position={Position.Left} isConnectable={false} />
+      <Handle type="target" position={data.targetPosition} isConnectable={false} />
       <div className="node-heading">
         <StatusIcon status={data.status} />
         <span className="node-mode">{data.mode === 'write' ? labels.write : labels.read}</span>
@@ -445,7 +454,7 @@ function GraphNodeCard({ data }: NodeProps<Node<GraphNodeData, 'operator'>>) {
           {data.receiptIds.length} {data.locale === 'ru' ? 'отчетов' : 'receipts'}
         </span>
       </div>
-      <Handle type="source" position={Position.Right} isConnectable={false} />
+      <Handle type="source" position={data.sourcePosition} isConnectable={false} />
     </article>
   );
 }
@@ -459,38 +468,22 @@ function layoutNodes(
   onOpen: (id: string) => void,
   onAction: (name: Parameters<GraphNodeData['onAction']>[0], nodeId: string) => void,
 ): Array<Node<GraphNodeData, 'operator'>> {
-  const levels = new Map<string, number>();
+  const placements = graphLayout(snapshot.nodes);
   const byId = new Map(snapshot.nodes.map((node) => [node.id, node]));
-  const levelOf = (id: string, visiting = new Set<string>()): number => {
-    if (levels.has(id)) return levels.get(id)!;
-    if (visiting.has(id)) return 0;
-    const node = byId.get(id);
-    if (!node || node.needs.length === 0) return 0;
-    visiting.add(id);
-    const level = Math.max(...node.needs.map((need) => levelOf(need, visiting))) + 1;
-    visiting.delete(id);
-    levels.set(id, level);
-    return level;
-  };
-  snapshot.nodes.forEach((node) => levels.set(node.id, levelOf(node.id)));
-  const rows = new Map<number, GraphNodeSnapshot[]>();
-  snapshot.nodes.forEach((node) =>
-    rows.set(levels.get(node.id) ?? 0, [...(rows.get(levels.get(node.id) ?? 0) ?? []), node]),
-  );
-  return snapshot.nodes.map((item) => {
-    const level = levels.get(item.id) ?? 0;
-    const peers = rows.get(level) ?? [item];
-    const index = peers.findIndex((node) => node.id === item.id);
+  return Array.from(placements, ([id, placement]) => {
+    const item = byId.get(id)!;
     return {
       id: item.id,
       type: 'operator',
       className: `execution-node status-${item.status}`,
       style: { '--node-status-color': `var(--status-${item.status})` } as React.CSSProperties,
-      position: { x: level * 310, y: index * 190 - (peers.length - 1) * 95 },
+      ...placement,
       draggable: false,
       selectable: true,
       data: {
         ...item,
+        sourcePosition: placement.sourcePosition,
+        targetPosition: placement.targetPosition,
         locale,
         selected: selectedNodeId === item.id,
         onOpen: () => onOpen(item.id),
@@ -845,6 +838,8 @@ export function App() {
       );
       return {
         ...edge,
+        type: 'smoothstep',
+        markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16 },
         animated: active,
         className: active ? 'dependency-active' : 'dependency-idle',
         style: { strokeWidth: active ? 2.5 : 1.5 },
@@ -1260,9 +1255,13 @@ export function App() {
                 elementsSelectable
                 fitView
                 fitViewOptions={{
-                  ...(currentGraphNodeId ? { nodes: [{ id: currentGraphNodeId }] } : {}),
-                  padding: 0.32,
-                  minZoom: 0.9,
+                  ...(window.matchMedia('(max-width: 720px)').matches && currentGraphNodeId
+                    ? {
+                        nodes: [{ id: currentGraphNodeId }],
+                        minZoom: 0.9,
+                        padding: 0.32,
+                      }
+                    : { minZoom: 0.08, padding: 0.14 }),
                   maxZoom: 1,
                 }}
                 maxZoom={1.35}

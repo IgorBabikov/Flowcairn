@@ -530,7 +530,10 @@ pre {
   outline-offset: 4px;
 }
 .graph-node > strong {
-  display: block;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
   margin-block: 12px 6px;
   font-size: 0.9rem;
   line-height: 1.25;

@@ -485,9 +485,10 @@ test('opens an eleven-node mobile graph on a readable active node and keeps fit-
   await readableInGraph(page, 'Этап 6');
 });
 
-test('focuses active, waiting, failed, and completed nodes again on run switch', async ({
+test('mobile focuses active, waiting, failed, and completed nodes again on run switch', async ({
   page,
 }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
   const active = chainSnapshot({
     runId: 'run-active',
     activeNodeId: 'node-5',
@@ -580,6 +581,7 @@ test('polling revision and locale changes preserve the operator viewport', async
   current.nodes[5] = { ...current.nodes[5], status: 'running' };
   await mockApi(page, current, { advanceAfterFirstSnapshot: true });
   await page.goto(`/#session=${token}`);
+  await page.getByRole('button', { name: 'Текущий этап', exact: true }).click();
   await readableInGraph(page, 'Этап 6');
 
   await page.getByRole('button', { name: 'Отдалить' }).click();
