@@ -34,6 +34,7 @@ import type {
   ProjectContext,
   Snapshot,
   IntakeInput,
+  IntakeOptions,
 } from './contracts';
 
 type Locale = 'ru' | 'en';
@@ -1038,13 +1039,13 @@ export function App() {
     });
   }
 
-  async function createRun(prompt: string) {
+  async function createRun(prompt: string, options: IntakeOptions) {
     if (!project?.capabilities.intake.allowed || inFlightRef.current) return;
     const existing = pending?.kind === 'create' ? pending : null;
     const id = operationId('intake');
     const operation: PendingCreateOperation = existing ?? {
       kind: 'create', key: 'create', operationId: id,
-      input: { prompt, operationId: id, contextHash: project.contextHash },
+      input: { prompt, operationId: id, contextHash: project.contextHash, ...options },
     };
     await sendOperation(operation);
   }
@@ -1055,6 +1056,9 @@ export function App() {
     context={project ? {
       name: project.name,
       instructions: project.contextPaths,
+      checks: project.checks,
+      scopeCandidates: project.scopeCandidates,
+      bootstrap: project.bootstrap,
       disclosure: `Планировщик: ${project.ai.provider ?? 'не настроен'}${project.ai.model ? ` · ${project.ai.model}` : ''}. Запрос к AI требует отдельного согласия на данные и возможную стоимость.`,
       capability: project.capabilities.intake,
     } : null}
@@ -1404,6 +1408,7 @@ export function App() {
         key={gate?.challenge ?? 'closed-gate'}
         ref={gateDialog}
         gate={gate}
+        planNodes={snapshot?.planHash === gate?.planHash ? snapshot?.nodes ?? [] : []}
         locale={locale}
         busy={busy}
         node={gate ? (snapshot?.nodes.find((node) => node.id === gate.nodeId) ?? null) : null}
@@ -1957,17 +1962,20 @@ const GateDialog = React.forwardRef<
   {
     gate: GateSnapshot | null;
     node: GraphNodeSnapshot | null;
+    planNodes: GraphNodeSnapshot[];
     locale: Locale;
     busy: boolean;
     onClose: () => void;
     onSubmit: (decision: 'approve' | 'accept' | 'reject', reason: string) => void;
   }
->(function GateDialog({ gate, node, locale, busy, onClose, onSubmit }, ref) {
+>(function GateDialog({ gate, node, planNodes, locale, busy, onClose, onSubmit }, ref) {
   const labels = COPY[locale];
   const [confirmed, setConfirmed] = useState(false);
   const [reject, setReject] = useState(false);
   const [reason, setReason] = useState('');
   if (!gate) return <dialog ref={ref} />;
+  const skills = [...new Set(planNodes.flatMap(item => item.skills.map(skill => `${skill.id} · ${skill.hash.slice(0, 12)}`)))];
+  const checks = planNodes.filter(item => item.action.kind === 'checks');
   const decision = reject ? 'reject' : gate.type === 'accept-result' ? 'accept' : 'approve';
   const capability = getCapability(
     node?.capabilities ?? {},
@@ -2011,6 +2019,10 @@ const GateDialog = React.forwardRef<
           <dd>{gate.readPaths?.join('\n') || labels.none}</dd>
           <dt>{labels.permissions}</dt>
           <dd>{gate.requiredPermissions.join('\n') || labels.none}</dd>
+          <dt>{labels.skills}</dt>
+          <dd>{skills.join('\n') || labels.none}</dd>
+          <dt>{labels.checks}</dt>
+          <dd>{checks.map(item => `${nodeTitle(item, locale)} (${item.action.id})`).join('\n') || (locale === 'ru' ? 'В этой версии плана не указаны' : 'Not specified in this plan')}</dd>
           <dt>{labels.risks}</dt>
           <dd>{gate.risks.join('\n')}</dd>
           <dt>{labels.evidence}</dt>

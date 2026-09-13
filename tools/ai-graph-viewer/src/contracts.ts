@@ -270,7 +270,21 @@ export function isSnapshot(value: unknown): value is Snapshot {
   );
 }
 
+export interface BootstrapContext {
+  firstTask: boolean;
+  required: boolean;
+  changedPaths: string[];
+  untrackedCandidates: string[];
+  snapshotHash: string;
+}
+export interface IntakeOptions {
+  scope?: string[];
+  snapshot?: true;
+  includeUntracked?: string[];
+  snapshotHash?: string;
+}
 export interface ProjectContext {
+  bootstrap?: BootstrapContext;
   schemaVersion: 2;
   name: string;
   contextHash: string;
@@ -280,7 +294,7 @@ export interface ProjectContext {
   ai: { provider: string | null; model: string | null };
   capabilities: { intake: Capability };
 }
-export interface IntakeInput {
+export interface IntakeInput extends IntakeOptions {
   prompt: string;
   operationId: string;
   contextHash: string;

@@ -113,9 +113,17 @@ export const api = {
     const body = await requestJson<ProjectContext>('/api/project');
     if (!body || body.schemaVersion !== 2 || typeof body.name !== 'string' ||
         typeof body.contextHash !== 'string' || !Array.isArray(body.contextPaths) ||
-        !body.contextPaths.every(path => typeof path === 'string') || !body.ai ||
+        !body.contextPaths.every(path => typeof path === 'string') || !Array.isArray(body.checks) ||
+        !body.checks.every(check => typeof check === 'string') || !Array.isArray(body.scopeCandidates) ||
+        !body.scopeCandidates.every(path => typeof path === 'string') || !body.ai ||
         typeof body.capabilities?.intake?.allowed !== 'boolean') {
       throw { code: 'INVALID_PROJECT', message: 'Не удалось прочитать контекст проекта. Обновите страницу.', retryable: true } satisfies ApiError;
+    }
+    if (body.bootstrap && (typeof body.bootstrap.required !== 'boolean' ||
+        typeof body.bootstrap.snapshotHash !== 'string' ||
+        !Array.isArray(body.bootstrap.changedPaths) || !body.bootstrap.changedPaths.every(path => typeof path === 'string') ||
+        !Array.isArray(body.bootstrap.untrackedCandidates) || !body.bootstrap.untrackedCandidates.every(path => typeof path === 'string'))) {
+      throw { code: 'INVALID_PROJECT', message: 'Список изменений поврежден. Обновите контекст.', retryable: true } satisfies ApiError;
     }
     return body;
   },

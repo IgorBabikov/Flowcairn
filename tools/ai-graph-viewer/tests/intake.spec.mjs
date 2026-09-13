@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { mockApi, snapshot, projectContext, allowed, allDenied, token } from './fixtures.mjs';
+import { mockApi, snapshot, projectContext, allowed, allDenied, graphNode, token } from './fixtures.mjs';
 
 test('unavailable planner stays fail-closed with a visible reason', async ({ page }) => {
   await mockApi(page, snapshot(), { emptyUntilIntake: true, projectContext: {
@@ -62,4 +62,60 @@ test('stale context requires a refresh and new request while preserving the task
   expect(requests).toHaveLength(2);
   expect(requests[1].contextHash).toBe('b'.repeat(64));
   expect(requests[1].operationId).not.toBe(requests[0].operationId);
+});
+
+
+test('approval shows only the skills and checks actually present in the backend plan', async ({page}) => {
+  const current = snapshot();
+  current.nodes.push(graphNode({id:'check-existing', title:'Проверить существующие тесты', action:{id:'check-tests', kind:'checks'}, skills:[], capabilities:allDenied}));
+  await mockApi(page, current);
+  await page.goto(`/#session=${token}`);
+  await page.getByRole('button', {name:'Подтвердить план'}).click();
+  const dialog = page.getByRole('dialog', {name:'Подтвердите решение'});
+  await expect(dialog).toContainText('project-context · 111111111111');
+  await expect(dialog).toContainText('Проверить существующие тесты (check-tests)');
+  await expect(dialog).not.toContainText('80%');
+  await expect(dialog).not.toContainText('100%');
+  await expect(dialog.getByRole('button', {name:'Зафиксировать решение'})).toBeDisabled();
+});
+
+
+test('large projects can narrow backend candidates without broadening write permissions', async ({page}) => {
+  const context = {...projectContext, scopeCandidates: Array.from({length:40}, (_, i) => `area-${i}`)};
+  const fixture = await mockApi(page, snapshot(), {emptyUntilIntake:true, projectContext:context});
+  await page.goto(`/#session=${token}`);
+  await page.getByLabel('Задача', {exact:true}).fill('Исправить выбранную часть');
+  await expect(page.getByRole('button', {name:'Составить план'})).toBeDisabled();
+  await page.getByText('Области задачи · 0 из 40').click();
+  await page.getByRole('checkbox', {name:'area-2', exact:true}).check();
+  await page.getByRole('button', {name:'Составить план'}).click();
+  await expect(page.locator('.react-flow')).toBeVisible();
+  const body = fixture.calls.find(call => call.action === 'intake').body;
+  expect(body.scope).toEqual(['area-2']);
+  expect(body.permissions).toBeUndefined();
+});
+
+
+test('dirty first install requires exact snapshot consent and explicit new-file selection', async ({page}) => {
+  const context = {...projectContext, bootstrap: {firstTask:true, required:true, changedPaths:['package.json', 'AGENTS.md'], untrackedCandidates:['src/new.ts'], snapshotHash:'c'.repeat(64)}};
+  const fixture = await mockApi(page, snapshot(), {emptyUntilIntake:true, projectContext:context});
+  await page.goto(`/#session=${token}`);
+  await page.getByLabel('Задача', {exact:true}).fill('Исправить поиск');
+  await expect(page.getByRole('button', {name:'Составить план'})).toBeDisabled();
+  await page.getByText('Изменения перед началом работы').click();
+  await expect(page.getByRole('region', {name:'Исходный снимок'})).toContainText('package.json');
+  const file = page.getByRole('checkbox', {name:'src/new.ts', exact:true});
+  await expect(file).not.toBeChecked();
+  const consent = page.getByRole('checkbox', {name:'Включить перечисленные изменения в исходный снимок'});
+  await consent.check();
+  await file.check();
+  await expect(consent).not.toBeChecked();
+  await consent.check();
+  await page.getByRole('button', {name:'Составить план'}).click();
+  await expect(page.locator('.react-flow')).toBeVisible();
+  const body = fixture.calls.find(call => call.action === 'intake').body;
+  expect(body.snapshot).toBe(true);
+  expect(body.snapshotHash).toBe(context.bootstrap.snapshotHash);
+  expect(body.includeUntracked).toEqual(['src/new.ts']);
+  expect(body.permissions).toBeUndefined();
 });

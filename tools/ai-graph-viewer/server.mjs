@@ -126,9 +126,29 @@ export function startViewer({ service, token, port = 4329, dist = path.join(DIRE
   server.headersTimeout = 10000;
   server.requestTimeout = 30000;
   server.maxHeadersCount = 40;
-  server.on('close', () => {
+  const releaseViewer = service.acquireViewerLease();
+  let released = false;
+  const cleanup = () => {
+    if (released) return;
+    released = true;
     for (const response of streams) response.end();
+    releaseViewer();
+    try {
+      service.close();
+    } catch {
+      // Never force-release the service owner: a rejected close retains its lease.
+    }
+  };
+  server.once('close', cleanup);
+  server.once('error', () => {
+    server.close();
+    cleanup();
   });
-  server.listen(port, '127.0.0.1');
+  try {
+    server.listen(port, '127.0.0.1');
+  } catch (error) {
+    cleanup();
+    throw error;
+  }
   return server;
 }

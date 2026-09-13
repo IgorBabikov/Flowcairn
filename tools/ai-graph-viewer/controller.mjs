@@ -42,7 +42,7 @@ export function sendError(response, error) {
   const code = typeof error.code === 'string' ? error.code : 'INVALID_REQUEST';
   const status = ['NOT_FOUND', 'RUN_NOT_FOUND', 'STORE_NOT_FOUND'].includes(code)
     ? 404
-    : ['REVISION_CONFLICT', 'CAS_CONFLICT', 'PLAN_CONFLICT', 'IDEMPOTENCY_CONFLICT', 'STALE_CONTEXT'].includes(code)
+    : ['REVISION_CONFLICT', 'CAS_CONFLICT', 'PLAN_CONFLICT', 'IDEMPOTENCY_CONFLICT', 'STALE_CONTEXT', 'INTAKE_BUSY'].includes(code)
       ? 409
       : code === 'BODY_LIMIT'
         ? 413

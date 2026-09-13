@@ -1214,3 +1214,14 @@ dialog::backdrop {
 .next-action p { font-size: 0.85rem; line-height: 1.5; margin: 0; max-width: 65ch; }
 @media (max-width: 720px) { .next-action { flex-direction: column; align-items: stretch; } }
 .graph-region:has(> .next-action) { grid-template-rows: auto auto minmax(0, 1fr); }
+
+.scope-picker { font-size: 0.85rem; }
+.scope-picker summary { cursor: pointer; color: var(--muted); }
+.scope-picker p { margin-block: 12px; }
+.scope-options { display: grid; gap: 8px; max-height: 220px; overflow: auto; padding: 4px; }
+.scope-options .confirmation { margin: 0; align-items: start; overflow-wrap: anywhere; }
+
+.bootstrap-context { padding-block: 16px; border-block: 1px solid var(--border); font-size: 0.85rem; }
+.bootstrap-context summary { cursor: pointer; }
+.bootstrap-context li { overflow-wrap: anywhere; }
+.bootstrap-context > p { font-size: 0.8rem; margin-top: 10px; }
