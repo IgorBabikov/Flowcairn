@@ -6,6 +6,7 @@ import {
   implementationNode,
   mockApi,
   plan,
+  projectContext,
   runSummary,
   snapshot,
   token,
@@ -104,49 +105,40 @@ test('renders backend state, confirms a gate, and retries one operation id', asy
   expect(runBodies[0].operationId).toBe(runBodies[1].operationId);
 });
 
-test('shows the registered Flowcairn task contract from the create capability', async ({
-  page,
-}) => {
-  await mockApi(page);
+test('creates a task from ordinary text without ids, permissions or external calls', async ({ page }) => {
+  const fixture = await mockApi(page, snapshot(), { emptyUntilIntake: true });
   await page.goto(`/#session=${token}`);
-  await page.getByRole('button', { name: 'Новый запуск' }).click();
-  const dialog = page.getByRole('dialog', { name: 'Новый локальный запуск' });
-  await expect(dialog).toContainText('flowcairn task --file task.json');
-  const id = dialog.getByLabel('ID зарегистрированной задачи');
-  await expect(id).toHaveAttribute('pattern', '[A-Z][A-Z0-9-]{2,40}');
-  await id.fill('TASK-101');
+  const composer = page.getByRole('region', { name: 'Что нужно сделать?' });
+  await expect(composer).toBeVisible();
+  await expect(page.getByText('flowcairn task --file task.json')).toHaveCount(0);
+  await expect(page.getByLabel('ID зарегистрированной задачи')).toHaveCount(0);
+  await expect(composer.getByRole('button', { name: 'Составить план' })).toBeDisabled();
+  await composer.getByLabel('Задача', {exact:true}).fill('Исправить поиск и добавить проверку пустого ввода');
+  await composer.getByRole('button', { name: 'Составить план' }).click();
+  await expect(page.locator('.react-flow')).toBeVisible();
+  const request = fixture.calls.find(call => call.action === 'intake').body;
+  expect(Object.keys(request).sort()).toEqual(['contextHash', 'operationId', 'prompt']);
+  expect(request.contextHash).toBe(projectContext.contextHash);
+  expect(fixture.calls.filter(call => call.action === 'run' || call.action === 'gate')).toHaveLength(0);
 });
 
-test('replays a lost create response with the exact same request', async ({ page }) => {
-  const fixture = await mockApi(page, snapshot(), {
-    loseFirstCreateResponse: true,
-    loseFirstRunResponse: false,
-  });
+test('replays a lost intake response with the exact same request', async ({ page }) => {
+  const fixture = await mockApi(page, snapshot(), { loseFirstCreateResponse: true, loseFirstRunResponse: false });
   await page.goto(`/#session=${token}`);
-  await page.getByRole('tab', { name: 'Изменения' }).click();
-  await expect(page.getByText('r3', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Новый запуск' }).click();
-
-  const dialog = page.getByRole('dialog', { name: 'Новый локальный запуск' });
-  await dialog.getByLabel('ID зарегистрированной задачи').fill('TASK-202');
-  await dialog.getByLabel('Цель').fill('Проверить стабильный create');
-  await dialog.getByLabel('Полная инструкция').fill('Создать локальный run');
-  await dialog.getByLabel('Границы задачи').fill('tools/ai-graph-viewer');
-  await dialog.getByLabel('Критерии приемки, пункт на строку').fill('Запрос можно безопасно повторить');
-  await dialog.getByRole('button', { name: 'Создать запуск' }).click();
-
-  await expect(dialog.getByRole('alert')).toContainText('NETWORK_UNCERTAIN');
-  await dialog.getByRole('button', { name: 'Повторить тот же запрос' }).click();
-  await expect(dialog).toHaveCount(0);
-
-  const requests = fixture.calls
-    .filter((call) => call.action === 'create')
-    .map((call) => call.body);
+  await page.getByRole('button', { name: 'Новая задача' }).click();
+  const composer = page.getByRole('region', { name: 'Что нужно сделать?' });
+  await composer.getByLabel('Задача', {exact:true}).fill('Проверить стабильный intake');
+  await composer.getByRole('button', { name: 'Составить план' }).click();
+  await expect(composer.getByRole('alert')).toContainText('Результат операции неизвестен');
+  await expect(composer.getByLabel('Задача', {exact:true})).toBeDisabled();
+  await expect(composer.getByRole('button', {name:'Закрыть', exact:true})).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect(composer.getByLabel('Задача', {exact:true})).toHaveValue('Проверить стабильный intake');
+  await composer.getByRole('button', { name: 'Повторить тот же запрос' }).click();
+  await expect(composer).toHaveCount(0);
+  const requests = fixture.calls.filter(call => call.action === 'intake').map(call => call.body);
   expect(requests).toHaveLength(2);
-  expect(requests[0].spec.checks).toEqual([]);
   expect(requests[1]).toEqual(requests[0]);
-  await expect(page.getByText('r0', { exact: true })).toBeVisible();
-  await expect(page.getByText('r3', { exact: true })).toHaveCount(0);
 });
 
 test('does not let a delayed snapshot replace a newer revision', async ({ page }) => {
@@ -305,12 +297,12 @@ test('uses native modal lifecycle and keeps toolbar keyboard activation', async 
   const fixture = await mockApi(page, runnableSnapshot(), { loseFirstRunResponse: false });
   await page.goto(`/#session=${token}`);
 
-  const create = page.getByRole('button', { name: 'Новый запуск' });
+  const create = page.getByRole('button', { name: 'Новая задача' });
   await create.focus();
   await create.click();
-  const createDialog = page.getByRole('dialog', { name: 'Новый локальный запуск' });
+  const createDialog = page.getByRole('region', { name: 'Что нужно сделать?' });
   await expect(createDialog).toBeVisible();
-  expect(await createDialog.evaluate((element) => element.matches(':modal'))).toBe(true);
+  await expect(createDialog.getByLabel('Задача', {exact:true})).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(createDialog).toHaveCount(0);
   await expect(create).toBeFocused();
@@ -397,7 +389,7 @@ test('does not run two-second list polling while SSE is connected', async ({ pag
   });
   const fixture = await mockApi(page);
   await page.goto(`/#session=${token}`);
-  await expect(page.getByText('Состояние обновляется с сервера')).toBeVisible();
+  await expect(page.getByText('На связи')).toBeVisible();
   const initialReads = fixture.listReads();
 
   await page.waitForTimeout(2500);
@@ -407,7 +399,7 @@ test('does not run two-second list polling while SSE is connected', async ({ pag
 test('explicit refresh discovers a run from an initially empty list', async ({ page }) => {
   await mockApi(page, snapshot(), { emptyFirstList: true });
   await page.goto(`/#session=${token}`);
-  await expect(page.getByLabel('Запуски').getByText(/Запусков пока нет/)).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Что нужно сделать?' })).toBeVisible();
   await page.getByRole('button', { name: 'Обновить' }).click();
   await expect(page.getByRole('button', { name: /TASK-101/ })).toBeVisible();
 });
@@ -529,6 +521,7 @@ test('mobile focuses active, waiting, failed, and completed nodes again on run s
     const request = route.request();
     expect(request.headers()['x-flowcairn-control']).toBe(token);
     const url = new URL(request.url());
+    if (url.pathname === '/api/project') { await route.fulfill({ json: projectContext }); return; }
     if (url.pathname === '/api/runs') {
       await route.fulfill({
         json: {
@@ -588,7 +581,7 @@ test('polling revision and locale changes preserve the operator viewport', async
   await page.getByRole('button', { name: 'Отдалить' }).click();
   const viewport = page.locator('.react-flow__viewport');
   const before = await viewport.evaluate((element) => element.getAttribute('style'));
-  await page.getByRole('button', { name: 'English' }).click();
+  await page.getByRole('button', { name: 'На английском' }).click();
   await expect(viewport).toHaveAttribute('style', before ?? '');
   await expect(page.getByTestId('run-revision')).toHaveText('4', { timeout: 5000 });
   await expect(viewport).toHaveAttribute('style', before ?? '');
@@ -690,6 +683,7 @@ test('renders a fail-closed snapshot when optional evidence reads fail', async (
     const request = route.request();
     expect(request.headers()['x-flowcairn-control']).toBe(token);
     const url = new URL(request.url());
+    if (url.pathname === '/api/project') { await route.fulfill({ json: projectContext }); return; }
     if (url.pathname.endsWith('/stream')) {
       await route.fulfill({
         status: 200,
@@ -726,7 +720,7 @@ test('keeps controls usable on mobile and supports RU/EN and dark mode', async (
   await page.setViewportSize({ width: 390, height: 844 });
   await mockApi(page);
   await page.goto(`/#session=${token}`);
-  await page.getByRole('button', { name: 'English' }).click();
+  await page.getByRole('button', { name: 'На английском' }).click();
   await expect(page.getByRole('heading', { name: 'Flowcairn' })).toBeVisible();
   expect(await page.locator('html').getAttribute('lang')).toBe('en');
   await page.getByRole('button', { name: 'Switch theme' }).click();

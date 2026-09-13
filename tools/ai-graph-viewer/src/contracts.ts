@@ -91,6 +91,7 @@ export interface GateSnapshot {
 }
 
 export interface Snapshot {
+  phase?: 'planning' | 'execution';
   schemaVersion: 2;
   runId: string;
   task?: { id: string; goal: string; scope: string[]; acceptance: string[] };
@@ -267,4 +268,21 @@ export function isSnapshot(value: unknown): value is Snapshot {
     Boolean(candidate.capabilities) &&
     Boolean(candidate.integrity)
   );
+}
+
+export interface ProjectContext {
+  schemaVersion: 2;
+  name: string;
+  contextHash: string;
+  contextPaths: string[];
+  scopeCandidates: string[];
+  checks: string[];
+  ai: { provider: string | null; model: string | null };
+  capabilities: { intake: Capability };
+}
+export interface IntakeInput {
+  prompt: string;
+  operationId: string;
+  contextHash: string;
+  scope?: string[];
 }

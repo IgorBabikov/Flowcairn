@@ -42,7 +42,7 @@ export function sendError(response, error) {
   const code = typeof error.code === 'string' ? error.code : 'INVALID_REQUEST';
   const status = ['NOT_FOUND', 'RUN_NOT_FOUND', 'STORE_NOT_FOUND'].includes(code)
     ? 404
-    : ['REVISION_CONFLICT', 'CAS_CONFLICT', 'PLAN_CONFLICT', 'IDEMPOTENCY_CONFLICT'].includes(code)
+    : ['REVISION_CONFLICT', 'CAS_CONFLICT', 'PLAN_CONFLICT', 'IDEMPOTENCY_CONFLICT', 'STALE_CONTEXT'].includes(code)
       ? 409
       : code === 'BODY_LIMIT'
         ? 413
@@ -62,6 +62,12 @@ export function sendError(response, error) {
 /** HTTP adapter only: all permission, state, gate and retry rules live in WorkflowService. */
 export async function control(service, request, response, url) {
   const body = await readBody(request);
+  if (url.pathname === '/api/intake') {
+    return send(response, 201, {
+      ok: true,
+      result: await service.intake(body, { actor: 'local-operator' }),
+    });
+  }
   if (url.pathname === '/api/runs') {
     if (
       !body ||

@@ -13,6 +13,8 @@ async function fixture(t) {
   writeFileSync(path.join(dist, 'index.html'), '<html><head></head><body></body></html>');
   const calls = [];
   const service = {
+    project: () => ({ project: { name: 'HTTP fixture' }, capabilities: { intake: { allowed: false, reason: 'Planner unavailable' } } }),
+    intake: async (...args) => { calls.push({ intake: args }); return { runId: 'run-intake' }; },
     capabilities: () => ({ create: { allowed: true, reason: null } }),
     listRuns: () => [{ runId: 'run-test' }],
     snapshot: () => {
@@ -156,4 +158,18 @@ test('Unicode auth header with equal character length is denied without crashing
   });
   assert.equal(denied.status, 403);
   assert.equal((await fetch(`${f.url}/api/runs`, { headers: f.headers })).status, 200);
+});
+
+
+test('project and intake HTTP adapters preserve service DTOs and require local authorization', async (t) => {
+  const f = await fixture(t);
+  assert.equal((await fetch(`${f.url}/api/project`)).status, 403);
+  assert.equal((await fetch(`${f.url}/api/intake`, { method: 'POST', body: '{}' })).status, 403);
+  const project = await fetch(`${f.url}/api/project`, { headers: f.headers });
+  assert.deepEqual(await project.json(), { project: { name: 'HTTP fixture' }, capabilities: { intake: { allowed: false, reason: 'Planner unavailable' } } });
+  const body = { prompt: 'Исправить поиск', operationId: 'intake-fixture', plannerConsent: { challenge: 'opaque-from-service' } };
+  const intake = await fetch(`${f.url}/api/intake`, { method: 'POST', headers: f.headers, body: JSON.stringify(body) });
+  assert.equal(intake.status, 201);
+  assert.deepEqual(await intake.json(), { ok: true, result: { runId: 'run-intake' } });
+  assert.deepEqual(f.calls, [{ intake: [body, { actor: 'local-operator' }] }]);
 });
