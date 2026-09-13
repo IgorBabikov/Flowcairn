@@ -1,0 +1,24 @@
+ARG BASE_IMAGE=node:22-alpine
+FROM ${BASE_IMAGE}
+
+USER root
+ARG PACKAGE_MANAGER
+ENV COREPACK_HOME=/opt/corepack
+RUN mkdir -p /opt/corepack \
+  && corepack enable \
+  && corepack prepare pnpm@11.8.0 --activate \
+  && chmod -R a+rX /opt/corepack
+
+WORKDIR /workspace
+COPY --chown=node:node manifests/ ./
+# Only dependency manifests enter this explicit networked preparation. Lifecycle scripts stay off.
+RUN if [ "$PACKAGE_MANAGER" = "npm" ]; then npm ci --ignore-scripts --no-audit --no-fund; \
+    elif [ "$PACKAGE_MANAGER" = "pnpm" ]; then pnpm install --frozen-lockfile --ignore-scripts; \
+    else exit 1; fi
+
+COPY --chown=root:root container-check.mjs /opt/flowcairn/container-check.mjs
+RUN chmod 0555 /opt/flowcairn/container-check.mjs \
+  && chown -R node:node /workspace
+
+USER node
+ENTRYPOINT ["/usr/local/bin/node", "/opt/flowcairn/container-check.mjs"]

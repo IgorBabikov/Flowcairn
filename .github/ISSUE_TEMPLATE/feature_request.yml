@@ -1,0 +1,23 @@
+name: Предложение
+description: Проблема пользователя и желаемое улучшение
+title: '[Feature]: '
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Какую задачу сейчас трудно решить?
+      description: Опишите конкретный сценарий и текущий обходной путь.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Что должно измениться?
+      description: Наблюдаемый результат, а не только список функций.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Границы и альтернативы
+      description: Что не входит в предложение? Потребуются ли новые права или получатель данных?

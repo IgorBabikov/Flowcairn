@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="368" viewBox="0 0 1280 368" role="img" aria-labelledby="title description">
+  <title id="title">Flowcairn</title>
+  <desc id="description">Локальный Graph Runtime: задача, план, подтверждение, AI, проверки и доказательства результата.</desc>
+  <rect width="1280" height="368" rx="24" fill="#141321"/>
+  <g fill="none" stroke="#B9A4FF" stroke-width="5" stroke-linecap="round">
+    <path d="M49 79h35M54 66h25M61 53h11"/>
+  </g>
+  <text x="105" y="83" fill="#F6F3FF" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-weight="700" font-size="46" letter-spacing="-1.1">Flowcairn</text>
+  <text x="50" y="133" fill="#C9C3DF" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24">План. Разрешения. Проверяемый результат.</text>
+  <g stroke="#6B617F" stroke-width="2" fill="none">
+    <path d="M220 225h30m-7-6 7 6-7 6M420 225h30m-7-6 7 6-7 6M620 225h30m-7-6 7 6-7 6M820 225h30m-7-6 7 6-7 6M1020 225h30m-7-6 7 6-7 6"/>
+  </g>
+  <g font-family="Inter, ui-sans-serif, system-ui, sans-serif" text-anchor="middle" font-size="23" font-weight="600">
+    <rect x="50" y="188" width="170" height="74" rx="12" fill="#252133" stroke="#544A68"/>
+    <text x="135" y="233" fill="#F6F3FF">Задача</text>
+    <rect x="250" y="188" width="170" height="74" rx="12" fill="#252133" stroke="#544A68"/>
+    <text x="335" y="233" fill="#F6F3FF">План</text>
+    <rect x="450" y="188" width="170" height="74" rx="12" fill="#302442" stroke="#A28BC9"/>
+    <text x="535" y="233" fill="#E9DDFB">Решение</text>
+    <rect x="650" y="188" width="170" height="74" rx="12" fill="#A28AF2"/>
+    <text x="735" y="233" fill="#171222">AI</text>
+    <rect x="850" y="188" width="170" height="74" rx="12" fill="#252133" stroke="#544A68"/>
+    <text x="935" y="233" fill="#F6F3FF">Проверки</text>
+    <rect x="1050" y="188" width="180" height="74" rx="12" fill="#252133" stroke="#544A68"/>
+    <text x="1140" y="233" fill="#F6F3FF">Отчет</text>
+  </g>
+  <text x="50" y="321" fill="#B4ACC9" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="18">Локальное исполнение · Граф этапов · Приемка человеком</text>
+</svg>

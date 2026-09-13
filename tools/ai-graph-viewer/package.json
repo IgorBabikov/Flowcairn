@@ -1,0 +1,12 @@
+{
+  "name": "flowcairn-viewer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc -p tsconfig.json",
+    "lint": "eslint src build.mjs eslint.config.mjs playwright.config.mjs tests",
+    "test:e2e": "playwright test --config playwright.config.mjs"
+  }
+}

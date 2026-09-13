@@ -1,0 +1,34 @@
+name: Ошибка
+description: Воспроизводимая проблема в Flowcairn
+title: '[Bug]: '
+body:
+  - type: markdown
+    attributes:
+      value: 'Уязвимость сообщайте по SECURITY.md. Не прикладывайте ключи, session URL, локальный state и закрытый код.'
+  - type: textarea
+    id: environment
+    attributes:
+      label: Окружение
+      description: Версия Flowcairn, ОС, Node, Docker, режим AI. Без credentials.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Как воспроизвести
+      description: Минимальные шаги на синтетических данных.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Ожидаемый результат
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Фактический результат
+      description: Безопасный error code и наблюдаемое поведение; не весь raw log.
+    validations:
+      required: true

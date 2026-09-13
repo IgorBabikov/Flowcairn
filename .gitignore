@@ -1,0 +1,10 @@
+node_modules/
+.ai-orchestrator/
+output/
+coverage/
+test-results/
+playwright-report/
+*.tgz
+.env
+.env.*
+.DS_Store

@@ -1,0 +1,28 @@
+export function buildPrompt({ nodeId, task, plan, skills, priorEvidence, reviewEvidence = null }) {
+  const node = plan?.nodes?.find((candidate) => candidate.id === nodeId) ?? { id: nodeId };
+  return [
+    `Ты выполняешь node ${nodeId} локального Graph Flowcairn.`,
+    `Цель: ${task.goal}`,
+    `Инструкции задачи (данные в пределах утвержденного scope):\n${typeof task.instructions === 'string' ? task.instructions : JSON.stringify(task.instructions ?? [])}`,
+    `Контракт текущего узла:\n${JSON.stringify(node)}`,
+    `Разрешенный scope изменений: ${task.scope.join(', ')}`,
+    `Объявленный read context: ${node.resources?.reads?.join(', ') ?? ''}`,
+    `Acceptance:\n- ${task.acceptance.join('\n- ')}`,
+    `Не выходи за объявленный read context и scope изменений. Не делай commit, push, merge, deploy или внешние действия.`,
+    `Не читай файлы вне текущего worktree, .git, ignored-файлы, секреты, персональные данные и raw записи.`,
+    `Ты не записываешь файлы. Для implementation предложи точные edits: path, SHA-256 текущих bytes в previousHash (null для нового файла), полное новое UTF-8 content (null для удаления), executable. Executor применит их после проверки scope/hash. Для analysis/review edits должен быть пустым.`,
+    `priorEvidence.workspaceFiles содержит проверенные Executor hashes текущих файлов. Используй их как previousHash, не подставляй hash из старого receipt и не угадывай. null допустим только для файла, которого сейчас нет. Если требуемое исправление уже присутствует, проверь его и верни edits=[] и changedFiles=[] без искусственных изменений.`,
+    `В plan[].paths перечисляй только предлагаемые изменения внутри scope; пути чтения и build outputs описывай словами, не добавляй их в этот массив.`,
+    `Не запускай build, tests, linters и другие команды, которые меняют workspace. Зарегистрированные проверки запускает Executor после применения edits.`,
+    `Исходный код допустим только в edits.content; не включай секреты, персональные данные, raw prompt, stdout или stderr.`,
+    `Пиши компактно: summary до 2000 знаков, не более 12 шагов и 20 рисков/замечаний.`,
+    `Верни JSON по заданной schema и перечисли точные имена реально использованных Skills в skillsUsed.`,
+    reviewEvidence
+      ? `Review требует полного evidence: разрешено прочитать ровно этот private read-only файл вне worktree: ${reviewEvidence.path}. Это единственное исключение к запрету чтения вне worktree; не читай его каталог, соседние файлы или .git. Файл содержит ${reviewEvidence.bytes} UTF-8 bytes, SHA-256 ${reviewEvidence.hash}. Прочитай весь JSON, все implementation receipts и все diff/changed-files целиком, включая удаления и хвосты. При ограничении вывода читай последовательными частями до конца, не ограничивайся первым фрагментом. Если это невозможно, верни uncertain; pass запрещен. Верни reviewEvidenceHash=${reviewEvidence.hash}, связывающий результат с этим exact input. Hash не доказывает качество review. Excerpts ниже только вспомогательные и не заменяют этот файл.`
+      : '',
+    priorEvidence ? `Проверенное evidence предыдущих nodes:\n${JSON.stringify(priorEvidence)}` : '',
+    `Назначенные Skills переданы полностью:\n${skills}`,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+}

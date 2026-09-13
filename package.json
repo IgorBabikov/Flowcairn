@@ -1,0 +1,71 @@
+{
+  "name": "flowcairn",
+  "version": "0.1.0",
+  "description": "Локальный Graph Runtime и ReactFlow для контролируемой AI-разработки",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22 <23"
+  },
+  "bin": {
+    "flowcairn": "bin/flowcairn.mjs"
+  },
+  "files": [
+    "bin",
+    "scripts/ai-graph/lib",
+    "scripts/ai-graph/cli.mjs",
+    "scripts/ai-graph/serve.mjs",
+    "scripts/ai-graph/container-check.mjs",
+    "scripts/ai-graph/Dockerfile.checks",
+    "scripts/ai-orchestrator.mjs",
+    "tools/ai-graph-viewer/dist",
+    "tools/ai-graph-viewer/server.mjs",
+    "tools/ai-graph-viewer/controller.mjs",
+    "skills",
+    "docs",
+    "README.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "CONTRIBUTING.md",
+    "CODE_OF_CONDUCT.md",
+    "SECURITY.md",
+    "SUPPORT.md",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "test": "node --test scripts/ai-graph/*.test.mjs scripts/ai-orchestrator.test.mjs tools/ai-graph-viewer/*.test.mjs tests/*.test.mjs",
+    "test:runtime": "node --test scripts/ai-graph/*.test.mjs scripts/ai-orchestrator.test.mjs",
+    "build": "node tools/ai-graph-viewer/build.mjs",
+    "typecheck": "tsc -p scripts/ai-graph/tsconfig.json && tsc -p tools/ai-graph-viewer/tsconfig.json",
+    "lint": "eslint --config tools/ai-graph-viewer/eslint.graph.config.mjs scripts/ai-graph tools/ai-graph-viewer/controller.mjs tools/ai-graph-viewer/server.mjs bin",
+    "check:public": "node scripts/check-public.mjs",
+    "test:ui": "playwright test --config tools/ai-graph-viewer/playwright.config.mjs"
+  },
+  "dependencies": {
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@playwright/test": "1.61.1",
+    "@types/node": "22.20.0",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "esbuild": "0.25.12",
+    "eslint": "10.6.0",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "globals": "17.7.0",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.62.0",
+    "@xyflow/react": "12.11.6",
+    "react": "19.2.7",
+    "react-dom": "19.2.7"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/IgorBabikov/flowcairn.git"
+  },
+  "homepage": "https://github.com/IgorBabikov/flowcairn#readme",
+  "bugs": {
+    "url": "https://github.com/IgorBabikov/flowcairn/issues"
+  }
+}
