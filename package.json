@@ -42,6 +42,8 @@
     "test:ui": "playwright test --config tools/ai-graph-viewer/playwright.config.mjs"
   },
   "dependencies": {
+    "picomatch": "4.0.7",
+    "yaml": "2.9.1",
     "zod": "4.4.3"
   },
   "devDependencies": {
@@ -50,15 +52,15 @@
     "@types/node": "22.20.0",
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
+    "@xyflow/react": "12.11.6",
     "esbuild": "0.25.12",
     "eslint": "10.6.0",
     "eslint-plugin-react-hooks": "7.1.1",
     "globals": "17.7.0",
-    "typescript": "5.9.3",
-    "typescript-eslint": "8.62.0",
-    "@xyflow/react": "12.11.6",
     "react": "19.2.7",
-    "react-dom": "19.2.7"
+    "react-dom": "19.2.7",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.62.0"
   },
   "repository": {
     "type": "git",

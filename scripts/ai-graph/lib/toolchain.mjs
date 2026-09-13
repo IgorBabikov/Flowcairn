@@ -60,15 +60,16 @@ function context(root, worktree) {
     );
   }
   const candidate = path.join(canonicalRoot, 'node_modules');
-  const sourceNodeModules = existsNoFollow(candidate)
-    ? physicalDirectory(candidate, 'TOOLCHAIN_UNAVAILABLE', 'canonical node_modules')
-    : null;
-  return {
+  if (existsNoFollow(candidate))
+    physicalDirectory(candidate, 'TOOLCHAIN_UNAVAILABLE', 'canonical node_modules');
+  const ctx = {
     root: canonicalRoot,
     worktree: canonicalWorktree,
-    sourceNodeModules,
     profile: loadProjectProfile(canonicalRoot),
   };
+  const dependencyPaths = workspaceDependencyPaths(ctx);
+  const readRoots = dependencyPaths.map((relative) => realpathSync(path.join(ctx.root, relative)));
+  return { ...ctx, dependencyPaths, readRoots };
 }
 
 function safeRelative(value) {
@@ -134,13 +135,13 @@ function mappedTarget(source, ctx) {
   } catch {
     fail('UNSAFE_TOOLCHAIN_SOURCE', `Dependency link поврежден: ${source}`);
   }
-  if (ctx.sourceNodeModules && inside(ctx.sourceNodeModules, resolved)) return resolved;
+  if (ctx.readRoots.some((root) => inside(root, resolved))) return resolved;
   if (!inside(ctx.root, resolved)) {
     fail('UNSAFE_TOOLCHAIN_SOURCE', `Dependency выходит из canonical root: ${source}`);
   }
   const relative = path.relative(ctx.root, resolved);
   if (
-    relative.split(path.sep).some((part) => part === '.git' || part === '.ai-orchestrator') ||
+    relative.split(path.sep).some((part) => ['.git', '.ai-orchestrator', 'node_modules'].includes(part)) ||
     !existsSync(path.join(ctx.worktree, relative))
   ) {
     fail('UNSAFE_TOOLCHAIN_SOURCE', `Workspace dependency нельзя remap: ${source}`);
@@ -216,7 +217,7 @@ function desiredForDirectory(relativeNodeModules, ctx) {
 }
 
 function description(ctx) {
-  const dependencyPaths = workspaceDependencyPaths(ctx);
+  const dependencyPaths = ctx.dependencyPaths;
   const groups = dependencyPaths.map((relative) => desiredForDirectory(relative, ctx));
   const lockfile = path.join(
     ctx.root,
@@ -242,7 +243,7 @@ function description(ctx) {
       return entry;
     }),
   );
-  const readRoots = ctx.sourceNodeModules ? [ctx.sourceNodeModules] : [];
+  const readRoots = ctx.readRoots;
   const identity = {
     version: VERSION,
     profileHash: hashObject(ctx.profile),

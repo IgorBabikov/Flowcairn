@@ -21,7 +21,11 @@ import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { buildPrompt } from './codex.mjs';
 import { GraphError, canonicalJson, sha256 } from './io.mjs';
-import { resolveAction } from './registry.mjs';
+import {
+  resolveAction,
+  contextPathAllowed,
+  isWithin as isWithinDeclaredPath,
+} from './registry.mjs';
 import {
   AIResultSchema,
   AIReviewResultSchema,
@@ -567,10 +571,10 @@ function makeAiCommand({
 
 function selectedSourceContext(worktree, node, task, profile) {
   const snapshot = fingerprintWorkspace(worktree, { outputPaths: profile.outputPaths });
-  const within = (file, roots) =>
-    roots.some((root) => file === root || file.startsWith(`${root}/`));
   const files = snapshot.files.filter(
-    (file) => within(file.path, node.resources.reads) && !within(file.path, task.forbiddenPaths),
+    (file) =>
+      node.resources.reads.some((scope) => isWithinDeclaredPath(file.path, scope)) &&
+      contextPathAllowed(file.path, task),
   );
   if (files.length > 256 || files.reduce((total, file) => total + file.size, 0) > 512 * 1024)
     fail(

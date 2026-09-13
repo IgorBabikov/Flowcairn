@@ -240,7 +240,7 @@ test('worker refuses changed private payload before any API call', async (t) => 
   );
 });
 
-test('OpenAI preparation sends selected source and whole review, binding private payload bytes to supervised command', (t) => {
+test('OpenAI payload uses canonical trailing-slash scope/deny boundaries and complete review evidence', (t) => {
   const { root, profile } = fixture(t);
   for (const args of [
     ['init', '--initial-branch=main'],
@@ -271,6 +271,11 @@ test('OpenAI preparation sends selected source and whole review, binding private
   }
   mkdirSync(path.join(root, 'src'));
   writeFileSync(path.join(root, 'src/main.js'), 'export const value = 1;');
+  mkdirSync(path.join(root, 'src/private'));
+  mkdirSync(path.join(root, 'src/private-other'));
+  writeFileSync(path.join(root, 'src/private/customer.txt'), 'FORBIDDEN_CUSTOMER_MARKER');
+  writeFileSync(path.join(root, 'src/private-other/customer.txt'), 'ALLOWED_NEIGHBOR_MARKER');
+  writeFileSync(path.join(root, 'src/.env.example'), 'SENSITIVE_TEMPLATE_MARKER');
   writeFileSync(path.join(root, 'unselected.txt'), 'not in approved context');
   const outputPath = realpathSync(mkdtempSync(path.join(tmpdir(), 'flowcairn-ai-output-')));
   chmodSync(outputPath, 0o700);
@@ -287,14 +292,15 @@ test('OpenAI preparation sends selected source and whole review, binding private
     action: { id: 'ai-review' },
     resources: { reads: ['src'], writes: [], exclusive: [] },
   };
-  const prepared = RUNNER_TESTING.makeOpenAiCommand({
+  const preparation = {
     worktree: root,
     node,
     task: {
       goal: 'Fixture',
       instructions: 'Review',
       scope: ['src'],
-      forbiddenPaths: [],
+      contextPaths: [],
+      forbiddenPaths: ['src/private/'],
       acceptance: ['Correct'],
     },
     plan: { nodes: [node] },
@@ -305,23 +311,36 @@ test('OpenAI preparation sends selected source and whole review, binding private
     toolchain: { node: process.execPath, digest: 'a'.repeat(64) },
     dependencyToolchain: { hash: 'b'.repeat(64) },
     profile,
-  });
-  try {
-    const body = readFileSync(prepared.inputFile, 'utf8');
-    const input = JSON.parse(body);
-    assert.deepEqual(
-      input.source.map((file) => file.path),
-      ['src/main.js'],
-    );
-    assert.equal(input.source[0].hash, hash('export const value = 1;'));
-    assert.equal(input.reviewEvidence.content, content);
-    assert.equal(prepared.command.args.at(-1), hash(body));
-    assert.equal(prepared.execution.provider, 'openai');
-    assert.equal(prepared.command.env.FLOWCAIRN_OPENAI_API_KEY, 'fixture-only-key');
-    assert.ok(!body.includes('fixture-only-key'));
-    assert.ok(!body.includes('not in approved context'));
-    assert.equal(prepared.input, '');
-  } finally {
-    RUNNER_TESTING.cleanupPrepared(prepared);
+  };
+  for (const readScope of ['src', 'src/']) {
+    const prepared = RUNNER_TESTING.makeOpenAiCommand({
+      ...preparation,
+      node: { ...node, resources: { ...node.resources, reads: [readScope] } },
+    });
+    try {
+      const body = readFileSync(prepared.inputFile, 'utf8');
+      const input = JSON.parse(body);
+      assert.deepEqual(
+        input.source.map((file) => file.path),
+        ['src/main.js', 'src/private-other/customer.txt'],
+      );
+      assert.equal(input.source[0].hash, hash('export const value = 1;'));
+      assert.equal(input.reviewEvidence.content, content);
+      assert.equal(prepared.command.args.at(-1), hash(body));
+      assert.equal(prepared.execution.provider, 'openai');
+      assert.equal(prepared.command.env.FLOWCAIRN_OPENAI_API_KEY, 'fixture-only-key');
+      assert.ok(!body.includes('fixture-only-key'));
+      assert.ok(!body.includes('not in approved context'));
+      assert.ok(!body.includes('FORBIDDEN_CUSTOMER_MARKER'));
+      assert.ok(!body.includes('SENSITIVE_TEMPLATE_MARKER'));
+      assert.ok(body.includes('ALLOWED_NEIGHBOR_MARKER'));
+      assert.equal(prepared.input, '');
+    } finally {
+      RUNNER_TESTING.cleanupPrepared(prepared);
+    }
   }
+  writeFileSync(path.join(root, 'src/.env'), 'SENSITIVE_ENV_MARKER');
+  assert.throws(() => RUNNER_TESTING.makeOpenAiCommand(preparation), {
+    code: 'SENSITIVE_WORKSPACE_PATH',
+  });
 });

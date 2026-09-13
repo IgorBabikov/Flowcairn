@@ -140,3 +140,71 @@ test('CLI rejects arbitrary and duplicate arguments', () => {
   assert.throws(() => parseOptions(['--root', 'a', '--root', 'b']), { code: 'ARGUMENT' });
   assert.deepEqual(parseOptions(['--root', '.', '--dry-run']), { root: '.', 'dry-run': true });
 });
+
+test('fresh clone adopts tracked profile without changing tracked files and can register a task', async (t) => {
+  const origin = fixture(t);
+  initializeProject(origin.root, options);
+  origin.git('add', '.flowcairn.json', '.gitignore');
+  origin.git('commit', '-m', 'fixture setup');
+  const clone = fixture(t);
+  // Replace only this test-owned disposable checkout with an actual clone.
+  rmSync(clone.root, { recursive: true, force: true });
+  execFileSync('/usr/bin/git', ['clone', '--no-local', origin.root, clone.root], { stdio: 'pipe' });
+  clone.git('config', 'user.name', 'Fixture');
+  clone.git('config', 'user.email', 'fixture@example.invalid');
+  const tracked = ['.flowcairn.json', '.gitignore', 'AGENTS.md'].map((file) => [
+    file,
+    readFileSync(path.join(clone.root, file)),
+  ]);
+  assert.equal(existsSync(path.join(clone.root, '.ai-orchestrator')), false);
+  assert.deepEqual(initializeProject(clone.root, { 'dry-run': true }).changes, [
+    '.ai-orchestrator/flowcairn-install.json',
+    '.ai-orchestrator/task.example.json',
+  ]);
+  assert.equal(existsSync(path.join(clone.root, '.ai-orchestrator')), false);
+  const adopted = initializeProject(clone.root);
+  assert.equal(adopted.adopted, true);
+  for (const [file, bytes] of tracked)
+    assert.deepEqual(readFileSync(path.join(clone.root, file)), bytes);
+  assert.equal(clone.git('status', '--porcelain'), '');
+  const snapshot = await createTask(
+    clone.root,
+    {
+      id: 'ORCH-001',
+      goal: 'Проверить документ',
+      instructions: 'Уточнить заголовок',
+      scope: ['README.md'],
+      acceptance: ['Заголовок понятен'],
+      checks: [],
+    },
+    { run: 'run-clone' },
+  );
+  assert.equal(snapshot.integrity.valid, true);
+  assert.equal(snapshot.status, 'waiting-for-human');
+});
+
+test('adoption preserves foreign local state and refuses linked owner directory', (t) => {
+  const { root } = fixture(t);
+  initializeProject(root, options);
+  rmSync(path.join(root, '.ai-orchestrator'), { recursive: true });
+  mkdirSync(path.join(root, '.ai-orchestrator'));
+  writeFileSync(path.join(root, '.ai-orchestrator/foreign.txt'), 'owner data');
+  const profile = readFileSync(path.join(root, '.flowcairn.json'));
+  assert.throws(() => initializeProject(root), { code: 'INSTALL_CONFLICT' });
+  assert.deepEqual(readFileSync(path.join(root, '.flowcairn.json')), profile);
+  assert.equal(readFileSync(path.join(root, '.ai-orchestrator/foreign.txt'), 'utf8'), 'owner data');
+});
+
+test('init includes child manifests from a pnpm YAML-only workspace', (t) => {
+  const { root } = fixture(t);
+  mkdirSync(path.join(root, 'packages/app'), { recursive: true });
+  writeFileSync(path.join(root, 'packages/app/package.json'), '{"name":"app"}');
+  writeFileSync(path.join(root, 'pnpm-workspace.yaml'), 'packages:\n  - packages/*\n');
+  const result = initializeProject(root, options);
+  assert.equal(result.profile.packageManager, 'pnpm');
+  assert.deepEqual(result.profile.manifests, [
+    'package.json',
+    'pnpm-workspace.yaml',
+    'packages/app/package.json',
+  ]);
+});

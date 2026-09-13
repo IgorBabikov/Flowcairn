@@ -30,6 +30,7 @@ import { runCli } from '../scripts/ai-graph/cli.mjs';
 import { probeRunner } from '../scripts/ai-graph/lib/runner.mjs';
 import { probeChecks, prepareCheckImage } from '../scripts/ai-graph/lib/docker-checks.mjs';
 import { startViewer } from '../tools/ai-graph-viewer/server.mjs';
+import { discoverWorkspaceManifests } from './workspaces.mjs';
 
 const OWNER_FILE = '.ai-orchestrator/flowcairn-install.json';
 const PROFILE = '.flowcairn.json';
@@ -182,42 +183,27 @@ function discoverManifests(root, pkg, manager, explicit) {
   if (existsSync(path.join(root, lock))) files.push(lock);
   if (manager === 'pnpm' && existsSync(path.join(root, 'pnpm-workspace.yaml')))
     files.push('pnpm-workspace.yaml');
-  const workspaces = Array.isArray(pkg.workspaces)
-    ? pkg.workspaces
-    : (pkg.workspaces?.packages ?? []);
-  for (const pattern of workspaces) {
-    if (typeof pattern !== 'string' || pattern.includes('..') || pattern.startsWith('/'))
-      fail('WORKSPACES', 'Укажите безопасные package manifests через --manifests.');
-    if (pattern.endsWith('/*') && !pattern.slice(0, -2).includes('*')) {
-      const parent = pattern.slice(0, -2);
-      const directory = path.join(root, parent);
-      if (
-        !existsSync(directory) ||
-        !lstatSync(directory).isDirectory() ||
-        lstatSync(directory).isSymbolicLink()
-      )
-        fail('WORKSPACES', 'Workspace directory недоступна; задайте --manifests явно.');
-      const output = git(root, ['ls-files', '--', `${parent}/*/package.json`]);
-      files.push(...output.split('\n').filter(Boolean));
-    } else if (!pattern.includes('*')) files.push(`${pattern}/package.json`);
-    else fail('WORKSPACES', 'Для сложных workspace glob укажите --manifests явно.');
-  }
+  files.push(...discoverWorkspaceManifests(root, pkg, manager));
   return [...new Set(files)];
 }
 
 /** Explicit, repeatable setup. It never replaces AGENTS, hooks or an existing profile. */
 export function initializeProject(input, options = {}) {
   const root = projectRoot(input);
-  if (existsNoFollow(path.join(root, PROFILE))) {
-    const profile = loadProjectProfile(root);
-    if (!existsSync(path.join(root, OWNER_FILE)))
-      fail(
-        'INSTALL_CONFLICT',
-        'Профиль уже существует, но не создан этой установкой. Он сохранен без изменений.',
-      );
-    return { created: false, root, profile, message: 'Проект уже настроен; файлы не изменены.' };
+  const existingProfile = existsNoFollow(path.join(root, PROFILE))
+    ? loadProjectProfile(root)
+    : null;
+  if (existingProfile && existsNoFollow(path.join(root, OWNER_FILE))) {
+    readProjectFile(root, OWNER_FILE, 1024 * 1024);
+    owner(root);
+    return {
+      created: false,
+      root,
+      profile: existingProfile,
+      message: 'Проект уже настроен; файлы не изменены.',
+    };
   }
-  if (!options.model)
+  if (!existingProfile && !options.model)
     fail('MODEL_REQUIRED', 'Укажите --model с точным ID модели, доступной вашему аккаунту.');
   const stateDirectory = path.join(root, '.ai-orchestrator');
   if (existsNoFollow(stateDirectory))
@@ -227,42 +213,68 @@ export function initializeProject(input, options = {}) {
     );
   const pkg = JSON.parse(readRegular(path.join(root, 'package.json'), 256 * 1024).toString('utf8'));
   const manager =
-    options['package-manager'] ?? (existsSync(path.join(root, 'pnpm-lock.yaml')) ? 'pnpm' : 'npm');
-  const integrationBranch = options.branch ?? git(root, ['symbolic-ref', '--short', 'HEAD']);
+    options['package-manager'] ??
+    (existsNoFollow(path.join(root, 'pnpm-lock.yaml')) ||
+    existsNoFollow(path.join(root, 'pnpm-workspace.yaml')) ||
+    pkg.packageManager?.startsWith('pnpm@')
+      ? 'pnpm'
+      : 'npm');
+  const integrationBranch =
+    existingProfile?.integrationBranch ??
+    options.branch ??
+    git(root, ['symbolic-ref', '--short', 'HEAD']);
   const checks =
     options.checks === undefined
       ? CHECKS.filter(
           (check) => typeof pkg.scripts?.[check === 'tests' ? 'test' : check] === 'string',
         )
       : csv(options.checks);
-  const profile = ProjectProfileSchema.parse({
-    version: 1,
-    integrationBranch,
-    packageManager: manager,
-    contextPaths: csv(options.context),
-    checks,
-    outputPaths: csv(options.outputs),
-    manifests: discoverManifests(root, pkg, manager, options.manifests),
-    ai: {
-      provider: options.provider ?? 'codex',
-      model: options.model,
-      ...(options['review-model'] ? { reviewModel: options['review-model'] } : {}),
-      ...(options['codex-path'] ? { codexPath: path.resolve(options['codex-path']) } : {}),
-    },
-  });
+  const profile =
+    existingProfile ??
+    ProjectProfileSchema.parse({
+      version: 1,
+      integrationBranch,
+      packageManager: manager,
+      contextPaths: csv(options.context),
+      checks,
+      outputPaths: csv(options.outputs),
+      manifests: discoverManifests(root, pkg, manager, options.manifests),
+      ai: {
+        provider: options.provider ?? 'codex',
+        model: options.model,
+        ...(options['review-model'] ? { reviewModel: options['review-model'] } : {}),
+        ...(options['codex-path'] ? { codexPath: path.resolve(options['codex-path']) } : {}),
+      },
+    });
   for (const file of profile.manifests) readProjectFile(root, file, 16 * 1024 * 1024);
   const ignoreFile = path.join(root, '.gitignore');
   const oldIgnore = existsNoFollow(ignoreFile) ? readRegular(ignoreFile).toString('utf8') : null;
-  const ignore =
-    (oldIgnore ?? '') + (oldIgnore && !oldIgnore.endsWith('\n') ? '\n' : '') + IGNORE_BLOCK;
-  const profileText = JSON.stringify(profile, null, 2) + '\n';
+  // A tracked profile survives clone; its local owner state intentionally does not.
+  const alreadyIgnored =
+    oldIgnore !== null &&
+    spawnSync(
+      '/usr/bin/git',
+      ['-C', root, 'check-ignore', '-q', '--', '.ai-orchestrator/flowcairn-install.json'],
+      { stdio: 'ignore' },
+    ).status === 0;
+  const ignore = alreadyIgnored
+    ? oldIgnore
+    : (oldIgnore ?? '') + (oldIgnore && !oldIgnore.endsWith('\n') ? '\n' : '') + IGNORE_BLOCK;
+  const profileText = existingProfile
+    ? readRegular(path.join(root, PROFILE)).toString('utf8')
+    : JSON.stringify(profile, null, 2) + '\n';
   if (options['dry-run'])
     return {
       created: false,
       dryRun: true,
       root,
       profile,
-      changes: [PROFILE, '.gitignore', OWNER_FILE, '.ai-orchestrator/task.example.json'],
+      changes: [
+        ...(existingProfile ? [] : [PROFILE]),
+        ...(ignore === oldIgnore ? [] : ['.gitignore']),
+        OWNER_FILE,
+        '.ai-orchestrator/task.example.json',
+      ],
     };
   const tmp = path.join(root, `.flowcairn-ignore-${randomUUID()}.tmp`);
   const ownedFiles = [];
@@ -276,7 +288,7 @@ export function initializeProject(input, options = {}) {
   try {
     mkdirSync(stateDirectory, { mode: 0o700 });
     createdDirectory = true;
-    createOwned(path.join(root, PROFILE), profileText, 0o644);
+    if (!existingProfile) createOwned(path.join(root, PROFILE), profileText, 0o644);
     createOwned(
       path.join(root, OWNER_FILE),
       JSON.stringify(
@@ -307,16 +319,18 @@ export function initializeProject(input, options = {}) {
         2,
       ) + '\n',
     );
-    const ignoreMode = oldIgnore === null ? 0o644 : lstatSync(ignoreFile).mode & 0o777;
-    createOwned(tmp, ignore, ignoreMode);
-    const current = existsNoFollow(ignoreFile) ? readRegular(ignoreFile).toString('utf8') : null;
-    if (current !== oldIgnore)
-      fail(
-        'INSTALL_CONFLICT',
-        '.gitignore изменился во время установки. Он сохранен; повторите проверку.',
-      );
-    renameSync(tmp, ignoreFile);
-    ignoreWritten = true;
+    if (ignore !== oldIgnore) {
+      const ignoreMode = oldIgnore === null ? 0o644 : lstatSync(ignoreFile).mode & 0o777;
+      createOwned(tmp, ignore, ignoreMode);
+      const current = existsNoFollow(ignoreFile) ? readRegular(ignoreFile).toString('utf8') : null;
+      if (current !== oldIgnore)
+        fail(
+          'INSTALL_CONFLICT',
+          '.gitignore изменился во время установки. Он сохранен; повторите проверку.',
+        );
+      renameSync(tmp, ignoreFile);
+      ignoreWritten = true;
+    }
   } catch (error) {
     // Do not remove a concurrent replacement or a file the owner has already edited.
     if (!ignoreWritten)
@@ -344,10 +358,13 @@ export function initializeProject(input, options = {}) {
   }
   return {
     created: true,
+    adopted: Boolean(existingProfile),
     root,
     profile,
     message:
-      'Проверьте git diff и закоммитьте .flowcairn.json и .gitignore перед созданием задачи. AGENTS и hooks не изменены.',
+      existingProfile && ignore === oldIgnore
+        ? 'Локальное состояние создано по существующему профилю. Исходники не изменены; можно создать задачу.'
+        : 'Проверьте git diff и закоммитьте .flowcairn.json и .gitignore перед созданием задачи. AGENTS и hooks не изменены.',
   };
 }
 
