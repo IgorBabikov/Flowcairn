@@ -170,16 +170,41 @@ export function discoverProjectSkillCandidates(root, { instructionManifest }) {
   return { ...body, fingerprint: hashObject(body) };
 }
 
-/** Create exact pinned data after the caller obtains explicit selection/consent. No writes. */
-export function createProjectSkillManifest(root, { instructionManifest, expectedFingerprint, selectedPaths }) {
-  if (!Array.isArray(selectedPaths) || selectedPaths.length > 4 || new Set(selectedPaths).size !== selectedPaths.length)
+/** Create pinned data after explicit applicability selection/consent. No writes.
+ * Candidate.scope is only a structural suggestion; it never supplies application defaults.
+ * Existing persisted profiles keep their semantics. Legacy empty selection remains a no-op.
+ */
+export function createProjectSkillManifest(root, { instructionManifest, expectedFingerprint, selections = undefined, selectedPaths = undefined }) {
+  if (selectedPaths !== undefined) {
+    if (selections !== undefined || !Array.isArray(selectedPaths) || selectedPaths.length !== 0)
+      fail('PROJECT_SKILLS_APPLICABILITY_REQUIRED', 'Для каждого Skill явно выберите actions и scope вместо selectedPaths');
+    selections = [];
+  }
+  if (!Array.isArray(selections) || selections.length > 4)
     fail('PROJECT_SKILLS_SELECTION', 'Выберите не более четырех разных Skills');
+  for (const selection of selections) {
+    if (!selection || typeof selection !== 'object' || Array.isArray(selection) ||
+      !Array.isArray(selection.actions) || !selection.actions.length || !Array.isArray(selection.scope) || !selection.scope.length)
+      fail('PROJECT_SKILLS_APPLICABILITY_REQUIRED', 'Для каждого Skill нужны явные actions и scope');
+    if (Object.keys(selection).sort().join(',') !== 'actions,path,scope')
+      fail('PROJECT_SKILLS_SELECTION', 'Допустимы только path, actions и scope');
+    safeContextPath(selection.path);
+  }
+  if (new Set(selections.map((selection) => selection.path)).size !== selections.length)
+    fail('PROJECT_SKILLS_SELECTION', 'Выбранные пути Skills должны быть уникальны');
   const preview = discoverProjectSkillCandidates(root, { instructionManifest });
   if (preview.fingerprint !== expectedFingerprint) fail('SKILL_DISCOVERY_DRIFT', 'Список кандидатов изменился; обновите выбор');
-  const manifest = selectedPaths.map((file) => {
-    const candidate = preview.candidates.find((item) => item.path === file);
+  const manifest = selections.map((selection) => {
+    const candidate = preview.candidates.find((item) => item.path === selection.path);
     if (!candidate?.eligible) fail('PROJECT_SKILLS_SELECTION', 'Выбран неизвестный или неподходящий Skill');
-    return { id: candidate.id, path: candidate.path, hash: candidate.hash, scope: [candidate.scope], actions: [...knownActions] };
+    return {
+      id: candidate.id, path: candidate.path, hash: candidate.hash,
+      scope: selection.scope.map((scope) => typeof scope === 'string' ? scope.replace(/\/$/, '') : scope),
+      actions: [...selection.actions],
+    };
   });
-  return validateProjectSkills(manifest);
+  validateProjectSkills(manifest);
+  // Explicit longer scope lists must also fit the effective instruction limit before saving.
+  for (const entry of manifest) loadSkill(root, entry.id, { projectSkills: manifest });
+  return manifest;
 }
