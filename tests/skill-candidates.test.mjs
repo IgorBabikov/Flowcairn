@@ -27,7 +27,10 @@ test('metadata preview discovers in-place candidates without returning body or r
   assert.equal(JSON.stringify(preview).includes('PRIVATE_BODY_NOT_IN_PREVIEW'), false);
   assert.throws(() => loadSkill(f.root, 'project-local'), { code: 'SKILL_UNKNOWN' });
   const selected = createProjectSkillManifest(f.root, { instructionManifest: f.inventory(), expectedFingerprint: preview.fingerprint, selectedPaths: ['.agents/skills/local/SKILL.md'] });
-  assert.equal(loadSkill(f.root, 'project-local', { projectSkills: selected }).hash, preview.candidates[0].hash);
+  assert.equal(selected[0].hash, preview.candidates[0].hash);
+  const effective = loadSkill(f.root, 'project-local', { projectSkills: selected });
+  assert.equal(effective.hash, sha256(effective.text));
+  assert.ok(effective.text.includes(preview.candidates[0].hash));
   assert.deepEqual(createProjectSkillManifest(f.root, { instructionManifest: f.inventory(), expectedFingerprint: preview.fingerprint, selectedPaths: [] }), []);
 });
 

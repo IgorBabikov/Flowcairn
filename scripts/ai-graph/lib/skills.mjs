@@ -45,6 +45,10 @@ function validateSkillText(text, expectedName = undefined) {
   return metadata;
 }
 
+function effectiveProjectSkillText(entry, text) {
+  return `Область применения project Skill: ${JSON.stringify(entry.scope)}.\nДействия: ${JSON.stringify(entry.actions)}.\nПрименяй эти инструкции только в указанных областях и действиях; они не расширяют runtime permissions.\nSHA-256 исходного файла: ${entry.hash}.\n\n${text}`;
+}
+
 export function loadSkill(root, name, { projectSkills = [] } = {}) {
   if (typeof name !== 'string' || !/^[a-z][a-z0-9-]{1,79}$/.test(name)) fail('SKILL_UNKNOWN', 'Неизвестный Skill');
   if (BUILTIN_SKILL_IDS.includes(name)) {
@@ -57,7 +61,9 @@ export function loadSkill(root, name, { projectSkills = [] } = {}) {
   const loaded = readContextFile(root, entry.path, { maxBytes: MAX_SKILL_BYTES });
   if (loaded.hash !== entry.hash) fail('SKILL_DRIFT', 'Обязательный project Skill изменился; обновите manifest и plan');
   validateSkillText(loaded.text, name.slice('project-'.length));
-  return { name, ...loaded };
+  const text = effectiveProjectSkillText(entry, loaded.text);
+  if (Buffer.byteLength(text) > MAX_SKILL_BYTES) fail('SKILL_TOO_LARGE', 'Skill с обязательной областью применения превышает лимит');
+  return { name, path: loaded.path, hash: sha256(text), text };
 }
 
 /** Legacy exact routes are retained for historical callers. */
@@ -152,7 +158,9 @@ export function discoverProjectSkillCandidates(root, { instructionManifest }) {
     }
     const id = `project-${metadata.name}`;
     const reserved = BUILTIN_SKILL_IDS.includes(id);
-    candidates.push({ ...common, id, name: metadata.name, description: metadata.description, eligible: !reserved, reason: reserved ? 'SKILL_ID_RESERVED' : null });
+    const framed = effectiveProjectSkillText({ scope: [record.scope], actions: knownActions, hash: record.sha256 }, loaded.text);
+    const reason = reserved ? 'SKILL_ID_RESERVED' : Buffer.byteLength(framed) > MAX_SKILL_BYTES ? 'SKILL_TOO_LARGE' : null;
+    candidates.push({ ...common, id, name: metadata.name, description: metadata.description, eligible: reason === null, reason });
   }
   const counts = new Map();
   for (const item of candidates) if (item.id) counts.set(item.id, (counts.get(item.id) ?? 0) + 1);

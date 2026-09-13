@@ -47,7 +47,7 @@ test('project skill requires explicit manifest, applicable action/scope and curr
   assert.throws(() => loadSkill(f.root, 'project-local'), { code: 'SKILL_UNKNOWN' });
   const selected = resolveNodeSkills(f.root, { action: 'ai-implement', scope: ['src'], projectSkills });
   assert.ok(selected.ids.includes('project-local'));
-  assert.equal(selected.skills.find((s) => s.name === 'project-local').text, text);
+  assert.ok(selected.skills.find((s) => s.name === 'project-local').text.endsWith(text));
   assert.ok(!resolveNodeSkills(f.root, { action: 'ai-review', scope: ['src'], projectSkills }).ids.includes('project-local'));
   f.write('docs/guide.md', '');
   assert.ok(!resolveNodeSkills(f.root, { action: 'ai-implement', scope: ['docs'], projectSkills }).ids.includes('project-local'));
@@ -88,7 +88,7 @@ test('existing .agents Skills are loaded in place without copying or treating th
   const projectSkills = [entry(text, { path: '.agents/skills/local/SKILL.md', scope: ['.'] })];
   const selected = resolveNodeSkills(f.root, { action: 'ai-implement', scope: ['src'], projectSkills });
   assert.equal(selected.manifest.find((s) => s.id === 'project-local').path, '.agents/skills/local/SKILL.md');
-  assert.equal(selected.skills.find((s) => s.name === 'project-local').hash, sha256(text));
+  assert.equal(selected.skills.find((s) => s.name === 'project-local').hash, sha256(selected.skills.find((s) => s.name === 'project-local').text));
 });
 
 
@@ -96,7 +96,7 @@ test('valid quoted project metadata works; duplicate YAML keys, tags and aliases
   const f = fixture(t);
   const valid = '---\nname: "local"\ndescription: >\n  Local guidance.\n---\nBody\n';
   f.write('skills/local/SKILL.md', valid);
-  assert.equal(loadSkill(f.root, 'project-local', { projectSkills: [entry(valid)] }).text, valid);
+  assert.ok(loadSkill(f.root, 'project-local', { projectSkills: [entry(valid)] }).text.endsWith(valid));
   for (const metadata of [
     'name: local\nname: local\ndescription: text',
     'name: local\ndescription: !unknown text',
@@ -107,4 +107,18 @@ test('valid quoted project metadata works; duplicate YAML keys, tags and aliases
     f.write('skills/local/SKILL.md', text);
     assert.throws(() => loadSkill(f.root, 'project-local', { projectSkills: [entry(text)] }), { code: 'SKILL_INVALID' });
   }
+});
+
+
+test('project Skill scope/action framing reaches the actual prompt and is pinned by effective hash', (t) => {
+  const f = fixture(t), text = skillText('local'); f.write('skills/local/SKILL.md', text);
+  const source = entry(text), loaded = loadSkill(f.root, 'project-local', { projectSkills: [source] });
+  assert.ok(loaded.text.includes('Область применения project Skill: ["src"]'));
+  assert.ok(renderSkillInstructions([loaded]).includes('src'));
+  assert.notEqual(loaded.hash, source.hash);
+  const narrowed = loadSkill(f.root, 'project-local', { projectSkills: [{ ...source, scope: ['src/index.js'] }] });
+  assert.notEqual(narrowed.hash, loaded.hash);
+  assert.equal(narrowed.hash, sha256(narrowed.text));
+  const differentAction = loadSkill(f.root, 'project-local', { projectSkills: [{ ...source, actions: ['ai-review'] }] });
+  assert.notEqual(differentAction.hash, loaded.hash);
 });
