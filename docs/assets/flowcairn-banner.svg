@@ -14,7 +14,7 @@
 <g transform="translate(690 60)">
 <path d="M140 72V113H350V153M140 72V153M350 224V266H140V312" fill="none" stroke="#79638c" stroke-width="3" stroke-linejoin="round"/>
 <path d="M140 113V153" fill="none" stroke="#58c7be" stroke-width="3" stroke-dasharray="6 5"/>
-<rect width="280" height="73" rx="14" fill="#253938" stroke="#73c5a7"/><text x="20" y="30" fill="#91dfbc" font-size="13" letter-spacing="1.6">ПЛАН ПОДТВЕРЖДЕН</text><text x="20" y="56" fill="#f7fcf8" font-size="19">Границы задачи согласованы</text>
+<rect width="340" height="73" rx="14" fill="#253938" stroke="#73c5a7"/><text x="20" y="30" fill="#91dfbc" font-size="13" letter-spacing="1.6">ПЛАН ПОДТВЕРЖДЕН</text><text x="20" y="56" fill="#f7fcf8" font-size="19">Границы задачи согласованы</text>
 <rect x="0" y="153" width="280" height="91" rx="14" fill="#263b43" stroke="#67d2d0" stroke-width="2"/><circle cx="22" cy="178" r="5" fill="#7ee4dc"/><text x="38" y="183" fill="#8be5dc" font-size="13" letter-spacing="1.2">ВЫПОЛНЯЕТСЯ</text><text x="20" y="215" fill="#fff" font-size="21" font-weight="700">Изменение кода</text>
 <rect x="305" y="153" width="195" height="73" rx="14" fill="#322b40" stroke="#8c7d9d" stroke-dasharray="5 4"/><text x="325" y="181" fill="#c1b5cc" font-size="13" letter-spacing="1.2">СЛЕДУЮЩИЙ ЭТАП</text><text x="325" y="207" fill="#f9f3ff" font-size="19">Проверки и ревью</text>
 <rect x="0" y="312" width="280" height="64" rx="14" fill="#42352c" stroke="#d6b170"/><text x="20" y="350" fill="#ffe0a3" font-size="20">Приемка — за вами</text>

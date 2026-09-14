@@ -161,6 +161,4 @@ npx flowcairn uninstall
 
 **[Личный Telegram-канал основателя Flowcairn](https://t.me/Babikov_build)**
 
-Счетчик показывает скачивания файлов GitHub Releases за все время. Это не число установок npm и не число пользователей.
-
 Лицензия [MIT](LICENSE).
