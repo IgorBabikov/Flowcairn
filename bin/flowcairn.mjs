@@ -18,6 +18,7 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createInterface } from 'node:readline/promises';
 import { GraphError, sha256 } from '../scripts/ai-graph/lib/io.mjs';
 import {
   ProjectProfileSchema,
@@ -230,11 +231,40 @@ export async function initializeCommand(input, options = {}, terminal = {}) {
   assertProviderPlatform(options);
   const selected = await collectOnboarding(root, options, terminal);
   const result = initializeProject(root, { ...selected, _skillManifest: await selectProjectSkills(root, selected, terminal) });
+  const checkPreparation = await maybePrepareChecks(root, result.profile, selected, terminal);
   if (selected.consent === true && !selected['dry-run']) {
     const inspected = await instructionsCommand(root, 'inspect');
     await instructionsCommand(root, 'activate', {consent:true, fingerprint:inspected.instructions.fingerprint});
   }
-  return result;
+  return { ...result, checkPreparation };
+}
+
+/** Docker image preparation is opt-in because it can download an image and dependencies. */
+export async function maybePrepareChecks(root, profile, options = {}, terminal = {}, checks = {
+  probe: probeChecks,
+  prepare: prepareCheckImage,
+}) {
+  if (options['dry-run'] || options.json || !profile.checks.length)
+    return { prepared: false, reason: 'NOT_NEEDED' };
+  const status = checks.probe({ root });
+  if (status.available || status.reason !== 'CHECK_IMAGE_MISSING')
+    return { prepared: false, reason: status.available ? 'READY' : status.reason };
+  const input = terminal.input ?? process.stdin;
+  const output = terminal.output ?? process.stderr;
+  if (!input.isTTY || !output.isTTY)
+    return { prepared: false, reason: 'NON_INTERACTIVE' };
+  const prompt = terminal.prompt ?? createInterface({ input, output });
+  try {
+    output.write('Проверки проекта найдены. Docker доступен, но образ проверок еще не подготовлен.\n');
+    const answer = (await prompt.question('Подготовить проверки в Docker? Это скачает образ и зависимости проекта. [да / нет; Enter — нет]: ')).trim().toLowerCase();
+    if (!['да', 'yes'].includes(answer)) {
+      output.write('Проверки не подготовлены. Перед выполнением проверок: npx flowcairn checks prepare.\n');
+      return { prepared: false, reason: 'DECLINED' };
+    }
+    return { prepared: true, result: checks.prepare({ root }) };
+  } finally {
+    if (!terminal.prompt) prompt.close();
+  }
 }
 
 export async function setupCommand(input, options = {}, terminal = {}) {
@@ -598,6 +628,9 @@ function printInitialization(result) {
       'Далее: npx flowcairn — открыть локальный UI и создать задачу.',
       'Разработка начнется после согласования плана.',
     );
+  if (result.checkPreparation && !result.checkPreparation.prepared &&
+      ['DECLINED', 'NON_INTERACTIVE'].includes(result.checkPreparation.reason))
+    summary.push('Проверки еще не подготовлены. Перед их запуском: npx flowcairn checks prepare.');
   process.stdout.write(sanitizeText(summary.join('\n')) + '\n');
 }
 
