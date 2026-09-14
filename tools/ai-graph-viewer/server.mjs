@@ -38,6 +38,10 @@ export function startViewer({ service, token, port = 4329, dist = path.join(DIRE
       try {
         if (request.method === 'POST') return await control(service, request, response, url);
         if (request.method !== 'GET') return send(response, 405, { error: 'method-not-allowed' });
+        if (url.pathname === '/api/onboarding')
+          return send(response, 200, await service.onboarding());
+        if (url.pathname === '/api/project')
+          return send(response, 200, await service.project());
         if (url.pathname === '/api/runs')
           return send(response, 200, {
             runs: service.listRuns(),
@@ -124,9 +128,29 @@ export function startViewer({ service, token, port = 4329, dist = path.join(DIRE
   server.headersTimeout = 10000;
   server.requestTimeout = 30000;
   server.maxHeadersCount = 40;
-  server.on('close', () => {
+  const releaseViewer = service.acquireViewerLease();
+  let released = false;
+  const cleanup = () => {
+    if (released) return;
+    released = true;
     for (const response of streams) response.end();
+    releaseViewer();
+    try {
+      service.close();
+    } catch {
+      // Never force-release the service owner: a rejected close retains its lease.
+    }
+  };
+  server.once('close', cleanup);
+  server.once('error', () => {
+    server.close();
+    cleanup();
   });
-  server.listen(port, '127.0.0.1');
+  try {
+    server.listen(port, '127.0.0.1');
+  } catch (error) {
+    cleanup();
+    throw error;
+  }
   return server;
 }

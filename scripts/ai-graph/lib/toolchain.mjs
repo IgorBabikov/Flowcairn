@@ -12,7 +12,7 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 import { GraphError, hashObject, sha256 } from './io.mjs';
-import { loadProjectProfile } from './project.mjs';
+import { loadProjectProfile, packageManagerLock, validatePackageManagerProject } from './project.mjs';
 
 const VERSION = 1;
 const HASH_PATTERN = /^[a-f0-9]{64}$/;
@@ -217,11 +217,12 @@ function desiredForDirectory(relativeNodeModules, ctx) {
 }
 
 function description(ctx) {
+  validatePackageManagerProject(ctx.root, ctx.profile.packageManager);
   const dependencyPaths = ctx.dependencyPaths;
   const groups = dependencyPaths.map((relative) => desiredForDirectory(relative, ctx));
   const lockfile = path.join(
     ctx.root,
-    ctx.profile.packageManager === 'npm' ? 'package-lock.json' : 'pnpm-lock.yaml',
+    packageManagerLock(ctx.profile.packageManager),
   );
   if (!existsSync(lockfile)) fail('TOOLCHAIN_UNAVAILABLE', 'Lockfile не найден');
   const lockStat = lstatSync(lockfile);

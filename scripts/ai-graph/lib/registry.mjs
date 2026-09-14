@@ -18,6 +18,7 @@ const definition = (id, kind, permissions, skills, artifacts, retrySafe = false)
 const entries = [
   definition('human-approve', 'gate', [], [], []),
   definition('human-accept', 'gate', [], [], []),
+  definition('ai-plan', 'analysis', ['ai.read'], Reflect.get(SKILL_ROUTES, 'plan') ?? SKILL_ROUTES.analyze, ['analysis']),
   definition('ai-analyze', 'analysis', ['ai.read'], SKILL_ROUTES.analyze, ['analysis']),
   definition(
     'ai-implement',
@@ -94,12 +95,13 @@ function isForbidden(candidate, scopes) {
 export function pathAllowed(candidate, task) {
   return (
     candidate.normalize('NFC').toLowerCase() !== '.flowcairn.json' &&
+    !isSensitivePath(candidate) &&
     task.scope.some((scope) => isWithin(candidate, scope)) &&
     !isForbidden(candidate, task.forbiddenPaths)
   );
 }
 
-function isSensitivePath(candidate) {
+export function isSensitivePath(candidate) {
   return candidate.split('/').some((segment) => {
     const name = segment.toLowerCase();
     return (
@@ -127,4 +129,18 @@ export function contextPathAllowed(candidate, task) {
     task.contextPaths.some((scope) => isWithin(candidate, scope)) ||
     REQUIRED_AI_CONTEXT_PATHS.includes(candidate);
   return declared && !isForbidden(candidate, task.forbiddenPaths) && !isSensitivePath(candidate);
+}
+
+/** Instruction files require explicit per-node read declaration, even inside broad source scopes. */
+export function isInstructionPath(candidate) {
+  return /(?:^|\/)(?:AGENTS?(?:\.override)?\.md|CLAUDE\.md|\.cursorrules|SKILL\.md)$/.test(candidate) ||
+    /(?:^|\/)(?:\.cursor\/rules\/.+\.(?:md|mdc)|\.claude\/rules\/.+\.md|\.github\/(?:copilot-instructions\.md|instructions\/.+\.instructions\.md))$/.test(candidate);
+}
+
+/** Машинные зависимости и бинарные материалы сохраняются в source, но не передаются AI как текст. */
+export function isAuxiliaryContextPath(candidate) {
+  const name = candidate.split('/').at(-1).toLowerCase();
+  return ['package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lock', 'bun.lockb',
+    'poetry.lock', 'uv.lock', 'cargo.lock', 'composer.lock', 'gemfile.lock', 'go.sum'].includes(name) ||
+    /\.(?:png|jpe?g|gif|webp|ico|avif|pdf|woff2?|ttf|otf|mp[34]|mov|wav|zip|gz|tgz|wasm|map)$/.test(name);
 }

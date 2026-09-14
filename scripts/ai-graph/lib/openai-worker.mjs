@@ -34,6 +34,8 @@ export function buildResponsesRequest(payload) {
     !payload.schema
   )
     fail('AI_INPUT_INVALID');
+  if (payload.reasoningEffort !== undefined && !['low', 'medium', 'high', 'xhigh'].includes(payload.reasoningEffort))
+    fail('AI_INPUT_INVALID');
   if (payload.reviewEvidence) {
     const evidence = payload.reviewEvidence;
     if (
@@ -46,6 +48,7 @@ export function buildResponsesRequest(payload) {
   }
   const request = {
     model: payload.model,
+    ...(payload.reasoningEffort !== undefined ? { reasoning: { effort: payload.reasoningEffort } } : {}),
     store: false,
     stream: false,
     input: [

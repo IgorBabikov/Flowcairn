@@ -6,6 +6,7 @@ import {
   implementationNode,
   mockApi,
   plan,
+  projectContext,
   runSummary,
   snapshot,
   token,
@@ -104,49 +105,77 @@ test('renders backend state, confirms a gate, and retries one operation id', asy
   expect(runBodies[0].operationId).toBe(runBodies[1].operationId);
 });
 
-test('shows the registered Flowcairn task contract from the create capability', async ({
-  page,
-}) => {
-  await mockApi(page);
+test('creates a task from ordinary text without ids, permissions or external calls', async ({ page }) => {
+  const fixture = await mockApi(page, snapshot(), { emptyUntilIntake: true });
   await page.goto(`/#session=${token}`);
-  await page.getByRole('button', { name: 'Новый запуск' }).click();
-  const dialog = page.getByRole('dialog', { name: 'Новый локальный запуск' });
-  await expect(dialog).toContainText('flowcairn task --file task.json');
-  const id = dialog.getByLabel('ID зарегистрированной задачи');
-  await expect(id).toHaveAttribute('pattern', '[A-Z][A-Z0-9-]{2,40}');
-  await id.fill('TASK-101');
+  const composer = page.getByRole('region', { name: 'Новая задача' });
+  await expect(composer).toBeVisible();
+  await expect(page.getByText('flowcairn task --file task.json')).toHaveCount(0);
+  await expect(page.getByLabel('ID зарегистрированной задачи')).toHaveCount(0);
+  await expect(composer.getByRole('button', { name: 'Запустить' })).toBeDisabled();
+  await composer.getByLabel('Заголовок задачи', {exact:true}).fill('Исправить поиск');
+  await composer.getByLabel('Номер задачи', {exact:true}).fill('TASK-101');
+  await composer.getByLabel('Полное описание задачи', {exact:true}).fill('Исправить поиск и добавить проверку пустого ввода');
+  await composer.getByRole('button', { name: 'Запустить' }).click();
+  await expect(page.locator('.react-flow')).toBeVisible();
+  const request = fixture.calls.find(call => call.action === 'intake').body;
+  expect(Object.keys(request).sort()).toEqual(['contextHash', 'description', 'operationId', 'taskNumber', 'title']);
+  expect(request.contextHash).toBe(projectContext.contextHash);
+  expect(fixture.calls.filter(call => call.action === 'run' || call.action === 'gate')).toHaveLength(0);
 });
 
-test('replays a lost create response with the exact same request', async ({ page }) => {
-  const fixture = await mockApi(page, snapshot(), {
-    loseFirstCreateResponse: true,
-    loseFirstRunResponse: false,
-  });
+test('shows the user task number in the run rail and graph header', async ({ page }) => {
+  await mockApi(page, snapshot());
   await page.goto(`/#session=${token}`);
-  await page.getByRole('tab', { name: 'Изменения' }).click();
-  await expect(page.getByText('r3', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Новый запуск' }).click();
+  await expect(page.locator('.run-row').first()).toContainText('FORM-101');
+  await expect(page.locator('.run-row').first()).not.toContainText('TASK-101');
+  await expect(page.locator('.graph-goal summary')).toContainText('FORM-101');
+});
 
-  const dialog = page.getByRole('dialog', { name: 'Новый локальный запуск' });
-  await dialog.getByLabel('ID зарегистрированной задачи').fill('TASK-202');
-  await dialog.getByLabel('Цель').fill('Проверить стабильный create');
-  await dialog.getByLabel('Полная инструкция').fill('Создать локальный run');
-  await dialog.getByLabel('Границы задачи').fill('tools/ai-graph-viewer');
-  await dialog.getByLabel('Критерии приемки, пункт на строку').fill('Запрос можно безопасно повторить');
-  await dialog.getByRole('button', { name: 'Создать запуск' }).click();
+test('keeps the newest plan in the rail when an older run becomes stale later', async ({ page }) => {
+  const stale = snapshot();
+  stale.runId = 'run-old';
+  stale.planVersion = 4;
+  stale.status = 'stale';
+  stale.updatedAt = '2026-09-14T12:30:00.000Z';
+  stale.task = { ...stale.task, id: 'task-form-102', taskNumber: 'FORM-102' };
+  const latest = {
+    ...stale,
+    runId: 'run-new',
+    planVersion: 5,
+    status: 'waiting-for-human',
+    updatedAt: '2026-09-14T12:00:00.000Z',
+  };
+  latest.nodes = latest.nodes.map(node => ({ ...node, title: 'Этап актуального плана' }));
+  await mockApi(page, stale, { extraRuns: [runSummary(latest)] });
+  await page.route('**/api/runs/run-new/snapshot', route => route.fulfill({ json: latest }));
+  await page.goto(`/#session=${token}`);
+  const rail = page.locator('.run-list');
+  await expect(rail).toContainText('FORM-102');
+  await expect(rail).toContainText('Версия плана 5');
+  await expect(rail).not.toContainText('Версия плана 4');
+  await expect(page.locator('.graph-node').first()).toContainText('Этап актуального плана');
+});
 
-  await expect(dialog.getByRole('alert')).toContainText('NETWORK_UNCERTAIN');
-  await dialog.getByRole('button', { name: 'Повторить тот же запрос' }).click();
-  await expect(dialog).toHaveCount(0);
-
-  const requests = fixture.calls
-    .filter((call) => call.action === 'create')
-    .map((call) => call.body);
+test('replays a lost intake response with the exact same request', async ({ page }) => {
+  const fixture = await mockApi(page, snapshot(), { loseFirstCreateResponse: true, loseFirstRunResponse: false });
+  await page.goto(`/#session=${token}`);
+  await page.getByRole('button', { name: 'Новая задача' }).click();
+  const composer = page.getByRole('region', { name: 'Новая задача' });
+  await composer.getByLabel('Заголовок задачи', {exact:true}).fill('Исправить поиск');
+  await composer.getByLabel('Номер задачи', {exact:true}).fill('TASK-101');
+  await composer.getByLabel('Полное описание задачи', {exact:true}).fill('Проверить стабильный intake');
+  await composer.getByRole('button', { name: 'Запустить' }).click();
+  await expect(composer.getByRole('alert')).toContainText('Результат операции неизвестен');
+  await expect(composer.getByLabel('Полное описание задачи', {exact:true})).toBeDisabled();
+  await expect(composer.getByRole('button', {name:'Закрыть', exact:true})).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect(composer.getByLabel('Полное описание задачи', {exact:true})).toHaveValue('Проверить стабильный intake');
+  await composer.getByRole('button', { name: 'Повторить тот же запрос' }).click();
+  await expect(composer).toHaveCount(0);
+  const requests = fixture.calls.filter(call => call.action === 'intake').map(call => call.body);
   expect(requests).toHaveLength(2);
-  expect(requests[0].spec.checks).toEqual([]);
   expect(requests[1]).toEqual(requests[0]);
-  await expect(page.getByText('r0', { exact: true })).toBeVisible();
-  await expect(page.getByText('r3', { exact: true })).toHaveCount(0);
 });
 
 test('does not let a delayed snapshot replace a newer revision', async ({ page }) => {
@@ -305,12 +334,12 @@ test('uses native modal lifecycle and keeps toolbar keyboard activation', async 
   const fixture = await mockApi(page, runnableSnapshot(), { loseFirstRunResponse: false });
   await page.goto(`/#session=${token}`);
 
-  const create = page.getByRole('button', { name: 'Новый запуск' });
+  const create = page.getByRole('button', { name: 'Новая задача' });
   await create.focus();
   await create.click();
-  const createDialog = page.getByRole('dialog', { name: 'Новый локальный запуск' });
+  const createDialog = page.getByRole('region', { name: 'Новая задача' });
   await expect(createDialog).toBeVisible();
-  expect(await createDialog.evaluate((element) => element.matches(':modal'))).toBe(true);
+  await expect(createDialog.getByLabel('Заголовок задачи', {exact:true})).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(createDialog).toHaveCount(0);
   await expect(create).toBeFocused();
@@ -397,7 +426,7 @@ test('does not run two-second list polling while SSE is connected', async ({ pag
   });
   const fixture = await mockApi(page);
   await page.goto(`/#session=${token}`);
-  await expect(page.getByText('Состояние обновляется с сервера')).toBeVisible();
+  await expect(page.getByText('На связи')).toBeVisible();
   const initialReads = fixture.listReads();
 
   await page.waitForTimeout(2500);
@@ -407,9 +436,9 @@ test('does not run two-second list polling while SSE is connected', async ({ pag
 test('explicit refresh discovers a run from an initially empty list', async ({ page }) => {
   await mockApi(page, snapshot(), { emptyFirstList: true });
   await page.goto(`/#session=${token}`);
-  await expect(page.getByLabel('Запуски').getByText(/Запусков пока нет/)).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Новая задача' })).toBeVisible();
   await page.getByRole('button', { name: 'Обновить' }).click();
-  await expect(page.getByRole('button', { name: /TASK-101/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /FORM-101/ })).toBeVisible();
 });
 
 test('dark status text tokens meet 4.5 to 1 contrast', async ({ page }) => {
@@ -485,21 +514,22 @@ test('opens an eleven-node mobile graph on a readable active node and keeps fit-
   await readableInGraph(page, 'Этап 6');
 });
 
-test('focuses active, waiting, failed, and completed nodes again on run switch', async ({
+test('mobile focuses active, waiting, failed, and completed nodes again on run switch', async ({
   page,
 }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
   const active = chainSnapshot({
     runId: 'run-active',
     activeNodeId: 'node-5',
     status: 'running',
-    task: { ...snapshot().task, id: 'TASK-ACTIVE' },
+    task: { ...snapshot().task, id: 'TASK-ACTIVE', taskNumber: 'TASK-ACTIVE' },
   });
   active.nodes[5] = { ...active.nodes[5], status: 'running' };
   const waiting = chainSnapshot({
     runId: 'run-waiting',
     activeNodeId: null,
     status: 'waiting-for-human',
-    task: { ...snapshot().task, id: 'TASK-WAITING' },
+    task: { ...snapshot().task, id: 'TASK-WAITING', taskNumber: 'TASK-WAITING' },
   });
   waiting.nodes[3] = { ...waiting.nodes[3], status: 'waiting-for-human' };
   waiting.gates = [{ ...snapshot().gates[0], nodeId: 'node-3' }];
@@ -509,7 +539,7 @@ test('focuses active, waiting, failed, and completed nodes again on run switch',
     gates: [],
     status: 'failed',
     finalDisposition: null,
-    task: { ...snapshot().task, id: 'TASK-FAILED' },
+    task: { ...snapshot().task, id: 'TASK-FAILED', taskNumber: 'TASK-FAILED' },
   });
   failed.nodes[4] = { ...failed.nodes[4], status: 'failed' };
   const completed = chainSnapshot({
@@ -518,7 +548,7 @@ test('focuses active, waiting, failed, and completed nodes again on run switch',
     gates: [],
     status: 'passed',
     finalDisposition: 'accepted',
-    task: { ...snapshot().task, id: 'TASK-COMPLETED' },
+    task: { ...snapshot().task, id: 'TASK-COMPLETED', taskNumber: 'TASK-COMPLETED' },
   });
   completed.nodes = completed.nodes.map((node) => ({ ...node, status: 'passed' }));
   const snapshots = new Map(
@@ -528,6 +558,7 @@ test('focuses active, waiting, failed, and completed nodes again on run switch',
     const request = route.request();
     expect(request.headers()['x-flowcairn-control']).toBe(token);
     const url = new URL(request.url());
+    if (url.pathname === '/api/project') { await route.fulfill({ json: projectContext }); return; }
     if (url.pathname === '/api/runs') {
       await route.fulfill({
         json: {
@@ -580,13 +611,14 @@ test('polling revision and locale changes preserve the operator viewport', async
   current.nodes[5] = { ...current.nodes[5], status: 'running' };
   await mockApi(page, current, { advanceAfterFirstSnapshot: true });
   await page.goto(`/#session=${token}`);
+  await page.getByRole('button', { name: 'Текущий этап', exact: true }).click();
   await readableInGraph(page, 'Этап 6');
 
   await page.getByRole('button', { name: 'Отдалить' }).click();
   await page.getByRole('button', { name: 'Отдалить' }).click();
   const viewport = page.locator('.react-flow__viewport');
   const before = await viewport.evaluate((element) => element.getAttribute('style'));
-  await page.getByRole('button', { name: 'English' }).click();
+  await page.getByRole('button', { name: 'На английском' }).click();
   await expect(viewport).toHaveAttribute('style', before ?? '');
   await expect(page.getByTestId('run-revision')).toHaveText('4', { timeout: 5000 });
   await expect(viewport).toHaveAttribute('style', before ?? '');
@@ -688,6 +720,7 @@ test('renders a fail-closed snapshot when optional evidence reads fail', async (
     const request = route.request();
     expect(request.headers()['x-flowcairn-control']).toBe(token);
     const url = new URL(request.url());
+    if (url.pathname === '/api/project') { await route.fulfill({ json: projectContext }); return; }
     if (url.pathname.endsWith('/stream')) {
       await route.fulfill({
         status: 200,
@@ -724,7 +757,7 @@ test('keeps controls usable on mobile and supports RU/EN and dark mode', async (
   await page.setViewportSize({ width: 390, height: 844 });
   await mockApi(page);
   await page.goto(`/#session=${token}`);
-  await page.getByRole('button', { name: 'English' }).click();
+  await page.getByRole('button', { name: 'На английском' }).click();
   await expect(page.getByRole('heading', { name: 'Flowcairn' })).toBeVisible();
   expect(await page.locator('html').getAttribute('lang')).toBe('en');
   await page.getByRole('button', { name: 'Switch theme' }).click();
@@ -734,8 +767,9 @@ test('keeps controls usable on mobile and supports RU/EN and dark mode', async (
   );
 });
 
-test('actual service fixture smoke', async ({ page }) => {
+test('actual service fixture smoke', async ({ page }, testInfo) => {
   test.skip(!process.env.FLOWCAIRN_TEST_URL, 'FLOWCAIRN_TEST_URL is not set');
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto(process.env.FLOWCAIRN_TEST_URL);
   await expect(
     page.getByRole('heading', {
@@ -743,4 +777,6 @@ test('actual service fixture smoke', async ({ page }) => {
     }),
   ).toBeVisible();
   await expect(page.locator('.operator-layout')).toBeVisible();
+  await expect(page.locator('.graph-node').first()).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('actual-workflow.png'), fullPage: true });
 });

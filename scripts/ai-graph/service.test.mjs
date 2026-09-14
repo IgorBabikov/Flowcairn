@@ -1321,3 +1321,46 @@ test('provider migration keeps historical plans readable and denies old executio
   assert.equal(f.service.plan(f.snapshot.runId).nodes.length, f.snapshot.nodes.length);
   assert.equal(f.service.listRuns()[0].task.id, input.id);
 });
+
+
+test('uncertain implementation keeps a sanitized explanation without saving proposed code', async (t) => {
+  const f = await fixture(t);
+  let applied = 0;
+  f.adapters.applyEdits = () => { applied++; };
+  const original = f.adapters.execute;
+  f.adapters.execute = async (context) => {
+    const result = await original(context);
+    if (context.node.action.id === 'ai-implement') {
+      result.output.verdict = 'uncertain';
+      result.output.summary = 'Не удалось подтвердить ограничение';
+      result.output.findings = [{ severity: 'blocking', message: 'Нужно уточнить контракт API', path: 'src/example.txt' }];
+      result.output.edits[0].content = 'PROPOSED_CODE_MUST_NOT_BE_STORED';
+    }
+    return result;
+  };
+  let snapshot = await f.approve();
+  snapshot = await f.service.command(snapshot.runId, 'run', f.request(snapshot));
+  const node = snapshot.nodes.find((item) => item.id === 'implement');
+  assert.equal(node.status, 'uncertain');
+  assert.equal(node.reason, 'Нужно уточнить контракт API');
+  const evidence = node.artifacts.find((item) => item.kind === 'review-findings');
+  const artifact = f.service.artifact(snapshot.runId, evidence.id);
+  assert.match(artifact.content, /Нужно уточнить контракт API/);
+  assert.doesNotMatch(artifact.content, /PROPOSED_CODE_MUST_NOT_BE_STORED/);
+  assert.equal(applied, 0);
+});
+
+
+test('подтвержденный таймаут сохраняет причину и не разрешает слепой повтор', async (t) => {
+  const f = await fixture(t);
+  f.adapters.execute = async ({ onStart }) => {
+    await onStart({ pid: process.pid, ticket: 'timeout-fixture' });
+    return { exitCode: 0, stopped: true, uncertain: true, timedOut: true, failureReason: 'TIMEOUT' };
+  };
+  let s = await f.approve();
+  s = await f.service.command(s.runId, 'run', f.request(s));
+  const node = s.nodes.find(item => item.status === 'uncertain');
+  assert.match(node.reason, /Истек лимит времени/);
+  assert.equal(node.capabilities.retry.allowed, false);
+  assert.equal(f.service.receipt(s.runId, node.receiptIds.at(-1)).termination.timedOut, true);
+});

@@ -89,6 +89,7 @@ export function snapshot() {
     runId: 'run-demo',
     task: {
       id: 'TASK-101',
+      taskNumber: 'FORM-101',
       goal: 'Собрать надежный Graph',
       scope: ['tools/ai-graph-viewer'],
       acceptance: ['UI следует backend capabilities'],
@@ -210,6 +211,14 @@ export function runSummary(value) {
   };
 }
 
+// Explicit browser fixture. No planner or external AI is called by these tests.
+export const projectContext = {
+  schemaVersion: 2, name: 'Тестовый проект', contextHash: hash('a'),
+  contextPaths: ['AGENTS.md', 'src/search.ts'], scopeCandidates: ['src'], checks: ['tests'],
+  ai: { provider: 'fixture', model: 'no-external-ai' },
+  capabilities: { intake: allowed },
+};
+
 export async function mockApi(page, initial = snapshot(), options = {}) {
   let current = structuredClone(initial);
   const calls = [];
@@ -217,6 +226,7 @@ export async function mockApi(page, initial = snapshot(), options = {}) {
   let runAttempts = 0;
   let stopAttempts = 0;
   let createAttempts = 0;
+  let intakeCreated = false;
   let snapshotReads = 0;
   let listReads = 0;
   let activeSnapshotReads = 0;
@@ -240,6 +250,12 @@ export async function mockApi(page, initial = snapshot(), options = {}) {
     const request = route.request();
     expect(request.headers()['x-flowcairn-control']).toBe(token);
     const url = new URL(request.url());
+    if (url.pathname === '/api/onboarding') {
+      await route.fulfill({json: {configured:true, profileHash:hash('a'), providers:[{id:'codex',label:'Codex',supported:true,reason:null}], values:{provider:'codex',model:'gpt-test',modelMode:'manual',reasoningEffort:'high',testPolicy:'keep',coverage:false,readConsent:true}, limitations:[]}}); return;
+    }
+    if (url.pathname === '/api/project') {
+      await route.fulfill({ json: options.projectContext ?? projectContext }); return;
+    }
     if (url.pathname.endsWith('/stream')) {
       if (options.streamBurst?.length) {
         current = { ...current, revision: Math.max(...options.streamBurst) };
@@ -253,34 +269,27 @@ export async function mockApi(page, initial = snapshot(), options = {}) {
       });
       return;
     }
-    if (url.pathname === '/api/runs' && request.method() === 'POST') {
+    if (url.pathname === '/api/intake' && request.method() === 'POST') {
       const body = request.postDataJSON();
-      calls.push({ action: 'create', body });
+      calls.push({ action: 'intake', body });
       createAttempts += 1;
+      if (options.intakeError) { await route.fulfill({ status: 409, json: {error: options.intakeError} }); return; }
       current = {
-        ...current,
-        runId: body.runId,
-        revision: 0,
-        task: {
-          id: body.spec.id,
-          goal: body.spec.goal,
-          scope: body.spec.scope,
-          acceptance: body.spec.acceptance,
-        },
+        ...current, runId: 'run-intake-fixture', revision: 0, phase: 'planning',
+        task: { id: 'TASK-GENERATED', goal: body.title, title: body.title, description: body.description, taskNumber: body.taskNumber, scope: ['src'], acceptance: [] },
       };
+      intakeCreated = true;
       if (options.loseFirstCreateResponse && createAttempts === 1) {
-        await route.abort('connectionreset');
-        return;
+        await route.abort('connectionreset'); return;
       }
-      await route.fulfill({ status: 201, json: { result: current } });
-      return;
+      await route.fulfill({ status: 201, json: { result: current } }); return;
     }
     if (url.pathname === '/api/runs' && request.method() === 'GET') {
       listReads += 1;
       await route.fulfill({
         json: {
           runs:
-            options.emptyFirstList && listReads === 1
+            (options.emptyFirstList && listReads === 1) || (options.emptyUntilIntake && !intakeCreated)
               ? []
               : [runSummary(current), ...(options.extraRuns ?? [])],
           capabilities: { create: allowed },
@@ -407,6 +416,14 @@ export async function mockApi(page, initial = snapshot(), options = {}) {
         },
       });
     }
+    if (url.pathname.endsWith('/control/revise-plan')) {
+      const body = request.postDataJSON();
+      calls.push({action:'revise-plan',body});
+      const parent = current.runId;
+      current = {...current,runId:'run-revised',supersedesRunId:parent,revision:0,planVersion:2,planHash:objectHash(planForVersion(2))};
+      current.gates = current.gates.map(gate => ({...gate,planHash:current.planHash,challenge:'revised-challenge'}));
+      await route.fulfill({json:{result:current}}); return;
+    }
     if (url.pathname.endsWith('/control/gate')) {
       const body = request.postDataJSON();
       calls.push({ action: 'gate', body });
@@ -510,6 +527,7 @@ export async function mockApi(page, initial = snapshot(), options = {}) {
         ...current,
         runId: `${previousRunId}-successor`,
         supersedesRunId: previousRunId,
+        phase: current.phase === 'planning' ? 'execution' : current.phase,
         planVersion,
         planHash: objectHash(planForVersion(planVersion)),
         revision: 0,

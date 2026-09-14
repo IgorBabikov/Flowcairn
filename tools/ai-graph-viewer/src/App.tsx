@@ -4,6 +4,8 @@ import {
   Controls,
   Handle,
   MiniMap,
+  MarkerType,
+  useUpdateNodeInternals,
   NodeToolbar,
   Position,
   ReactFlow,
@@ -14,6 +16,11 @@ import {
 } from '@xyflow/react';
 import { api, sessionToken, watchRevisions } from './api';
 import { humanText, nodeTitle, statusHint, StatusIcon } from './presentation';
+import { graphLayout } from './graph-layout';
+import { TaskComposer } from './TaskComposer';
+import { WorkflowPanel } from './WorkflowPanel';
+import { SetupPanel } from './SetupPanel';
+import { workflowProjection } from './workflow-projection';
 import type {
   ApiError,
   Artifact,
@@ -27,9 +34,10 @@ import type {
   Receipt,
   RunStatus,
   RunSummary,
-  ServiceCapabilities,
+  ProjectContext,
   Snapshot,
-  TaskInput,
+  IntakeInput,
+  TaskFields,
 } from './contracts';
 
 type Locale = 'ru' | 'en';
@@ -46,8 +54,7 @@ type PendingCreateOperation = {
   kind: 'create';
   key: 'create';
   operationId: string;
-  runId: string;
-  spec: TaskInput;
+  input: IntakeInput;
 };
 type PendingOperation = PendingControlOperation | PendingCreateOperation;
 type SnapshotRefresh = {
@@ -59,12 +66,12 @@ type SnapshotRefresh = {
 const COPY = {
   ru: {
     title: 'Flowcairn',
-    subtitle: 'План, права и результаты выполнения.',
+    subtitle: 'От задачи до проверенного результата.',
     runs: 'Запуски',
     active: 'Активные',
     archive: 'История',
-    create: 'Новый запуск',
-    noRuns: 'Запусков пока нет. Создайте задачу с границами работ и критериями приемки.',
+    create: 'Новая задача',
+    noRuns: 'Опишите, что нужно сделать. Здесь появится план работы.',
     loading: 'Загружаем сохраненное состояние…',
     retryLoad: 'Повторить загрузку',
     graph: 'Граф выполнения',
@@ -103,10 +110,10 @@ const COPY = {
     compareLoading: 'Загружаем план для сравнения…',
     compareFailed: 'Не удалось загрузить план для сравнения.',
     refresh: 'Обновить',
-    language: 'English',
+    language: 'На английском',
     theme: 'Сменить тему',
-    live: 'Состояние обновляется с сервера',
-    disconnected: 'Канал обновлений недоступен; опрашиваем сервер каждые 2 секунды.',
+    live: 'На связи',
+    disconnected: 'Обновляем состояние',
     operationFailed: 'Операция не подтверждена',
     retrySame: 'Повторить тот же запрос',
     dismiss: 'Закрыть',
@@ -126,16 +133,6 @@ const COPY = {
     draftHint: 'Редактируется только копия этапов. Активный план остается неизменяемым.',
     validateReplan: 'Отправить на серверную проверку',
     invalidJson: 'Исправьте JSON черновика перед отправкой.',
-    createTitle: 'Новый локальный запуск',
-    createHint:
-      'Сначала зарегистрируйте задачу: flowcairn task --file task.json. Укажите ее ID. Создание запуска сохраняет план и исходное состояние проекта; действия запускаются отдельно.',
-    taskId: 'ID зарегистрированной задачи',
-    goal: 'Цель',
-    instructions: 'Полная инструкция',
-    acceptance: 'Критерии приемки, пункт на строку',
-    forbidden: 'Запрещенные пути, по одному на строку',
-    includeUntracked: 'Разрешенные новые файлы',
-    createRun: 'Создать запуск',
     status: 'Статус',
     revision: 'Ревизия',
     updated: 'Обновлен',
@@ -212,16 +209,6 @@ const COPY = {
     draftHint: 'Only a copy of nodes is editable. The active plan remains immutable.',
     validateReplan: 'Send for server validation',
     invalidJson: 'Fix the draft JSON before submitting.',
-    createTitle: 'New local run',
-    createHint:
-      'Register the task with flowcairn task --file task.json, then enter its ID. Creating a run saves the plan and project snapshot; actions start separately.',
-    taskId: 'Registered task ID',
-    goal: 'Goal',
-    instructions: 'Full instructions',
-    acceptance: 'Acceptance, one item per line',
-    forbidden: 'Forbidden paths, one per line',
-    includeUntracked: 'Allowed untracked paths',
-    createRun: 'Create run',
     status: 'Status',
     revision: 'Revision',
     updated: 'Updated',
@@ -330,6 +317,31 @@ function getCapability(set: Partial<Record<CapabilityName, Capability>>, name: C
   return set[name] ?? { allowed: false, reason: 'Сервер не сообщил о доступности действия' };
 }
 
+function taskLifecycleKey(run: RunSummary): string {
+  const task = run.task;
+  return task?.id && task.taskNumber ? `${task.id}\u0000${task.taskNumber}` : run.runId;
+}
+
+function isNewerPlan(candidate: RunSummary, current: RunSummary): boolean {
+  const candidateVersion = candidate.planVersion ?? -1;
+  const currentVersion = current.planVersion ?? -1;
+  if (candidateVersion !== currentVersion) return candidateVersion > currentVersion;
+  if ((candidate.updatedAt ?? '') !== (current.updatedAt ?? ''))
+    return (candidate.updatedAt ?? '') > (current.updatedAt ?? '');
+  return candidate.runId > current.runId;
+}
+
+/** One task lifecycle is shown once, always at its newest immutable plan version. */
+function newestRunsByTask(runs: RunSummary[]): RunSummary[] {
+  const latest = new Map<string, RunSummary>();
+  for (const run of runs) {
+    const key = taskLifecycleKey(run);
+    const current = latest.get(key);
+    if (!current || isNewerPlan(run, current)) latest.set(key, run);
+  }
+  return runs.filter((run) => latest.get(taskLifecycleKey(run)) === run);
+}
+
 function relevantNodeId(snapshot: Snapshot): string | null {
   const ids = new Set(snapshot.nodes.map((node) => node.id));
   if (snapshot.activeNodeId && ids.has(snapshot.activeNodeId)) return snapshot.activeNodeId;
@@ -351,6 +363,8 @@ function relevantNodeId(snapshot: Snapshot): string | null {
 type GraphNodeData = GraphNodeSnapshot &
   Record<string, unknown> & {
     locale: Locale;
+    sourcePosition: Position;
+    targetPosition: Position;
     selected: boolean;
     onOpen: () => void;
     onAction: (name: 'run' | 'retry' | 'rerun-check' | 'recover') => void;
@@ -367,6 +381,7 @@ function ActionButton({
   onClick: () => void;
   compact?: boolean;
 }) {
+  if (!capability.allowed) return null;
   return (
     <button
       className={compact ? 'button compact' : 'button'}
@@ -381,6 +396,10 @@ function ActionButton({
 }
 
 function GraphNodeCard({ data }: NodeProps<Node<GraphNodeData, 'operator'>>) {
+  const updateNodeInternals = useUpdateNodeInternals();
+  useEffect(() => {
+    updateNodeInternals(data.id);
+  }, [data.id, data.sourcePosition, data.targetPosition, updateNodeInternals]);
   const labels = COPY[data.locale];
   const actions: Array<['run' | 'retry' | 'rerun-check' | 'recover', CapabilityName, string]> = [
     ['run', 'run', labels.run],
@@ -428,7 +447,7 @@ function GraphNodeCard({ data }: NodeProps<Node<GraphNodeData, 'operator'>>) {
           ) : null;
         })}
       </NodeToolbar>
-      <Handle type="target" position={Position.Left} isConnectable={false} />
+      <Handle type="target" position={data.targetPosition} isConnectable={false} />
       <div className="node-heading">
         <StatusIcon status={data.status} />
         <span className="node-mode">{data.mode === 'write' ? labels.write : labels.read}</span>
@@ -436,7 +455,7 @@ function GraphNodeCard({ data }: NodeProps<Node<GraphNodeData, 'operator'>>) {
       <strong>{nodeTitle(data, data.locale)}</strong>
       <span className="node-status">{STATUS[data.locale][data.status]}</span>
       <span className="node-hint">{statusHint(data.status, data.locale)}</span>
-      <div className="node-meta">
+      {!data.sourceRunId && <div className="node-meta">
         <span>
           {labels.attempt}: {data.attempt}
         </span>
@@ -444,8 +463,8 @@ function GraphNodeCard({ data }: NodeProps<Node<GraphNodeData, 'operator'>>) {
         <span>
           {data.receiptIds.length} {data.locale === 'ru' ? 'отчетов' : 'receipts'}
         </span>
-      </div>
-      <Handle type="source" position={Position.Right} isConnectable={false} />
+      </div>}
+      <Handle type="source" position={data.sourcePosition} isConnectable={false} />
     </article>
   );
 }
@@ -459,38 +478,22 @@ function layoutNodes(
   onOpen: (id: string) => void,
   onAction: (name: Parameters<GraphNodeData['onAction']>[0], nodeId: string) => void,
 ): Array<Node<GraphNodeData, 'operator'>> {
-  const levels = new Map<string, number>();
+  const placements = graphLayout(snapshot.nodes);
   const byId = new Map(snapshot.nodes.map((node) => [node.id, node]));
-  const levelOf = (id: string, visiting = new Set<string>()): number => {
-    if (levels.has(id)) return levels.get(id)!;
-    if (visiting.has(id)) return 0;
-    const node = byId.get(id);
-    if (!node || node.needs.length === 0) return 0;
-    visiting.add(id);
-    const level = Math.max(...node.needs.map((need) => levelOf(need, visiting))) + 1;
-    visiting.delete(id);
-    levels.set(id, level);
-    return level;
-  };
-  snapshot.nodes.forEach((node) => levels.set(node.id, levelOf(node.id)));
-  const rows = new Map<number, GraphNodeSnapshot[]>();
-  snapshot.nodes.forEach((node) =>
-    rows.set(levels.get(node.id) ?? 0, [...(rows.get(levels.get(node.id) ?? 0) ?? []), node]),
-  );
-  return snapshot.nodes.map((item) => {
-    const level = levels.get(item.id) ?? 0;
-    const peers = rows.get(level) ?? [item];
-    const index = peers.findIndex((node) => node.id === item.id);
+  return Array.from(placements, ([id, placement]) => {
+    const item = byId.get(id)!;
     return {
       id: item.id,
       type: 'operator',
       className: `execution-node status-${item.status}`,
       style: { '--node-status-color': `var(--status-${item.status})` } as React.CSSProperties,
-      position: { x: level * 310, y: index * 190 - (peers.length - 1) * 95 },
+      ...placement,
       draggable: false,
       selectable: true,
       data: {
         ...item,
+        sourcePosition: placement.sourcePosition,
+        targetPosition: placement.targetPosition,
         locale,
         selected: selectedNodeId === item.id,
         onOpen: () => onOpen(item.id),
@@ -512,7 +515,7 @@ export function App() {
   }, []);
   const authenticated = Boolean(sessionToken());
   const [runs, setRuns] = useState<RunSummary[]>([]);
-  const [serviceCapabilities, setServiceCapabilities] = useState<ServiceCapabilities>({});
+  const [project, setProject] = useState<ProjectContext | null>(null);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [plan, setPlan] = useState<GraphPlan | null>(null);
@@ -534,6 +537,7 @@ export function App() {
   const [compareLoading, setCompareLoading] = useState(false);
   const [compareError, setCompareError] = useState<ApiError | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [showSetup, setShowSetup] = useState(false);
   const [showDraft, setShowDraft] = useState(false);
   const [gate, setGate] = useState<GateSnapshot | null>(null);
   const [flowInstance, setFlowInstance] = useState<ReactFlowInstance | null>(null);
@@ -547,6 +551,7 @@ export function App() {
   const stopInFlightRef = useRef(false);
   const pollInFlightRef = useRef(false);
   const snapshotRefreshesRef = useRef(new Map<string, SnapshotRefresh>());
+  const visibleRuns = useMemo(() => newestRunsByTask(runs), [runs]);
 
   const selectRun = useCallback((runId: string | null) => {
     if (selectedRunRef.current !== runId) {
@@ -556,6 +561,7 @@ export function App() {
       setPlan(null);
       setEvents([]);
       setSelectedNodeId(null);
+      setTab('overview');
       setEvidence(null);
       setCompareRunId('');
       setComparePlan(null);
@@ -589,6 +595,14 @@ export function App() {
     },
     [selectRun],
   );
+
+  useEffect(() => {
+    if (snapshot?.workflow === 'autonomous' && snapshot.successorRunId &&
+        snapshot.successorRunId !== snapshot.runId && snapshot.integrity.valid) {
+      const successor = snapshot.successorRunId;
+      queueMicrotask(() => selectRun(successor));
+    }
+  }, [snapshot?.workflow, snapshot?.successorRunId, snapshot?.runId, snapshot?.integrity.valid, selectRun]);
 
   const commitPlan = useCallback(
     async (runId: string, expectedHash: string | undefined, next: GraphPlan | null) => {
@@ -629,14 +643,13 @@ export function App() {
     const result = await api.listRuns();
     if (request !== runsRequestRef.current) return;
     setRuns(result.runs);
-    setServiceCapabilities(result.capabilities);
     if (result.runs.length === 0) {
       selectRun(null);
       return;
     }
     const current = selectedRunRef.current;
     if (!current || !result.runs.some((run) => run.runId === current))
-      selectRun(result.runs[0]?.runId ?? null);
+      selectRun(newestRunsByTask(result.runs)[0]?.runId ?? null);
   }, [selectRun]);
 
   const refreshSnapshot = useCallback(
@@ -669,7 +682,7 @@ export function App() {
               continue;
             }
             setSelectedNodeId((current) =>
-              current && next.nodes.some((node) => node.id === current)
+              current && workflowProjection(next).nodes.some((node) => node.id === current)
                 ? current
                 : (next.activeNodeId ?? next.nodes[0]?.id ?? null),
             );
@@ -703,7 +716,8 @@ export function App() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      await refreshRuns();
+      const [, context] = await Promise.all([refreshRuns(), api.project()]);
+      setProject(context);
       setError(null);
     } catch (reason) {
       setError(reason as ApiError);
@@ -820,24 +834,29 @@ export function App() {
     };
   }, [refreshSnapshot, selectedRunId, snapshot?.revision]);
 
-  const selectedNode = snapshot?.nodes.find((node) => node.id === selectedNodeId) ?? null;
+  const visualSnapshot = useMemo(() => snapshot ? workflowProjection(snapshot) : null, [snapshot]);
+  const selectedNode = visualSnapshot?.nodes.find((node) => node.id === selectedNodeId) ?? null;
   const graphNodes = useMemo(
     () =>
-      snapshot
-        ? layoutNodes(snapshot, locale, selectedNodeId, setSelectedNodeId, (action, nodeId) => {
+      visualSnapshot
+        ? layoutNodes(visualSnapshot, locale, selectedNodeId, id => {
+            setSelectedNodeId(id);
+            if (visualSnapshot.nodes.find(node => node.id === id)?.sourceRunId) setTab('evidence');
+          }, (action, nodeId) => {
             void execute(action, nodeId);
           })
         : [],
     // execute reads the latest committed snapshot and the selected node id from state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [locale, selectedNodeId, snapshot],
+    [locale, selectedNodeId, visualSnapshot],
   );
   const graphEdges: Edge[] = useMemo(() => {
-    const byId = new Map(snapshot?.nodes.map((node) => [node.id, node]));
-    return (snapshot?.edges ?? []).map((edge) => {
+    const byId = new Map(visualSnapshot?.nodes.map((node) => [node.id, node]));
+    return (visualSnapshot?.edges ?? []).map((edge) => {
       // activeNodeId also points to gates/ready steps; only committed statuses indicate work.
       const active = Boolean(
         snapshot?.integrity.valid &&
+        !snapshot.failureReason &&
         !['stale', 'uncertain'].includes(snapshot.status) &&
         byId.get(edge.target)?.status === 'running' &&
         byId.get(edge.source)?.status === 'passed' &&
@@ -845,13 +864,22 @@ export function App() {
       );
       return {
         ...edge,
+        type: 'smoothstep',
+        markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16 },
         animated: active,
         className: active ? 'dependency-active' : 'dependency-idle',
         style: { strokeWidth: active ? 2.5 : 1.5 },
       };
     });
-  }, [snapshot]);
+  }, [snapshot, visualSnapshot]);
   const currentGraphNodeId = snapshot ? relevantNodeId(snapshot) : null;
+  const autonomousRecoveryNode =
+    snapshot?.workflow === 'autonomous' &&
+    (Boolean(snapshot.failureReason) || ['failed', 'uncertain', 'stale'].includes(snapshot.status)) &&
+    selectedNode &&
+    !selectedNode.sourceRunId
+      ? selectedNode
+      : null;
 
   const focusGraphNode = useCallback(
     (nodeId: string) => {
@@ -957,13 +985,13 @@ export function App() {
     try {
       const next =
         operation.kind === 'create'
-          ? await api.createRun(operation.spec, operation.runId, operation.operationId)
+          ? await api.intake(operation.input)
           : await api.control(operation.runId, operation.action, operation.request);
       const successor =
         operation.kind === 'control' &&
-        ['replan', 'recover'].includes(operation.action) &&
+        ['replan', 'recover', 'revise-plan'].includes(operation.action) &&
         next.supersedesRunId === operation.runId;
-      if (next.runId !== operation.runId && !successor) {
+      if (operation.kind === 'control' && next.runId !== operation.runId && !successor) {
         throw {
           code: 'INVALID_SNAPSHOT',
           message: 'Ответ операции относится к другому run.',
@@ -979,9 +1007,7 @@ export function App() {
       if (operation.kind === 'create') setShowCreate(false);
       setPending(null);
       setError(null);
-      setNotice(
-        locale === 'ru' ? 'Состояние сохранено сервером.' : 'The service committed the new state.',
-      );
+      setNotice('');
       await refreshHistory(next.runId).catch(() => undefined);
       await refreshRuns();
     } catch (reason) {
@@ -1010,7 +1036,7 @@ export function App() {
     try {
       setEvidence({
         type: 'receipt',
-        value: await api.receipt(snapshot.runId, hash),
+        value: await api.receipt(selectedNode.sourceRunId ?? snapshot.runId, hash),
       });
     } catch (reason) {
       setError(reason as ApiError);
@@ -1022,7 +1048,7 @@ export function App() {
     try {
       setEvidence({
         type: 'artifact',
-        value: await api.artifact(snapshot.runId, hash),
+        value: await api.artifact(selectedNode?.sourceRunId ?? snapshot.runId, hash),
       });
     } catch (reason) {
       setError(reason as ApiError);
@@ -1051,29 +1077,75 @@ export function App() {
     requestAnimationFrame(() => gateDialog.current?.showModal());
   }
 
-  async function createRun(spec: TaskInput) {
-    const capability = serviceCapabilities.create ?? {
-      allowed: false,
-      reason: 'Сервер не сообщил о доступности действия',
-    };
-    if (!capability.allowed || inFlightRef.current)
-      return setNotice(humanText(capability.reason, locale) || labels.unavailable);
+  function requestReplan() {
+    if (!snapshot?.planHash || snapshot.revision == null || !getCapability(snapshot.capabilities, 'requestReplan').allowed) return;
+    if (snapshot.phase !== 'planning') { setShowDraft(true); return; }
+    const id = operationId('replan');
+    void sendOperation({kind: 'control', key: `${snapshot.runId}:replan`, operationId: id,
+      runId: snapshot.runId, action: 'replan', request: {
+        operationId: id, expectedRevision: snapshot.revision, planHash: snapshot.planHash,
+      },
+    });
+  }
+
+  async function createRun(fields: TaskFields) {
+    if (!project?.capabilities.intake.allowed || inFlightRef.current) return;
     const existing = pending?.kind === 'create' ? pending : null;
+    const id = operationId('intake');
     const operation: PendingCreateOperation = existing ?? {
-      kind: 'create',
-      key: 'create',
-      operationId: operationId('create'),
-      runId: operationId('run'),
-      spec: structuredClone(spec),
+      kind: 'create', key: 'create', operationId: id,
+      input: { ...fields, operationId: id, contextHash: project.contextHash },
     };
     await sendOperation(operation);
   }
+
+  function approveWorkflow(approvedGate: GateSnapshot) {
+    if (approvedGate.expiresAt <= Date.now()) {
+      setNotice('Согласование устарело. Обновляем план для повторной проверки.');
+      if (snapshot) void refreshSnapshot(snapshot.runId, true);
+      return;
+    }
+    if (!snapshot?.planHash || snapshot.revision == null || !plan || pending || busy ||
+        !snapshot.integrity.valid || approvedGate.planHash !== snapshot.planHash ||
+        approvedGate.expiresAt <= Date.now() ||
+        !getCapability(snapshot.nodes.find(node => node.id === approvedGate.nodeId)?.capabilities ?? {}, 'approve').allowed) return;
+    const id = operationId('gate');
+    void sendOperation({ kind: 'control', key: `${snapshot.runId}:gate:${approvedGate.nodeId}:approve`,
+      operationId: id, runId: snapshot.runId, action: 'gate', request: {
+        operationId: id, expectedRevision: snapshot.revision, planHash: snapshot.planHash,
+        nodeId: approvedGate.nodeId, decision: 'approve', challenge: approvedGate.challenge,
+        permissions: approvedGate.requiredPermissions,
+      } });
+  }
+
+  function reviseWorkflow(feedback: string) {
+    if (!snapshot?.planHash || snapshot.revision == null || pending || busy ||
+        !getCapability(snapshot.capabilities, 'revisePlan').allowed) return;
+    const id = operationId('revise-plan');
+    void sendOperation({ kind: 'control', key: `${snapshot.runId}:revise-plan`, operationId: id,
+      runId: snapshot.runId, action: 'revise-plan', request: {
+        operationId: id, expectedRevision: snapshot.revision, planHash: snapshot.planHash, feedback,
+      } });
+  }
+
+  const planningActionLabel = getCapability(snapshot?.capabilities ?? {}, 'requestReplan').label ?? labels.replan;
+  const composing = showCreate || (!snapshot && !selectedRunId);
+  const composer = <TaskComposer
+    capability={project?.capabilities.intake ?? null}
+    busy={busy} pending={pending?.kind === 'create'} error={error}
+    onSubmit={createRun}
+    onRetry={() => {
+      if (pending?.kind === 'create') void sendOperation(pending);
+      else void api.project().then(context => { setProject(context); setError(null); }).catch(reason => setError(reason as ApiError));
+    }}
+    onClose={snapshot && !busy && pending?.kind !== 'create' ? () => { setShowCreate(false); document.getElementById('new-task')?.focus(); } : undefined}
+  />;
 
   if (!authenticated) return <MissingSession labels={labels} />;
   if (loading && runs.length === 0) return <LoadingState label={labels.loading} />;
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell${snapshot?.workflow === 'autonomous' ? ' autonomous' : ''}`}>
       <a className="skip-link" href="#graph-canvas">
         {labels.graph}
       </a>
@@ -1090,9 +1162,12 @@ export function App() {
           </div>
         </div>
         <div className="topbar-actions">
+          <button className="button quiet" type="button" aria-expanded={showSetup} onClick={() => setShowSetup(!showSetup)}>Настройки проекта</button>
+          {runs.length === 0 && <button type="button" className="button quiet" onClick={() => void load()}>{labels.refresh}</button>}
           <span className={streamConnected ? 'connection live' : 'connection'}>
             {streamConnected ? labels.live : labels.disconnected}
           </span>
+          {!composing && snapshot?.workflow !== 'autonomous' && <>
           <button
             className="button quiet"
             onClick={() => setLocale(locale === 'ru' ? 'en' : 'ru')}
@@ -1100,6 +1175,7 @@ export function App() {
           >
             {labels.language}
           </button>
+          </>}
           <button
             className="button quiet"
             onClick={() => document.documentElement.toggleAttribute('data-dark')}
@@ -1120,7 +1196,7 @@ export function App() {
           <ActionButton
             capability={
               snapshot
-                ? getCapability(snapshot.capabilities, 'run')
+                ? (snapshot.workflow === 'autonomous' ? { allowed: false, reason: null } : getCapability(snapshot.capabilities, 'run'))
                 : { allowed: false, reason: labels.unavailable }
             }
             onClick={() => void execute('run')}
@@ -1144,7 +1220,7 @@ export function App() {
           onDismiss={() => setStopError(null)}
         />
       )}
-      {error && !showCreate && (
+      {error && !showCreate && pending?.kind !== 'create' && (
         <ErrorNotice
           error={error}
           labels={labels}
@@ -1160,8 +1236,9 @@ export function App() {
         </div>
       )}
 
-      <section className="operator-layout">
-        <aside className="run-rail" aria-label={labels.runs}>
+      {showSetup && <SetupPanel onClose={() => setShowSetup(false)} />}
+      <section className={`operator-layout${composing ? ' composing' : ''}${runs.length === 0 ? ' no-runs' : ''}`}>
+        {runs.length > 0 && <aside className="run-rail" aria-label={labels.runs}>
           <div className="rail-heading">
             <h2>{labels.runs}</h2>
             <button
@@ -1171,42 +1248,47 @@ export function App() {
             >
               {labels.refresh}
             </button>
-            <ActionButton
-              compact
-              capability={
-                serviceCapabilities.create ?? {
-                  allowed: false,
-                  reason: labels.unavailable,
-                }
-              }
-              onClick={() => {
-                setError(null);
-                setShowCreate(true);
-              }}
-            >
-              {labels.create}
-            </ActionButton>
+            <button
+              id="new-task"
+              type="button"
+              className="button compact quiet"
+              disabled={!project?.capabilities.intake.allowed}
+              onClick={() => { setError(null); setShowCreate(true); }}
+            >{labels.create}</button>
+
           </div>
           <div className="run-list">
-            {runs.map((run) => (
+            {visibleRuns.map((run) => (
               <RunButton
                 key={run.runId}
                 run={run}
                 locale={locale}
-                active={run.runId === selectedRunId}
+                active={run.runId === selectedRunId || Boolean(run.task?.taskNumber && run.task.taskNumber === snapshot?.task?.taskNumber && run.task.id === snapshot?.task?.id)}
                 onClick={() => selectRun(run.runId)}
               />
             ))}
             {runs.length === 0 && <p className="empty-copy">{labels.noRuns}</p>}
           </div>
-          {snapshot && <RunHealth snapshot={snapshot} locale={locale} />}
-        </aside>
+          {snapshot && <details className="health-details"><summary>Состояние проекта</summary><RunHealth snapshot={snapshot} locale={locale} /></details>}
+        </aside>}
 
-        <section className="graph-region" id="graph-canvas" aria-label={labels.graph}>
+        {composing ? composer : <section className="graph-region" id="graph-canvas" aria-label={labels.graph}>
+          {snapshot?.workflow !== 'autonomous' && snapshot?.phase === 'planning' && getCapability(snapshot.capabilities, 'requestReplan').allowed && (
+            <div className="next-action"><p>Следующая версия плана будет проверена сервером. Новые права потребуют вашего решения.</p>
+              <button className="button primary" type="button" disabled={busy} onClick={requestReplan}>{planningActionLabel}</button></div>
+          )}
           <div className="graph-header">
             <div>
-              <h2>{snapshot?.task?.id ?? labels.graph}</h2>
-              <p>{snapshot?.task?.goal ?? (selectedRunId ? labels.loading : labels.noRuns)}</p>
+              <h2>{labels.graph}</h2>
+              <details className="graph-goal">
+                <summary>
+                  <span>
+                    {snapshot?.task?.taskNumber ?? snapshot?.task?.id ?? (selectedRunId ? labels.loading : labels.noRuns)}
+                    {snapshot?.task?.goal ? ` · ${snapshot.task.goal}` : ''}
+                  </span>
+                </summary>
+                <p>{snapshot?.task?.description ?? snapshot?.task?.goal ?? (selectedRunId ? labels.loading : labels.noRuns)}</p>
+              </details>
             </div>
             {snapshot && (
               <div className="graph-tools">
@@ -1260,9 +1342,13 @@ export function App() {
                 elementsSelectable
                 fitView
                 fitViewOptions={{
-                  ...(currentGraphNodeId ? { nodes: [{ id: currentGraphNodeId }] } : {}),
-                  padding: 0.32,
-                  minZoom: 0.9,
+                  ...(window.matchMedia('(max-width: 720px)').matches && currentGraphNodeId
+                    ? {
+                        nodes: [{ id: currentGraphNodeId }],
+                        minZoom: 0.9,
+                        padding: 0.32,
+                      }
+                    : { minZoom: 0.08, padding: 0.14 }),
                   maxZoom: 1,
                 }}
                 maxZoom={1.35}
@@ -1289,12 +1375,14 @@ export function App() {
                 proOptions={{ hideAttribution: false }}
               >
                 <Background color="var(--flow-grid)" gap={24} size={1} />
-                <MiniMap
-                  ariaLabel={locale === 'ru' ? 'Мини-карта графа' : 'Graph minimap'}
-                  pannable
-                  zoomable
-                  nodeColor={(node) => `var(--status-${String(node.data.status)})`}
-                />
+                {(visualSnapshot?.nodes.length ?? 0) > 12 && (
+                  <MiniMap
+                    ariaLabel={locale === 'ru' ? 'Мини-карта графа' : 'Graph minimap'}
+                    pannable
+                    zoomable
+                    nodeColor={(node) => `var(--status-${String(node.data.status)})`}
+                  />
+                )}
                 <Controls showInteractive={false} />
               </ReactFlow>
             ) : selectedRunId && !snapshot ? (
@@ -1305,9 +1393,9 @@ export function App() {
               <EmptyGraph labels={labels} />
             )}
           </div>
-        </section>
+        </section>}
 
-        <aside className="detail-panel" aria-label={labels.details}>
+        {!composing && <aside className="detail-panel" aria-label={labels.details}>
           <nav className="detail-tabs" aria-label={labels.details}>
             {(['overview', 'evidence', 'history', 'plan'] as const).map((name) => (
               <button
@@ -1323,7 +1411,22 @@ export function App() {
             ))}
           </nav>
           <div className="detail-scroll">
-            {tab === 'overview' &&
+            {snapshot?.workflow === 'autonomous' ? (
+              <>
+                <div hidden={tab !== 'overview' && tab !== 'plan'}><WorkflowPanel key={snapshot.runId} snapshot={snapshot} plan={plan} busy={busy || Boolean(pending)} onApprove={approveWorkflow} onRevise={reviseWorkflow} /></div>
+                {tab === 'overview' && autonomousRecoveryNode && (
+                  <NodeDetails
+                    node={autonomousRecoveryNode}
+                    locale={locale}
+                    busy={busy}
+                    onAction={(action) => void execute(action, autonomousRecoveryNode.id)}
+                    onGate={() => undefined}
+                    onReplan={requestReplan}
+                    replanLabel={getCapability(autonomousRecoveryNode.capabilities, 'requestReplan').label ?? labels.replan}
+                  />
+                )}
+              </>
+            ) : tab === 'overview' &&
               (selectedNode ? (
                 <NodeDetails
                   node={selectedNode}
@@ -1334,7 +1437,8 @@ export function App() {
                     const found = snapshot?.gates.find((item) => item.nodeId === selectedNode.id);
                     if (found) openGate(found);
                   }}
-                  onReplan={() => setShowDraft(true)}
+                  onReplan={requestReplan}
+                  replanLabel={getCapability(selectedNode.capabilities, 'requestReplan').label ?? labels.replan}
                 />
               ) : (
                 <p className="empty-copy">{labels.selectNode}</p>
@@ -1342,14 +1446,14 @@ export function App() {
             {tab === 'evidence' && (
               <EvidenceList
                 node={selectedNode}
-                planning={snapshot?.planningArtifacts ?? []}
+                planning={selectedNode?.sourceRunId ? [] : snapshot?.planningArtifacts ?? []}
                 locale={locale}
                 onReceipt={openReceipt}
                 onArtifact={openArtifact}
               />
             )}
             {tab === 'history' && <HistoryPanel events={events} locale={locale} />}
-            {tab === 'plan' && (
+            {tab === 'plan' && snapshot?.workflow !== 'autonomous' && (
               <PlanPanel
                 plan={plan}
                 runs={runs.filter((run) => run.runId !== selectedRunId)}
@@ -1362,28 +1466,9 @@ export function App() {
               />
             )}
           </div>
-        </aside>
+        </aside>}
       </section>
 
-      {showCreate && (
-        <CreateRunDialog
-          locale={locale}
-          capability={
-            serviceCapabilities.create ?? {
-              allowed: false,
-              reason: labels.unavailable,
-            }
-          }
-          busy={busy}
-          error={error}
-          pending={pending?.kind === 'create'}
-          onClose={() => setShowCreate(false)}
-          onCreate={createRun}
-          onRetry={() => {
-            if (pending?.kind === 'create') void sendOperation(pending);
-          }}
-        />
-      )}
       {showDraft && snapshot && plan && (
         <DraftDialog
           key={`${snapshot.runId}:${snapshot.planHash ?? ''}`}
@@ -1422,6 +1507,7 @@ export function App() {
         key={gate?.challenge ?? 'closed-gate'}
         ref={gateDialog}
         gate={gate}
+        planNodes={snapshot?.planHash === gate?.planHash ? snapshot?.nodes ?? [] : []}
         locale={locale}
         busy={busy}
         node={gate ? (snapshot?.nodes.find((node) => node.id === gate.nodeId) ?? null) : null}
@@ -1481,11 +1567,9 @@ function RunButton({
     >
       <span className={`status-mark status-${run.status}`} aria-hidden="true" />
       <span>
-        <strong>{run.task?.id ?? run.runId}</strong>
+        <strong>{run.task?.taskNumber ?? run.task?.id ?? run.runId}</strong>
         <small>{run.task?.goal ?? run.integrity.reason ?? run.runId}</small>
-        <small title={run.runId}>
-          v{run.planVersion ?? '—'} · {run.runId}
-        </small>
+        <small title={run.runId}>Версия плана {run.planVersion ?? '—'}</small>
       </span>
       <em>{STATUS[locale][run.status] ?? run.status}</em>
     </button>
@@ -1534,6 +1618,7 @@ function NodeDetails({
   onAction,
   onGate,
   onReplan,
+  replanLabel,
 }: {
   node: GraphNodeSnapshot;
   locale: Locale;
@@ -1541,6 +1626,7 @@ function NodeDetails({
   onAction: (action: 'run' | 'retry' | 'rerun-check' | 'recover') => void;
   onGate: () => void;
   onReplan: () => void;
+  replanLabel: string;
 }) {
   const labels = COPY[locale];
   const actions: Array<['run' | 'retry' | 'rerun-check' | 'recover', CapabilityName, string]> = [
@@ -1586,7 +1672,7 @@ function NodeDetails({
           capability={getCapability(node.capabilities, 'requestReplan')}
           onClick={onReplan}
         >
-          {labels.replan}
+          {replanLabel}
         </ActionButton>
       </div>
       <dl className="fact-list">
@@ -1663,6 +1749,7 @@ function EvidenceList({
   return (
     <div className="evidence-list">
       <h2>{node ? nodeTitle(node, locale) : labels.evidence}</h2>
+      {node?.sourceRunId && <p className="field-hint">Сохраненный анализ из предыдущей версии. Отчеты относятся к исходному запуску <code>{node.sourceRunId}</code>, план <code>{node.sourcePlanHash?.slice(0, 12)}</code>.</p>}
       {node?.receiptIds.map((hash, index) => (
         <button key={hash} onClick={() => onReceipt(hash)} type="button">
           <span>
@@ -1714,7 +1801,7 @@ function HistoryPanel({ events, locale }: { events: HistoryEvent[]; locale: Loca
             {changes.map((node) => (
               <small key={node.id}>
                 {node.id}: {STATUS[locale][node.status]} · {labels.attempt} {node.attempt} ·{' '}
-                {node.receiptIds.length} receipts
+                {node.receiptIds.length} {locale === 'ru' ? 'отчетов' : 'receipts'}
               </small>
             ))}
           </li>
@@ -1806,7 +1893,7 @@ function PlanPanel({
         </div>
       )}
       <details>
-        <summary>{locale === 'ru' ? 'Nodes плана' : 'Plan nodes'}</summary>
+        <summary>{locale === 'ru' ? 'Этапы плана' : 'Plan nodes'}</summary>
         <pre>{JSON.stringify(plan.nodes, null, 2)}</pre>
       </details>
     </div>
@@ -1883,155 +1970,6 @@ function EmptyGraph({ labels }: { labels: (typeof COPY)[Locale] }) {
       <h2>{labels.graph}</h2>
       <p>{labels.noRuns}</p>
     </div>
-  );
-}
-
-function CreateRunDialog({
-  locale,
-  capability,
-  busy,
-  error,
-  pending,
-  onClose,
-  onCreate,
-  onRetry,
-}: {
-  locale: Locale;
-  capability: Capability;
-  busy: boolean;
-  error: ApiError | null;
-  pending: boolean;
-  onClose: () => void;
-  onCreate: (spec: TaskInput) => void;
-  onRetry: () => void;
-}) {
-  const labels = COPY[locale];
-  const { dialogRef, onCancel } = useModalLifecycle(onClose);
-  const [values, setValues] = useState({
-    id: '',
-    goal: '',
-    instructions: '',
-    scope: '',
-    contextPaths: '',
-    acceptance: '',
-    forbiddenPaths: '',
-    includeUntracked: '',
-  });
-  const lines = (value: string) =>
-    value
-      .split('\n')
-      .map((item) => item.trim())
-      .filter(Boolean);
-  return (
-    <dialog
-      className="sheet-dialog"
-      ref={dialogRef}
-      onCancel={onCancel}
-      aria-labelledby="create-title"
-    >
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          onCreate({
-            id: values.id,
-            goal: values.goal,
-            instructions: values.instructions,
-            scope: lines(values.scope),
-            contextPaths: lines(values.contextPaths),
-            acceptance: lines(values.acceptance),
-            forbiddenPaths: lines(values.forbiddenPaths),
-            includeUntracked: lines(values.includeUntracked),
-            checks: [],
-            resources: [],
-            limits: { maxAttempts: 2, maxReplans: 2, timeoutMs: 600000 },
-          });
-        }}
-      >
-        <header>
-          <div>
-            <h2 id="create-title">{labels.createTitle}</h2>
-            <p>{labels.createHint}</p>
-          </div>
-          <button className="button quiet" onClick={onClose} type="button">
-            {labels.cancel}
-          </button>
-        </header>
-        {error && (
-          <div className="dialog-error" role="alert">
-            <p>
-              {error.code}: {error.message}
-            </p>
-            {pending && (
-              <button className="button" disabled={busy} onClick={onRetry} type="button">
-                {labels.retrySame}
-              </button>
-            )}
-          </div>
-        )}
-        {(
-          [
-            'id',
-            'goal',
-            'instructions',
-            'scope',
-            'contextPaths',
-            'acceptance',
-            'forbiddenPaths',
-            'includeUntracked',
-          ] as const
-        ).map((name) => (
-          <label key={name}>
-            {name === 'id'
-              ? labels.taskId
-              : name === 'goal'
-                ? labels.goal
-                : name === 'instructions'
-                  ? labels.instructions
-                  : name === 'scope'
-                    ? labels.scope
-                    : name === 'contextPaths'
-                      ? locale === 'ru'
-                        ? 'Дополнительные пути для чтения (по одному в строке)'
-                        : 'Additional read-only context paths (one per line)'
-                      : name === 'acceptance'
-                        ? labels.acceptance
-                        : name === 'forbiddenPaths'
-                          ? labels.forbidden
-                          : labels.includeUntracked}
-            {name === 'id' ? (
-              <input
-                required
-                maxLength={41}
-                pattern="[A-Z][A-Z0-9-]{2,40}"
-                placeholder="TASK-101"
-                value={values[name]}
-                onChange={(event) => setValues({ ...values, [name]: event.target.value })}
-              />
-            ) : (
-              <textarea
-                required={['goal', 'instructions', 'scope', 'acceptance'].includes(name)}
-                maxLength={name === 'instructions' ? 16000 : 4000}
-                value={values[name]}
-                onChange={(event) => setValues({ ...values, [name]: event.target.value })}
-              />
-            )}
-          </label>
-        ))}
-        <div className="dialog-actions">
-          <button className="button quiet" onClick={onClose} type="button">
-            {labels.cancel}
-          </button>
-          <button
-            className="button primary"
-            disabled={!capability.allowed || busy}
-            title={capability.allowed ? undefined : humanText(capability.reason) || undefined}
-            type="submit"
-          >
-            {busy ? '…' : labels.createRun}
-          </button>
-        </div>
-      </form>
-    </dialog>
   );
 }
 
@@ -2122,17 +2060,20 @@ const GateDialog = React.forwardRef<
   {
     gate: GateSnapshot | null;
     node: GraphNodeSnapshot | null;
+    planNodes: GraphNodeSnapshot[];
     locale: Locale;
     busy: boolean;
     onClose: () => void;
     onSubmit: (decision: 'approve' | 'accept' | 'reject', reason: string) => void;
   }
->(function GateDialog({ gate, node, locale, busy, onClose, onSubmit }, ref) {
+>(function GateDialog({ gate, node, planNodes, locale, busy, onClose, onSubmit }, ref) {
   const labels = COPY[locale];
   const [confirmed, setConfirmed] = useState(false);
   const [reject, setReject] = useState(false);
   const [reason, setReason] = useState('');
   if (!gate) return <dialog ref={ref} />;
+  const skills = [...new Set(planNodes.flatMap(item => item.skills.map(skill => `${skill.id} · ${skill.hash.slice(0, 12)}`)))];
+  const checks = planNodes.filter(item => item.action.kind === 'checks');
   const decision = reject ? 'reject' : gate.type === 'accept-result' ? 'accept' : 'approve';
   const capability = getCapability(
     node?.capabilities ?? {},
@@ -2159,7 +2100,7 @@ const GateDialog = React.forwardRef<
         <header>
           <div>
             <h2 id="gate-title">{labels.gateTitle}</h2>
-            <p>{node ? nodeTitle(node, locale) : humanText(gate.title, locale)}</p>
+            <p>{humanText(gate.title, locale)}</p>
           </div>
           <button className="button quiet" onClick={onClose} type="button">
             {labels.cancel}
@@ -2176,10 +2117,14 @@ const GateDialog = React.forwardRef<
           <dd>{gate.readPaths?.join('\n') || labels.none}</dd>
           <dt>{labels.permissions}</dt>
           <dd>{gate.requiredPermissions.join('\n') || labels.none}</dd>
+          <dt>{labels.skills}</dt>
+          <dd>{skills.join('\n') || labels.none}</dd>
+          <dt>{labels.checks}</dt>
+          <dd>{checks.map(item => `${nodeTitle(item, locale)} (${item.action.id})`).join('\n') || (locale === 'ru' ? 'В этой версии плана не указаны' : 'Not specified in this plan')}</dd>
           <dt>{labels.risks}</dt>
           <dd>{gate.risks.join('\n')}</dd>
           <dt>{labels.evidence}</dt>
-          <dd>{gate.evidence.length ? `${gate.evidence.length} artifacts` : labels.none}</dd>
+          <dd>{gate.evidence.length ? `${gate.evidence.length} ${locale === 'ru' ? 'материалов' : 'artifacts'}` : labels.none}</dd>
           <dt>{labels.consequences}</dt>
           <dd>{reject ? gate.consequences.reject : gate.consequences.approve}</dd>
         </dl>

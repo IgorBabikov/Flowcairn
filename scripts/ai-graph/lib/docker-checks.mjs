@@ -21,7 +21,7 @@ import {
 import path from 'node:path';
 import { homedir } from 'node:os';
 import { GraphError, canonicalJson, hashObject, sha256 } from './io.mjs';
-import { loadProjectProfile, RUNTIME_ROOT } from './project.mjs';
+import { loadProjectProfile, RUNTIME_ROOT, packageManagerLock, validatePackageManagerProject } from './project.mjs';
 import { resolveAction } from './registry.mjs';
 import { GraphPlanSchema, NodeDefinitionSchema, TaskSpecSchema } from './schemas.mjs';
 
@@ -55,7 +55,6 @@ function dockerExecutable() {
   fail('DOCKER_UNAVAILABLE', 'Доверенный Docker executable не найден');
 }
 const BASE_IMAGE = 'node:22-alpine';
-const PNPM_VERSION = '11.8.0';
 const IMAGE_REPOSITORY = 'flowcairn-checks';
 const IMAGE_LABEL = 'com.flowcairn.check-image';
 const CONTEXT_LABEL = 'com.flowcairn.context-hash';
@@ -265,15 +264,15 @@ function safeFile(root, relative, maxBytes = 16 * 1024 * 1024) {
 
 function contextDescription(root, baseId) {
   const profile = loadProjectProfile(root);
-  const requiredLock = profile.packageManager === 'npm' ? 'package-lock.json' : 'pnpm-lock.yaml';
+  const requiredLock = packageManagerLock(profile.packageManager);
   if (!profile.manifests.includes('package.json') || !profile.manifests.includes(requiredLock))
     fail('CHECK_CONTEXT_UNSAFE', 'Profile должен включать package.json и lockfile');
+  const packageManagerVersion = validatePackageManagerProject(root, profile.packageManager);
   const sources = profile.manifests.map((relative) => {
     if (
       !(
-        relative === 'pnpm-lock.yaml' ||
-        relative === 'package-lock.json' ||
-        relative === 'pnpm-workspace.yaml' ||
+        relative === requiredLock ||
+        (profile.packageManager === 'pnpm' && relative === 'pnpm-workspace.yaml') ||
         path.posix.basename(relative) === 'package.json'
       )
     )
@@ -307,7 +306,7 @@ function contextDescription(root, baseId) {
   const identity = {
     version: 2,
     baseId,
-    pnpmVersion: PNPM_VERSION,
+    packageManagerVersion,
     profileHash: hashObject(profile),
     sources: sources.map(({ target, hash, size }) => ({ target, hash, size })),
   };
@@ -315,6 +314,7 @@ function contextDescription(root, baseId) {
   return {
     sources,
     packageManager: profile.packageManager,
+    packageManagerVersion,
     hash,
     tag: `${IMAGE_REPOSITORY}:${hash.slice(0, 32)}`,
   };
@@ -689,6 +689,8 @@ export function prepareCheckImage({ root }) {
         `BASE_IMAGE=${expected.baseReference}`,
         '--build-arg',
         `PACKAGE_MANAGER=${expected.packageManager}`,
+        '--build-arg',
+        `PACKAGE_MANAGER_VERSION=${expected.packageManagerVersion}`,
         '--tag',
         expected.tag,
         contextRoot,
@@ -732,7 +734,9 @@ function validateFingerprint(before) {
             !part ||
             part === '.' ||
             part === '..' ||
-            ['.git', '.ai-orchestrator', 'node_modules'].includes(part.toLowerCase()),
+            ['.git', '.ai-orchestrator', 'node_modules', '.npmrc', '.netrc', '.pypirc'].includes(part.toLowerCase()) ||
+            /^(?:\.env(?:\.|$)|credentials(?:\.json)?$|id_rsa$|id_ed25519$)/i.test(part) ||
+            /\.(?:pem|key|p12|pfx)$/i.test(part),
         ) ||
       !HASH_PATTERN.test(file.hash) ||
       !['100644', '100755'].includes(file.mode) ||
@@ -858,7 +862,8 @@ function intendedSecurity(input, contractFile) {
     logOptions: { compress: 'false', 'max-file': '1', 'max-size': '8m' },
     tmpfs: {
       '/tmp': 'rw,noexec,nosuid,nodev,size=67108864,nr_inodes=16384,uid=1000,gid=1000,mode=0700',
-      '/workspace': 'rw,nosuid,nodev,size=1073741824,nr_inodes=131072,uid=1000,gid=1000,mode=0700',
+      // Docker tmpfs defaults to noexec. Approved checks need package bins/native tools here.
+      '/workspace': 'rw,exec,nosuid,nodev,size=1073741824,nr_inodes=131072,uid=1000,gid=1000,mode=0700',
     },
     mounts: [
       { destination: '/contract.json', rw: false, source: contractFile, type: 'bind' },
@@ -940,7 +945,7 @@ function createArguments({ input, image, contractFile, labels, name }) {
     '--mount',
     `type=bind,src=${contractFile},dst=/contract.json,readonly`,
     '--tmpfs',
-    '/workspace:rw,nosuid,nodev,size=1073741824,nr_inodes=131072,uid=1000,gid=1000,mode=0700',
+    '/workspace:rw,exec,nosuid,nodev,size=1073741824,nr_inodes=131072,uid=1000,gid=1000,mode=0700',
     '--workdir',
     '/workspace',
     '--user',

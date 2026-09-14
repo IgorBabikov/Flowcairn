@@ -8,7 +8,9 @@ import type {
   RunSummary,
   ServiceCapabilities,
   Snapshot,
-  TaskInput,
+  IntakeInput,
+  ProjectContext,
+  OnboardingStatus,
 } from './contracts';
 import { isSnapshot } from './contracts';
 
@@ -61,7 +63,7 @@ function errorFrom(status: number, value: unknown): ApiError {
   return {
     code,
     message,
-    retryable: status >= 500 || status === 409 || status === 429,
+    retryable: code !== 'STALE_CONTEXT' && (status >= 500 || status === 409 || status === 429),
   };
 }
 
@@ -95,6 +97,13 @@ async function requestJson<T>(url: string, init: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
+  async onboarding(): Promise<OnboardingStatus> {
+    const body = await requestJson<OnboardingStatus>('/api/onboarding');
+    if (!body || typeof body.configured !== 'boolean' || !body.values ||
+        !Array.isArray(body.providers) || !Array.isArray(body.limitations))
+      throw { code: 'INVALID_ONBOARDING', message: 'Не удалось прочитать настройки проекта.', retryable: true } satisfies ApiError;
+    return body;
+  },
   async listRuns(): Promise<{
     runs: RunSummary[];
     capabilities: ServiceCapabilities;
@@ -108,18 +117,34 @@ export const api = {
       capabilities: body.capabilities ?? {},
     };
   },
-  async createRun(spec: TaskInput, runId: string, operationId: string): Promise<Snapshot> {
-    const body = await requestJson<{ result: Snapshot }>('/api/runs', {
+  async project(): Promise<ProjectContext> {
+    const body = await requestJson<ProjectContext>('/api/project');
+    if (!body || body.schemaVersion !== 2 || typeof body.name !== 'string' ||
+        typeof body.contextHash !== 'string' || !Array.isArray(body.contextPaths) ||
+        !body.contextPaths.every(path => typeof path === 'string') || !Array.isArray(body.checks) ||
+        !body.checks.every(check => typeof check === 'string') || !Array.isArray(body.scopeCandidates) ||
+        !body.scopeCandidates.every(path => typeof path === 'string') || !body.ai ||
+        typeof body.capabilities?.intake?.allowed !== 'boolean') {
+      throw { code: 'INVALID_PROJECT', message: 'Не удалось прочитать контекст проекта. Обновите страницу.', retryable: true } satisfies ApiError;
+    }
+    if (body.bootstrap && (typeof body.bootstrap.required !== 'boolean' ||
+        typeof body.bootstrap.snapshotHash !== 'string' ||
+        !Array.isArray(body.bootstrap.changedPaths) || !body.bootstrap.changedPaths.every(path => typeof path === 'string') ||
+        !Array.isArray(body.bootstrap.untrackedCandidates) || !body.bootstrap.untrackedCandidates.every(path => typeof path === 'string') ||
+        (body.bootstrap.requiredUntracked !== undefined && (!Array.isArray(body.bootstrap.requiredUntracked) ||
+          !body.bootstrap.requiredUntracked.every(file => file && typeof file.path === 'string' && typeof file.hash === 'string'))))) {
+      throw { code: 'INVALID_PROJECT', message: 'Список изменений поврежден. Обновите контекст.', retryable: true } satisfies ApiError;
+    }
+    return body;
+  },
+  async intake(input: IntakeInput): Promise<Snapshot> {
+    const body = await requestJson<{ result: Snapshot }>('/api/intake', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ spec, runId, operationId }),
+      body: JSON.stringify(input),
     });
     if (!isSnapshot(body.result)) {
-      throw {
-        code: 'INVALID_SNAPSHOT',
-        message: 'Ответ создания поврежден.',
-        retryable: true,
-      } satisfies ApiError;
+      throw { code: 'INVALID_SNAPSHOT', message: 'Ответ создания задачи поврежден.', retryable: true } satisfies ApiError;
     }
     return body.result;
   },

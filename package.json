@@ -1,7 +1,7 @@
 {
   "name": "flowcairn",
-  "version": "0.1.2-dev",
-  "description": "Локальный Graph Runtime и ReactFlow для контролируемой AI-разработки",
+  "version": "0.2.0",
+  "description": "AI-разработка по проверяемому плану: задачи, Graph, React Flow и Skills вашего проекта",
   "type": "module",
   "license": "MIT",
   "engines": {
@@ -40,7 +40,8 @@
     "lint": "eslint --config tools/ai-graph-viewer/eslint.graph.config.mjs scripts/ai-graph tools/ai-graph-viewer/controller.mjs tools/ai-graph-viewer/server.mjs bin",
     "check:public": "node scripts/check-public.mjs",
     "test:ui": "playwright test --config tools/ai-graph-viewer/playwright.config.mjs",
-    "check:package": "node scripts/check-package.mjs"
+    "check:package": "node scripts/check-package.mjs",
+    "test:install": "node --test tests/install.test.mjs tests/install-platform.test.mjs tests/package-managers.test.mjs tests/skills-selection.test.mjs tests/uninstall-cli.test.mjs"
   },
   "dependencies": {
     "picomatch": "4.0.7",
@@ -70,5 +71,19 @@
   "homepage": "https://github.com/IgorBabikov/flowcairn#readme",
   "bugs": {
     "url": "https://github.com/IgorBabikov/flowcairn/issues"
+  },
+  "keywords": [
+    "ai-workflow",
+    "ai-coding",
+    "workflow-orchestration",
+    "react-flow",
+    "developer-tools",
+    "local-first",
+    "agent-skills",
+    "human-in-the-loop"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   }
 }

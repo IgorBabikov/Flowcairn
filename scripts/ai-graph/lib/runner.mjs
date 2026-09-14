@@ -24,10 +24,14 @@ import { GraphError, canonicalJson, sha256 } from './io.mjs';
 import {
   resolveAction,
   contextPathAllowed,
+  isAuxiliaryContextPath,
+  isInstructionPath,
   isWithin as isWithinDeclaredPath,
 } from './registry.mjs';
 import {
   AIResultSchema,
+  AIPlanningResultSchema,
+  AIAnalysisResultSchema,
   AIReviewResultSchema,
   GraphPlanSchema,
   NodeDefinitionSchema,
@@ -85,8 +89,9 @@ function parseInputs({ node, task, plan, skills, priorEvidence, reviewEvidence }
   if (!parsedNode.success || !parsedTask.success || !parsedPlan.success) {
     fail('INVALID_RUNNER_INPUT', 'Runner получил данные вне validated Graph contract');
   }
-  if (!parsedPlan.data.nodes.some((candidate) => candidate.id === parsedNode.data.id)) {
-    fail('RUNNER_NODE_MISMATCH', 'Node не принадлежит переданному plan');
+  const approvedNode = parsedPlan.data.nodes.find((candidate) => candidate.id === parsedNode.data.id);
+  if (!approvedNode || sha256(canonicalJson(approvedNode)) !== sha256(canonicalJson(parsedNode.data))) {
+    fail('RUNNER_NODE_MISMATCH', 'Node contract не совпадает с approved plan');
   }
   if (
     parsedPlan.data.sourceHash !== parsedTask.data.sourceHash ||
@@ -97,7 +102,7 @@ function parseInputs({ node, task, plan, skills, priorEvidence, reviewEvidence }
   if (!Array.isArray(skills) || skills.length > 20) {
     fail('INVALID_RUNNER_SKILLS', 'Некорректный список Skills');
   }
-  const expected = [...parsedNode.data.skills].sort();
+  const expected = [...approvedNode.skills].sort();
   const normalizedSkills = skills.map((skill) => {
     if (
       !isPlainObject(skill) ||
@@ -113,6 +118,8 @@ function parseInputs({ node, task, plan, skills, priorEvidence, reviewEvidence }
     }
     return { name: skill.name, path: skill.path, hash: skill.hash, text: skill.text };
   });
+  if (normalizedSkills.some((skill) => !parsedPlan.data.skills.some((approved) => approved.id === skill.name && approved.path === skill.path && approved.hash === skill.hash)))
+    fail('RUNNER_SKILLS_MISMATCH', 'Skill bytes/path не совпадают с approved plan');
   if (
     JSON.stringify(normalizedSkills.map((skill) => skill.name).sort()) !== JSON.stringify(expected)
   ) {
@@ -453,6 +460,27 @@ function createExclusiveFile(file, contents) {
   }
 }
 
+// Формат подтверждения Skills задается доверенным узлом, а не свободным текстом модели.
+function aiResponseSchema(node, plan) {
+  const schema = z.toJSONSchema(node.action.id === 'ai-review' ? AIReviewResultSchema : node.action.id === 'ai-plan' ? AIPlanningResultSchema : node.action.id === 'ai-analyze' && plan?.workflow === 'autonomous' ? AIAnalysisResultSchema : AIResultSchema);
+  if (schema.properties?.skillsUsed && node.skills?.length) {
+    schema.properties.skillsUsed = { type: 'array', items: { type: 'string', enum: [...node.skills] }, minItems: node.skills.length, maxItems: node.skills.length };
+  }
+  if (node.action.id !== 'ai-implement') {
+    for (const key of ['edits', 'changedFiles']) {
+      const property = schema.properties?.[key];
+      if (typeof property === 'object' && property !== null) property.maxItems = 0;
+    }
+  }
+  if (node.action.id === 'ai-plan' && typeof schema.properties?.plan === 'object') schema.properties.plan.maxItems = 0;
+  const edits = schema.properties?.edits;
+  if (node.action.id === 'ai-implement' && node.resources?.writes?.length && typeof edits === 'object' && edits !== null && typeof edits.items === 'object' && !Array.isArray(edits.items) && typeof edits.items.properties?.path === 'object') {
+    const scopes = node.resources.writes.map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\/$/, ''));
+    edits.items.properties.path = { ...edits.items.properties.path, pattern: `^(?:${scopes.join('|')})(?:/.*)?$` };
+  }
+  return schema;
+}
+
 function makeAiCommand({
   worktree,
   node,
@@ -465,6 +493,7 @@ function makeAiCommand({
   toolchain,
   dependencyToolchain,
   profile,
+  instructionDenials = [],
 }) {
   const schemaFile = path.join(outputPath, `ai-schema-${randomUUID()}.json`);
   const resultFile = path.join(outputPath, `ai-result-${randomUUID()}.json`);
@@ -472,7 +501,7 @@ function makeAiCommand({
   try {
     createExclusiveFile(
       schemaFile,
-      `${JSON.stringify(z.toJSONSchema(node.action.id === 'ai-review' ? AIReviewResultSchema : AIResultSchema))}\n`,
+      `${JSON.stringify(aiResponseSchema(node, plan))}\n`,
     );
     createExclusiveFile(resultFile, '');
     reviewFile = reviewBundle ? createReviewEvidenceFile(outputPath, reviewBundle) : null;
@@ -481,6 +510,7 @@ function makeAiCommand({
       reads: node.resources.reads,
       extraReads: reviewFile ? [reviewFile.path] : [],
       denied: [
+        ...instructionDenials,
         ...task.forbiddenPaths,
         ...profile.outputPaths,
         ...dependencyToolchain.dependencyPaths,
@@ -501,13 +531,13 @@ function makeAiCommand({
       '--cd',
       worktree,
       '--model',
-      node.action.id === 'ai-review'
+      node.action.id === 'ai-review' && Reflect.get(profile.ai, 'modelMode') !== 'manual'
         ? (profile.ai.reviewModel ?? profile.ai.model)
         : profile.ai.model,
       '--config',
       'approval_policy="never"',
       '--config',
-      `model_reasoning_effort="${node.action.id === 'ai-review' ? 'high' : 'medium'}"`,
+      `model_reasoning_effort="${Reflect.get(profile.ai, 'modelMode') === 'manual' ? (Reflect.get(profile.ai, 'reasoningEffort') ?? 'medium') : node.action.id === 'ai-review' ? (Reflect.get(profile.ai, 'reviewReasoningEffort') ?? Reflect.get(profile.ai, 'reasoningEffort') ?? 'high') : (Reflect.get(profile.ai, 'reasoningEffort') ?? 'medium')}"`,
       '--config',
       `default_permissions=${tomlString(profileName)}`,
       '--config',
@@ -522,6 +552,7 @@ function makeAiCommand({
     ];
     const prompt = buildPrompt({
       nodeId: node.id,
+      profile,
       task,
       plan,
       skills: renderSkillInstructions(skills),
@@ -549,7 +580,7 @@ function makeAiCommand({
         provider: 'codex',
         cliVersion: CODEX_VERSION,
         model:
-          node.action.id === 'ai-review'
+          node.action.id === 'ai-review' && Reflect.get(profile.ai, 'modelMode') !== 'manual'
             ? (profile.ai.reviewModel ?? profile.ai.model)
             : profile.ai.model,
         sandboxDigest: sha256(
@@ -569,12 +600,25 @@ function makeAiCommand({
   }
 }
 
-function selectedSourceContext(worktree, node, task, profile) {
-  const snapshot = fingerprintWorkspace(worktree, { outputPaths: profile.outputPaths });
+function sourceFingerprint(worktree, profile, dependencyToolchain = { dependencyPaths: [] }) {
+  // Callers obtain dependencyToolchain from verifyToolchain; dependency links are checked there.
+  return fingerprintWorkspace(worktree, {
+    outputPaths: [...new Set([...profile.outputPaths, ...dependencyToolchain.dependencyPaths])],
+  });
+}
+
+function instructionDenials(worktree, node, profile, dependencyToolchain) {
+  return sourceFingerprint(worktree, profile, dependencyToolchain).files
+    .filter((file) => isAuxiliaryContextPath(file.path) || (isInstructionPath(file.path) && !node.resources.reads.includes(file.path)))
+    .map((file) => file.path);
+}
+
+function selectedSourceContext(worktree, node, task, profile, dependencyToolchain = { dependencyPaths: [] }) {
+  const snapshot = sourceFingerprint(worktree, profile, dependencyToolchain);
   const files = snapshot.files.filter(
     (file) =>
-      node.resources.reads.some((scope) => isWithinDeclaredPath(file.path, scope)) &&
-      contextPathAllowed(file.path, task),
+      !isAuxiliaryContextPath(file.path) && node.resources.reads.some((scope) => isWithinDeclaredPath(file.path, scope)) &&
+      contextPathAllowed(file.path, task) && (!isInstructionPath(file.path) || node.resources.reads.includes(file.path)),
   );
   if (files.length > 256 || files.reduce((total, file) => total + file.size, 0) > 512 * 1024)
     fail(
@@ -625,14 +669,16 @@ function makeOpenAiCommand({
       fail('AI_AUTH_REQUIRED', 'Задайте FLOWCAIRN_OPENAI_API_KEY');
     reviewFile = reviewBundle ? createReviewEvidenceFile(outputPath, reviewBundle) : null;
     if (reviewFile) verifyReviewEvidenceFile(reviewFile);
-    const source = selectedSourceContext(worktree, node, task, profile);
+    const source = selectedSourceContext(worktree, node, task, profile, dependencyToolchain);
     const model =
-      node.action.id === 'ai-review'
+      node.action.id === 'ai-review' && Reflect.get(profile.ai, 'modelMode') !== 'manual'
         ? (profile.ai.reviewModel ?? profile.ai.model)
         : profile.ai.model;
-    const schema = z.toJSONSchema(
-      node.action.id === 'ai-review' ? AIReviewResultSchema : AIResultSchema,
-    );
+    // Передаем только явный выбор. Поддержку выбранной моделью проверяет API без подмены параметра.
+    const reasoningEffort = node.action.id === 'ai-review' && Reflect.get(profile.ai, 'modelMode') !== 'manual'
+      ? (Reflect.get(profile.ai, 'reviewReasoningEffort') ?? Reflect.get(profile.ai, 'reasoningEffort'))
+      : Reflect.get(profile.ai, 'reasoningEffort');
+    const schema = aiResponseSchema(node, plan);
     // Responses strict mode requires every object property, including nullable/defaulted fields.
     const requireProperties = (value) => {
       if (!value || typeof value !== 'object') return;
@@ -648,6 +694,7 @@ function makeOpenAiCommand({
     requireProperties(schema);
     const prompt = buildPrompt({
       nodeId: node.id,
+      profile,
       task,
       plan,
       skills: renderSkillInstructions(skills),
@@ -656,6 +703,7 @@ function makeOpenAiCommand({
     const payload = {
       version: 1,
       model,
+      ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
       schema,
       prompt,
       source,
@@ -688,6 +736,7 @@ function makeOpenAiCommand({
         provider: 'openai',
         cliVersion: null,
         model,
+        ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
         sandboxDigest: sha256(
           canonicalJson({
             kind: 'trusted-tool-free-worker',
@@ -930,6 +979,9 @@ export async function runRegisteredAction({
   const prepared = prepare({
     ...input,
     profile,
+    instructionDenials: profile.ai.provider === 'codex'
+      ? instructionDenials(allocation.worktreePath, input.node, profile, dependencyToolchain)
+      : [],
     worktree: allocation.worktreePath,
     outputPath: allocation.outputPath,
     toolchain,
@@ -1101,6 +1153,8 @@ export async function runRegisteredAction({
       stopped,
       uncertain,
       failureReason,
+      timedOut: failureReason === 'TIMEOUT',
+      outputLimit: failureReason === 'OUTPUT_LIMIT',
       durationMs,
       process: processMetadata,
       execution: executionMetadata(prepared, output),
@@ -1353,6 +1407,7 @@ export const RUNNER_TESTING = Object.freeze({
   makeAiCommand,
   makeOpenAiCommand,
   selectedSourceContext,
+  instructionDenials,
   discoverCodex,
   cleanupPrepared,
 });

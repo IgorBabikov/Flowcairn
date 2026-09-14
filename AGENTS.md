@@ -5,6 +5,7 @@
 - Главный стандарт: docs/GRAPH-REACTFLOW-STANDARD.md. Executor владеет состоянием; ReactFlow только отображает snapshot/capabilities.
 - Разделяй runtimeRoot (пакет) и projectRoot (проект пользователя). Не записывай исходники пакета в чужой проект.
 - Сохраняй immutable hashes, trusted registry, permissions, receipts, gates, idempotency и failed/uncertain.
+- Skills и правила качества: docs/SKILLS.md. Project Skills действуют только на выбранных этапах и в выбранных областях; coverage не навязывается.
 - Не включай личные инструкции, абсолютные пользовательские пути, приватные данные, токены или историю внутренних запусков в пакет.
 - Не обнуляй чужие Git changes, AGENTS или hooks. Установка должна быть повторяемой и безопасно отказываться от конфликта.
 - Работай в назначенных файлах, не отменяй чужие правки. Source changes проверяй unit/integration/typecheck; UI проверяй в браузере.

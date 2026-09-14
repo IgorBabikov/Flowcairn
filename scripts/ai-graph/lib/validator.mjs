@@ -20,7 +20,7 @@ const same = (a, b) => JSON.stringify([...a].sort()) === JSON.stringify([...b].s
 export function validatePlan(
   input,
   taskInput,
-  { runtimeHash = undefined, skills = undefined, mode = 'current' } = {},
+  { runtimeHash = undefined, skills = undefined, resolveSkills = undefined, resolveReadPaths = undefined, contextHash = undefined, mode = 'current' } = {},
 ) {
   if (!['current', 'historical'].includes(mode))
     reject('INVALID_VALIDATION_MODE', 'Неизвестный режим проверки плана');
@@ -38,9 +38,11 @@ export function validatePlan(
     reject('PLAN_TASK_MISMATCH', 'План связан с другой задачей или исходниками');
   if (!historical && (plan.registryHash !== REGISTRY_HASH || plan.policyHash !== POLICY_HASH))
     reject('POLICY_DRIFT', 'Registry или permissions policy изменились');
+  if (!historical && contextHash && plan.contextHash !== contextHash)
+    reject('CONTEXT_DRIFT', 'Project context или Skills discovery изменились');
   if (!historical && runtimeHash && plan.runtimeHash !== runtimeHash)
     reject('RUNTIME_DRIFT', 'Runtime изменился');
-  if (!historical && skills && hashObject(plan.skills) !== hashObject(skills))
+  if (!historical && skills && plan.skills.some((skill) => !skills.some((current) => hashObject(current) === hashObject(skill))))
     reject('SKILL_DRIFT', 'Назначенные Skills изменились');
   if (new Set(plan.skills.map((s) => s.id)).size !== plan.skills.length)
     reject('INVALID_SKILLS', 'Повторяющиеся Skills');
@@ -70,24 +72,31 @@ export function validatePlan(
     }
     ancestors.set(id, set);
   }
-  const historicalGates = historical
+  const autonomous = plan.workflow === 'autonomous';
+  const productPlanning = autonomous && plan.stage === 'planning';
+  const historicalGates = historical && !autonomous
     ? plan.nodes.filter((node) => node.success.kind === 'gate')
     : [];
-  const approve = historical
+  const approve = historical && !autonomous
     ? historicalGates.filter((n) => n.needs.length === 0)
     : plan.nodes.filter((n) => n.action.id === 'human-approve');
-  const accept = historical
+  const accept = autonomous
+    ? plan.nodes.filter((node) => node.action.id === 'artifact-handoff')
+    : historical
     ? historicalGates.filter(
         (n) => n.success.kind === 'gate' && ancestors.get(n.id).size === plan.nodes.length - 1,
       )
     : plan.nodes.filter((n) => n.action.id === 'human-accept');
   if (
-    (historical && historicalGates.length !== 2) ||
-    approve.length !== 1 ||
+    (!autonomous && historical && historicalGates.length !== 2) ||
+    approve.length !== (productPlanning ? 0 : 1) ||
     accept.length !== 1 ||
-    approve[0].needs.length
+    (!productPlanning && approve[0].needs.length) ||
+    (autonomous && plan.nodes.some((n) => n.action.id === 'human-accept'))
   )
     reject('INVALID_GATES', 'Нужны один начальный approve-plan и один конечный accept-result');
+  if (autonomous && (!plan.autonomy || plan.autonomy.maxRepairCycles !== 2 || plan.autonomy.maxDurationMs !== 1800000))
+    reject('AUTONOMY_POLICY', 'Нет ограниченной политики автономного выполнения');
   const declaredSkills = new Set(plan.skills.map((s) => s.id));
   const usedSkills = new Set();
   for (const node of plan.nodes) {
@@ -102,7 +111,7 @@ export function validatePlan(
       reject('PERMISSION_MISMATCH', 'Node не может расширить или скрыть permissions действия');
     if (new Set(node.skills).size !== node.skills.length)
       reject('SKILL_POLICY', 'Node содержит повторяющиеся Skills');
-    if (!historical && !same(node.skills, action.skills))
+    if (!historical && !same(node.skills, resolveSkills ? resolveSkills(node, task) : action.skills))
       reject('SKILL_POLICY', 'Skills назначает trusted policy');
     for (const skill of node.skills) {
       if (!declaredSkills.has(skill)) reject('MISSING_SKILL', 'Отсутствует Skill manifest');
@@ -119,7 +128,7 @@ export function validatePlan(
       : Math.min(action.maxAttempts, task.limits.maxAttempts);
     if (node.retry.maxAttempts > maxAttempts)
       reject('UNSAFE_RETRY_POLICY', 'Retry policy превышает безопасный предел');
-    if (node.id !== approve[0].id && !ancestors.get(node.id).has(approve[0].id))
+    if (!productPlanning && node.id !== approve[0].id && !ancestors.get(node.id).has(approve[0].id))
       reject('APPROVAL_BYPASS', 'Node не зависит от approval');
     if (node.id !== accept[0].id && !ancestors.get(accept[0].id).has(node.id))
       reject('ACCEPTANCE_BYPASS', 'Final gate должен ждать все nodes');
@@ -132,7 +141,7 @@ export function validatePlan(
       }
       if (
         node.action.id.startsWith('ai-') &&
-        [...REQUIRED_AI_CONTEXT_PATHS, ...task.contextPaths].some(
+        [...REQUIRED_AI_CONTEXT_PATHS, ...(resolveReadPaths ? resolveReadPaths(node, task) : task.contextPaths)].some(
           (required) => !node.resources.reads.includes(required),
         )
       )
@@ -160,7 +169,23 @@ export function validatePlan(
         a.resources.exclusive.some((r) => b.resources.exclusive.includes(r));
       if (conflict) reject('RESOURCE_CONFLICT', 'Конфликтующие nodes требуют dependency');
     }
-  if (!historical) {
+  if (!historical && plan.stage === 'planning') {
+    if (autonomous) {
+      const analyze = plan.nodes.filter((n) => n.action.id === 'ai-analyze');
+      const planner = plan.nodes.filter((n) => n.action.id === 'ai-plan');
+      if (planner.length !== 1 || analyze.length !== (plan.analysisArtifact ? 0 : 1) ||
+          (analyze.length && !ancestors.get(planner[0].id).has(analyze[0].id)) ||
+          plan.nodes.some((n) => !['ai-analyze','ai-plan','artifact-handoff'].includes(n.action.id)) ||
+          plan.nodes.some((n) => n.permissions.some((p) => p !== 'ai.read')))
+        reject('INVALID_PLANNING_STAGE', 'Нужны последовательные read-only анализ и план');
+    } else if (plan.nodes.length !== 3 || plan.nodes.filter((n) => n.action.id === 'ai-plan').length !== 1 ||
+        plan.nodes.some((n) => !['human-approve', 'ai-plan', 'human-accept'].includes(n.action.id)) ||
+        plan.nodes.some((n) => n.permissions.some((permission) => permission !== 'ai.read')))
+      reject('INVALID_PLANNING_STAGE', 'Planning допускает только consent, read-only planner и terminal boundary');
+  }
+  if (!historical && plan.stage !== 'planning') {
+    if (plan.nodes.some((n) => n.action.id === 'ai-plan'))
+      reject('INVALID_PLANNING_STAGE', 'Planner требует отдельного staging run');
     const implementations = plan.nodes.filter((n) => n.action.id === 'ai-implement');
     const workspaceChecks = plan.nodes.filter((n) => n.action.id === 'workspace-check');
     if (
@@ -225,7 +250,7 @@ export function assertPlanHash(plan, expectedHash) {
     reject('PLAN_INTEGRITY', 'Immutable plan hash не совпадает');
 }
 
-export function compilePlan(task, { runtimeHash, skills, version = 1, parentPlanHash = null }) {
+export function compilePlan(task, { runtimeHash, skills, resolveSkills = undefined, resolveReadPaths = undefined, contextHash = undefined, version = 1, parentPlanHash = null }) {
   const nodes = [];
   const aiReads = [...new Set([...task.scope, ...task.contextPaths, ...REQUIRED_AI_CONTEXT_PATHS])];
   const add = (id, actionId, title, outcome, needs) => {
@@ -300,9 +325,13 @@ export function compilePlan(task, { runtimeHash, skills, version = 1, parentPlan
     'Владелец принял проверенный результат',
     ['handoff'],
   );
+  if (resolveSkills) for (const node of nodes) node.skills = resolveSkills(node, task);
+  if (resolveReadPaths) for (const node of nodes) node.resources.reads = resolveReadPaths(node, task);
+  const selectedSkills = skills.filter((skill) => nodes.some((node) => node.skills.includes(skill.id)));
   return validatePlan(
     {
       schemaVersion: 2,
+      ...(contextHash ? { contextHash } : {}),
       taskHash: hashObject(task),
       version,
       parentPlanHash,
@@ -310,10 +339,10 @@ export function compilePlan(task, { runtimeHash, skills, version = 1, parentPlan
       runtimeHash,
       registryHash: REGISTRY_HASH,
       policyHash: POLICY_HASH,
-      skills,
+      skills: selectedSkills,
       nodes,
     },
     task,
-    { runtimeHash, skills },
+    { runtimeHash, skills, resolveSkills, resolveReadPaths, contextHash },
   );
 }

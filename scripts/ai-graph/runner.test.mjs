@@ -435,6 +435,7 @@ test('review file transport grants exactly one trusted read without enlarging pr
   const node = {
     ...contract.node,
     id: 'review',
+    skills: ['project-context', 'code-review'],
     action: { id: 'ai-review' },
     resources: { reads: ['scripts/ai-graph'], writes: [], exclusive: [] },
   };
@@ -468,6 +469,11 @@ test('review file transport grants exactly one trusted read without enlarging pr
     assert.ok(Buffer.byteLength(prepared.input) < 128 * 1024);
     const schema = JSON.parse(readFileSync(prepared.schemaFile, 'utf8'));
     assert.ok(schema.required.includes('reviewEvidenceHash'));
+    assert.equal(schema.properties.edits.maxItems, 0);
+    assert.equal(schema.properties.changedFiles.maxItems, 0);
+    assert.deepEqual(schema.properties.skillsUsed.items.enum, node.skills);
+    assert.equal(schema.properties.skillsUsed.minItems, node.skills.length);
+    assert.equal(schema.properties.skillsUsed.maxItems, node.skills.length);
     assert.equal(schema.additionalProperties, false);
   } finally {
     RUNNER_TESTING.cleanupPrepared(prepared);
@@ -571,4 +577,105 @@ test('production stopped cleanup removes its own evidence file and closes its pa
   RUNNER_TESTING.cleanupPrepared({ reviewFile: file }, true);
   assert.throws(() => fstatSync(ownedFd), { code: 'EBADF' });
   assert.equal(existsSync(file.path), false);
+});
+
+test('ручной выбор сохраняет модель и усиление review, fresh exec не возобновляет историю', async () => {
+  const { RUNNER_TESTING } = await import('./lib/runner.mjs');
+  const contract = runnerContract();
+  const node = { ...contract.node, id: 'review', action: { id: 'ai-review' } };
+  contract.plan.nodes = [node];
+  const content = '{}';
+  const prepared = RUNNER_TESTING.makeAiCommand({ ...contract, node, worktree: '/private/tmp/isolated-worktree', skills: [], priorEvidence: null,
+    reviewBundle: { content, bytes: 2, hash: sha256(content) }, outputPath: realpathSync(fixture()),
+    toolchain: { node: NODE_BINARY, codexEntry: '/trusted/codex.js', digest: 'a'.repeat(64) },
+    profile: { outputPaths: [], ai: { provider: 'codex', model: 'chosen-model', reviewModel: 'other-model', modelMode: 'manual', reasoningEffort: 'low', reviewReasoningEffort: 'high' } },
+    dependencyToolchain: { dependencyPaths: [], hash: 'b'.repeat(64) } });
+  try {
+    const args = prepared.command.args;
+    assert.equal(args[args.indexOf('--model') + 1], 'chosen-model');
+    assert.ok(args.includes('model_reasoning_effort="low"'));
+    assert.ok(args.includes('--ephemeral')); assert.ok(!args.includes('resume'));
+    assert.equal(prepared.execution.model, 'chosen-model');
+  } finally { RUNNER_TESTING.cleanupPrepared(prepared); }
+});
+
+test('большой lock исключается из AI context, его hash остается частью workspace integrity', async () => {
+  const { RUNNER_TESTING } = await import('./lib/runner.mjs');
+  const { fingerprintWorkspace } = await import('./lib/workspace.mjs');
+  const { spawnSync } = await import('node:child_process');
+  const root = realpathSync(fixture());
+  assert.equal(spawnSync('/usr/bin/git',['init','-q',root]).status,0);
+  writeFileSync(path.join(root,'form.mjs'),'export const valid = true;');
+  writeFileSync(path.join(root,'package-lock.json'),JSON.stringify({padding:'x'.repeat(600 * 1024)}));
+  const profile={outputPaths:[]};
+  const node={resources:{reads:['form.mjs','package-lock.json']}};
+  const task={scope:node.resources.reads,contextPaths:[],forbiddenPaths:[]};
+  const before=fingerprintWorkspace(root);
+  const selected=RUNNER_TESTING.selectedSourceContext(root,node,task,profile);
+  assert.deepEqual(selected.map(file=>file.path),['form.mjs']);
+  assert.ok(before.files.some(file=>file.path==='package-lock.json'));
+  assert.ok(RUNNER_TESTING.instructionDenials(root,node,profile).includes('package-lock.json'));
+  writeFileSync(path.join(root,'package-lock.json'),'{}');
+  assert.notEqual(fingerprintWorkspace(root).hash,before.hash);
+});
+
+test('соседний AGENT.md не входит в scoped AI context и запрещен Codex sandbox', async () => {
+ const { RUNNER_TESTING } = await import('./lib/runner.mjs');
+ const { spawnSync } = await import('node:child_process');
+ const { mkdirSync } = await import('node:fs');
+ const root=realpathSync(fixture());assert.equal(spawnSync('/usr/bin/git',['init','-q',root]).status,0);
+ mkdirSync(path.join(root,'apps/api'),{recursive:true});mkdirSync(path.join(root,'apps/web'),{recursive:true});
+ writeFileSync(path.join(root,'apps/api/AGENT.md'),'API rules');writeFileSync(path.join(root,'apps/web/AGENT.md'),'Web rules');
+ writeFileSync(path.join(root,'apps/api/index.mjs'),'export const ok=true;');
+ const task={scope:['apps'],contextPaths:[],forbiddenPaths:[]};
+ const node={resources:{reads:['apps','apps/api/AGENT.md']}};const profile={outputPaths:[]};
+ const selected=RUNNER_TESTING.selectedSourceContext(root,node,task,profile);
+ assert.ok(selected.some(file=>file.path==='apps/api/AGENT.md'));
+ assert.ok(!selected.some(file=>file.path==='apps/web/AGENT.md'));
+ assert.ok(RUNNER_TESTING.instructionDenials(root,node,profile).includes('apps/web/AGENT.md'));
+});
+
+
+test('схема edits ограничена буквальными путями текущего узла', async () => {
+  const { RUNNER_TESTING } = await import('./lib/runner.mjs');
+  const outputPath = realpathSync(fixture());
+  const contract = runnerContract();
+  const node = { ...contract.node, action: { id: 'ai-implement', version: 1, inputs: {} }, skills: ['project-context'], resources: { reads: ['src', 'styles.css'], writes: ['src/form.mjs', 'styles.css'], exclusive: [] } };
+  const prepared = RUNNER_TESTING.makeAiCommand({ ...contract, node, plan: { ...contract.plan, nodes: [node] }, worktree: '/private/tmp/isolated-worktree', skills: [], priorEvidence: null, outputPath,
+    profile: { ai: { model: 'fixture-model' }, outputPaths: [] },
+    toolchain: { node: process.execPath, codexEntry: '/trusted/codex.js', digest: 'a'.repeat(64) },
+    dependencyToolchain: { dependencyPaths: [], hash: 'b'.repeat(64) },
+  });
+  try {
+    const schema = JSON.parse(readFileSync(prepared.schemaFile, 'utf8'));
+    const pattern = new RegExp(schema.properties.edits.items.properties.path.pattern);
+    assert.ok(pattern.test('src/form.mjs')); assert.ok(pattern.test('styles.css'));
+    assert.equal(pattern.test('src/formXmjs'), false); assert.equal(pattern.test('index.html'), false);
+    assert.match(prepared.input, /только для текущего узла: src\/form.mjs, styles.css/);
+  } finally { RUNNER_TESTING.cleanupPrepared(prepared); }
+});
+
+test('prompt отделяет запрет корня worktree от разрешенных read paths', async () => {
+  const { RUNNER_TESTING } = await import('./lib/runner.mjs');
+  const outputPath = realpathSync(fixture());
+  const contract = runnerContract();
+  const node = {
+    ...contract.node,
+    action: { id: 'ai-implement', version: 1, inputs: {} },
+    resources: { reads: ['index.html', 'styles.css', 'src'], writes: ['src/form.mjs'], exclusive: [] },
+  };
+  const worktree = '/private/tmp/isolated-worktree';
+  const prepared = RUNNER_TESTING.makeAiCommand({ ...contract, node, plan: { ...contract.plan, nodes: [node] }, worktree, skills: [], priorEvidence: null, outputPath,
+    profile: { ai: { model: 'fixture-model' }, outputPaths: [] },
+    toolchain: { node: process.execPath, codexEntry: '/trusted/codex.js', digest: 'a'.repeat(64) },
+    dependencyToolchain: { dependencyPaths: [], hash: 'b'.repeat(64) },
+  });
+  try {
+    const filesystem = prepared.command.args.find((item) => item.startsWith('permissions.graph-ai-implement.filesystem='));
+    assert.ok(filesystem.includes(`${JSON.stringify(worktree)}="deny"`));
+    for (const relative of node.resources.reads)
+      assert.ok(filesystem.includes(`${JSON.stringify(path.join(worktree, relative))}="read"`));
+    assert.match(prepared.input, /не запускай ls \./i);
+    assert.match(prepared.input, /точно перечисленные paths/i);
+  } finally { RUNNER_TESTING.cleanupPrepared(prepared); }
 });

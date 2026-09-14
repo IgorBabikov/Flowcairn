@@ -82,6 +82,8 @@ export const SkillManifestSchema = z.strictObject({ id: Id, path: RelativePath, 
 export const TaskInputSchema = z.strictObject({
   id: z.string().regex(/^[A-Z][A-Z0-9-]{2,40}$/),
   goal: Text,
+  taskNumber: z.string().trim().min(1).max(80).optional(),
+  planningFeedback: z.array(z.string().trim().min(1).max(4000)).max(10).optional(),
   instructions: z.string().min(1).max(16000),
   scope: z.array(RelativePath).min(1).max(32),
   contextPaths: z.array(RelativePath).max(32).default([]),
@@ -121,7 +123,7 @@ export const NodeDefinitionSchema = z.strictObject({
   }),
   success: SuccessContractSchema,
   permissions: z.array(Permission).max(3),
-  skills: z.array(Id).max(12),
+  skills: z.array(Id).max(20),
   resources: z.strictObject({
     reads: z.array(RelativePath).max(96),
     writes: z.array(RelativePath).max(64),
@@ -133,6 +135,11 @@ export const NodeDefinitionSchema = z.strictObject({
   }),
 });
 export const GraphPlanSchema = z.strictObject({
+  stage: z.enum(['planning', 'execution']).optional(),
+  workflow: z.literal('autonomous').optional(),
+  analysisArtifact: Hash.optional(),
+  autonomy: z.strictObject({ maxRepairCycles: z.literal(2), maxDurationMs: z.literal(1800000) }).optional(),
+  contextHash: Hash.optional(),
   schemaVersion: z.literal(2),
   taskHash: Hash,
   version: z.number().int().min(1).max(100),
@@ -215,7 +222,7 @@ export const ReceiptSchema = z.strictObject({
   nodeId: Id,
   attemptId: Id,
   attempt: z.number().int().min(1),
-  phase: z.enum(['started', 'finished', 'gate', 'recovery', 'planning']),
+  phase: z.enum(['started', 'finished', 'gate', 'policy', 'recovery', 'planning']),
   actionId: Id,
   actionVersion: z.number().int().min(1),
   planVersion: z.number().int().min(1),
@@ -294,6 +301,8 @@ export const RunStateSchema = z.strictObject({
   sourceBundle: z.string().max(4096),
   planVersion: z.number().int().min(1),
   maxReplans: z.number().int().min(0).max(3),
+  planningTransitions: z.number().int().min(0).max(100).optional(),
+  policyGrant: z.strictObject({ runId: Id, planHash: Hash, receiptId: Hash, cycle: z.number().int().min(1).max(2), startedAt: z.iso.datetime() }).optional(),
   supersedesRunId: Id.nullable(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
@@ -352,6 +361,7 @@ export const RunStateSchema = z.strictObject({
   planningArtifacts: z.array(Hash).max(50),
   actor: z.string().min(1).max(120),
   intakeHash: Hash,
+  naturalIntakeHash: Hash.optional(),
   createOperationId: Id,
   setupPending: z.boolean(),
   stopRequested: z.boolean().optional(),
@@ -368,6 +378,7 @@ export const ControlRequestSchema = z.strictObject({
   challenge: z.string().max(160).optional(),
   draft: z.unknown().optional(),
   reason: z.string().min(1).max(1000).optional(),
+  feedback: z.string().trim().min(1).max(4000).optional(),
 });
 
 /** @typedef {z.infer<typeof TaskInputSchema>} TaskInput */
@@ -377,3 +388,42 @@ export const ControlRequestSchema = z.strictObject({
 /** @typedef {z.infer<typeof ReceiptSchema>} Receipt */
 /** @typedef {z.infer<typeof ControlRequestSchema>} ControlRequest */
 /** @typedef {z.infer<typeof AIResultSchema>} AIResult */
+
+// Planner output is data: actions, commands, permissions and Skills are deliberately absent.
+export const PlanningStepSchema = z.strictObject({
+  id: Id,
+  title: z.string().min(1).max(160),
+  outcome: Text,
+  needs: z.array(Id).max(12),
+  paths: z.array(RelativePath).min(1).max(32),
+});
+export const AIPlanningResultSchema = AIResultSchema.extend({
+  steps: z.array(PlanningStepSchema).max(12),
+});
+export const LegacyIntakeSchema = z.strictObject({
+  prompt: z.string().trim().min(3).max(16000),
+  operationId: Id,
+  contextHash: Hash,
+  scope: z.array(RelativePath).min(1).max(32).optional(),
+  snapshot: z.literal(true).optional(),
+  snapshotHash: Hash.optional(),
+  includeUntracked: z.array(RelativePath).max(64).optional(),
+});
+
+export const ProductIntakeSchema = z.strictObject({
+  title: z.string().trim().min(1).max(160),
+  description: z.string().trim().min(3).max(16000),
+  taskNumber: z.string().trim().min(1).max(80),
+  operationId: Id,
+  contextHash: Hash,
+});
+export const NaturalIntakeSchema = z.union([ProductIntakeSchema, LegacyIntakeSchema]);
+export const AIAnalysisResultSchema = AIResultSchema.extend({
+  analysis: z.strictObject({
+    requirements: z.array(Text).min(1).max(12),
+    constraints: z.array(Text).max(12),
+    projectFacts: z.array(z.strictObject({ path: RelativePath, fact: Text })).min(1).max(20),
+    acceptance: z.array(Text).min(1).max(12),
+    risks: z.array(Text).max(12),
+  }),
+});

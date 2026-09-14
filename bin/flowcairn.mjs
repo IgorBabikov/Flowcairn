@@ -19,19 +19,33 @@ import {
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline/promises';
-import { GraphError, hashObject, sha256 } from '../scripts/ai-graph/lib/io.mjs';
+import { GraphError, sha256 } from '../scripts/ai-graph/lib/io.mjs';
 import {
   ProjectProfileSchema,
+  onboardingConsentHash,
+  hasOnboardingConsent,
   loadProjectProfile,
   RUNTIME_ROOT,
+  PACKAGE_MANAGER_LOCKS,
+  packageManagerLock,
+  validatePackageManagerProject,
 } from '../scripts/ai-graph/lib/project.mjs';
-import { Id, TaskInputSchema } from '../scripts/ai-graph/lib/schemas.mjs';
+import { TaskInputSchema } from '../scripts/ai-graph/lib/schemas.mjs';
 import { WorkflowService, sanitizeText } from '../scripts/ai-graph/lib/service.mjs';
 import { runCli } from '../scripts/ai-graph/cli.mjs';
 import { probeRunner } from '../scripts/ai-graph/lib/runner.mjs';
 import { probeChecks, prepareCheckImage } from '../scripts/ai-graph/lib/docker-checks.mjs';
 import { startViewer } from '../tools/ai-graph-viewer/server.mjs';
 import { discoverWorkspaceManifests } from './workspaces.mjs';
+import { assertRuntimePlatform, assertProjectPlatform, defaultProvider } from '../scripts/ai-graph/lib/platform.mjs';
+import { openBrowser } from './browser.mjs';
+import { checkUpdate } from './update.mjs';
+import { instructionsCommand } from './instructions.mjs';
+import { uninstallCommand } from './uninstall.mjs';
+import { selectProjectSkills } from './skills-selection.mjs';
+import { createTask } from '../scripts/ai-graph/lib/task-registration.mjs';
+import { collectOnboarding, inspectOnboarding, onboardingInput, saveOnboarding } from './onboarding.mjs';
+export { createTask };
 
 const OWNER_FILE = '.ai-orchestrator/flowcairn-install.json';
 const PROFILE = '.flowcairn.json';
@@ -40,6 +54,10 @@ const CHECKS = ['typecheck', 'lint', 'tests', 'build'];
 const VALUE_OPTIONS = new Set([
   'root',
   'provider',
+  'model-mode',
+  'reasoning-effort',
+  'review-reasoning-effort',
+  'test-policy',
   'model',
   'review-model',
   'branch',
@@ -68,8 +86,12 @@ const VALUE_OPTIONS = new Set([
   'hash',
   'after',
   'revision',
+  'fingerprint',
+  'skills',
+  'skill-actions',
+  'skill-scope',
 ]);
-const BOOLEAN_OPTIONS = new Set(['json', 'dry-run', 'help', 'snapshot']);
+const BOOLEAN_OPTIONS = new Set(['json', 'dry-run', 'help', 'snapshot', 'no-open', 'consent', 'read-consent', 'coverage']);
 
 function fail(code, message) {
   throw new GraphError(code, message);
@@ -89,16 +111,12 @@ function csv(value) {
     : [];
 }
 function requireNode() {
-  if (Number(process.versions.node.split('.')[0]) !== 22)
-    fail('NODE_VERSION', 'Нужен Node.js 22. Переключите версию в текущем терминале.');
-  if (!['darwin', 'linux'].includes(process.platform))
-    fail(
-      'PLATFORM',
-      'Поддерживаются macOS и Linux. На Windows используйте Linux в WSL2; native Windows не поддерживается.',
-    );
+  assertRuntimePlatform();
 }
 function projectRoot(input = process.cwd()) {
+  assertRuntimePlatform();
   const root = realpathSync(path.resolve(input));
+  assertProjectPlatform(root);
   let top;
   try {
     top = realpathSync(git(root, ['rev-parse', '--show-toplevel']));
@@ -181,7 +199,7 @@ export function parseOptions(tokens) {
 function discoverManifests(root, pkg, manager, explicit) {
   if (explicit) return csv(explicit);
   const files = ['package.json'];
-  const lock = manager === 'npm' ? 'package-lock.json' : 'pnpm-lock.yaml';
+  const lock = packageManagerLock(manager);
   if (existsSync(path.join(root, lock))) files.push(lock);
   if (manager === 'pnpm' && existsSync(path.join(root, 'pnpm-workspace.yaml')))
     files.push('pnpm-workspace.yaml');
@@ -191,66 +209,88 @@ function discoverManifests(root, pkg, manager, explicit) {
 
 function packageManager(root, pkg, explicit) {
   if (explicit !== undefined) {
-    if (!['npm', 'pnpm'].includes(explicit))
-      fail('PACKAGE_MANAGER', 'Поддерживаются npm и pnpm. Укажите --package-manager npm или pnpm.');
+    packageManagerLock(explicit);
     return explicit;
   }
   const declared = typeof pkg.packageManager === 'string' ? pkg.packageManager.split('@')[0] : null;
-  if (declared && !['npm', 'pnpm'].includes(declared))
-    fail('PACKAGE_MANAGER', 'Менеджер из package.json не поддерживается: доступны npm и pnpm.');
-  const npm = existsNoFollow(path.join(root, 'package-lock.json'));
-  const pnpm =
-    existsNoFollow(path.join(root, 'pnpm-lock.yaml')) ||
-    existsNoFollow(path.join(root, 'pnpm-workspace.yaml'));
-  if ((npm && pnpm) || (declared === 'npm' && pnpm) || (declared === 'pnpm' && npm))
-    fail(
-      'PACKAGE_MANAGER',
-      'Найдены признаки npm и pnpm. Выберите --package-manager npm или pnpm.',
-    );
-  if (
-    !declared &&
-    !npm &&
-    !pnpm &&
-    ['yarn.lock', 'bun.lock', 'bun.lockb'].some((name) => existsNoFollow(path.join(root, name)))
-  )
-    fail('PACKAGE_MANAGER', 'Найден lock-файл неподдерживаемого менеджера. Доступны npm и pnpm.');
-  return declared ?? (pnpm ? 'pnpm' : 'npm');
+  if (declared) packageManagerLock(declared);
+  const detected = Object.entries(PACKAGE_MANAGER_LOCKS).filter(([manager, lock]) =>
+    existsNoFollow(path.join(root, lock)) || (manager === 'pnpm' && existsNoFollow(path.join(root, 'pnpm-workspace.yaml'))),
+  ).map(([manager]) => manager);
+  const bun = ['bun.lock', 'bun.lockb'].some((name) => existsNoFollow(path.join(root, name)));
+  if (bun || detected.length > 1 || (declared && detected.some((manager) => manager !== declared)))
+    fail('PACKAGE_MANAGER', 'Менеджер пакетов неоднозначен или найден Bun lockfile. Выберите --package-manager npm|pnpm|yarn; Bun пока не поддерживается.');
+  return declared ?? detected[0] ?? 'npm';
 }
 
-/** One explicit model choice; never probe accounts or read global configuration. */
+/** Первый запуск спрашивает настройки один раз, не читая глобальные аккаунты. */
 export async function initializeCommand(input, options = {}, terminal = {}) {
   const root = projectRoot(input);
-  if (existsNoFollow(path.join(root, PROFILE)) || options.model)
+  if (existsNoFollow(path.join(root, PROFILE)) || existsNoFollow(path.join(root, '.ai-orchestrator')))
     return initializeProject(root, options);
-  // Preflight errors take precedence over asking the user for a model.
-  if (existsNoFollow(path.join(root, '.ai-orchestrator'))) return initializeProject(root, options);
   assertProviderPlatform(options);
-  const stdin = terminal.input ?? process.stdin;
-  const stdout = terminal.output ?? process.stderr;
-  if (!stdin.isTTY || !stdout.isTTY || options.json || options['dry-run'])
-    return initializeProject(root, options);
-  const prompt = createInterface({ input: stdin, output: stdout });
+  const selected = await collectOnboarding(root, options, terminal);
+  const result = initializeProject(root, { ...selected, _skillManifest: await selectProjectSkills(root, selected, terminal) });
+  const checkPreparation = await maybePrepareChecks(root, result.profile, selected, terminal);
+  if (selected.consent === true && !selected['dry-run']) {
+    const inspected = await instructionsCommand(root, 'inspect');
+    await instructionsCommand(root, 'activate', {consent:true, fingerprint:inspected.instructions.fingerprint});
+  }
+  return { ...result, checkPreparation };
+}
+
+/** Docker image preparation is opt-in because it can download an image and dependencies. */
+export async function maybePrepareChecks(root, profile, options = {}, terminal = {}, checks = {
+  probe: probeChecks,
+  prepare: prepareCheckImage,
+}) {
+  if (options['dry-run'] || options.json || !profile.checks.length)
+    return { prepared: false, reason: 'NOT_NEEDED' };
+  const status = checks.probe({ root });
+  if (status.available || status.reason !== 'CHECK_IMAGE_MISSING')
+    return { prepared: false, reason: status.available ? 'READY' : status.reason };
+  const input = terminal.input ?? process.stdin;
+  const output = terminal.output ?? process.stderr;
+  if (!input.isTTY || !output.isTTY)
+    return { prepared: false, reason: 'NON_INTERACTIVE' };
+  const prompt = terminal.prompt ?? createInterface({ input, output });
   try {
-    stdout.write(
-      `Настройка Flowcairn. Провайдер: ${options.provider ?? 'codex'}. AI пока не запускается.\n`,
-    );
-    stdout.write(
-      'Введите ID доступной вам модели, не API-ключ. Доступность здесь не проверяется.\n',
-    );
-    const model = (await prompt.question('ID модели: ')).trim();
-    if (!model)
-      fail(
-        'MODEL_REQUIRED',
-        'Модель не указана. Файлы не изменены. Повторите init --model MODEL_ID.',
-      );
-    return initializeProject(root, { ...options, model });
+    output.write('Проверки проекта найдены. Docker доступен, но образ проверок еще не подготовлен.\n');
+    const answer = (await prompt.question('Подготовить проверки в Docker? Это скачает образ и зависимости проекта. [да / нет; Enter — нет]: ')).trim().toLowerCase();
+    if (!['да', 'yes'].includes(answer)) {
+      output.write('Проверки не подготовлены. Перед выполнением проверок: npx flowcairn checks prepare.\n');
+      return { prepared: false, reason: 'DECLINED' };
+    }
+    return { prepared: true, result: checks.prepare({ root }) };
   } finally {
-    prompt.close();
+    if (!terminal.prompt) prompt.close();
   }
 }
 
+export async function setupCommand(input, options = {}, terminal = {}) {
+  const root = projectRoot(input);
+  if (!existsNoFollow(path.join(root, PROFILE))) return initializeCommand(root, options, terminal);
+  const current = inspectOnboarding(root);
+  const selected = await collectOnboarding(root, { ...options, advanced: true }, terminal);
+  const resolved = {
+    provider:current.values.provider, model:current.values.model,
+    'model-mode':current.values.modelMode, 'reasoning-effort':current.values.reasoningEffort,
+    'test-policy':current.values.testPolicy, coverage:current.values.coverage,
+    ...selected,
+  };
+  // В скриптах требуется новое явное разрешение; прежнее не считается ответом.
+  const result = await saveOnboarding(root, onboardingInput(resolved, current.profileHash), {dryRun:options['dry-run'] === true});
+  if (selected.consent === true && !options['dry-run']) {
+    const inspected = await instructionsCommand(root, 'inspect');
+    await instructionsCommand(root, 'activate', {consent:true, fingerprint:inspected.instructions.fingerprint});
+  }
+  return result;
+}
+
 function assertProviderPlatform(options) {
-  if (process.platform !== 'darwin' && (options.provider ?? 'codex') === 'codex')
+  if (options.provider && !['codex', 'openai'].includes(options.provider))
+    fail('PROVIDER_UNSUPPORTED', 'Claude и Cursor пока не подключены к исполнителю Flowcairn. Выберите Codex на macOS или OpenAI API; автоматическое наследование настроек IDE недоступно.');
+  if (process.platform !== 'darwin' && (options.provider ?? defaultProvider()) === 'codex')
     fail(
       'PROVIDER_PLATFORM',
       'Исполнение через Codex сейчас поддерживается только на macOS. На Linux используйте npx flowcairn init --provider openai --model MODEL_ID.',
@@ -263,6 +303,17 @@ export function initializeProject(input, options = {}) {
   const existingProfile = existsNoFollow(path.join(root, PROFILE))
     ? loadProjectProfile(root)
     : null;
+  if (existingProfile && options.skills !== undefined &&
+      JSON.stringify([...new Set(csv(options.skills))].sort()) !== JSON.stringify((existingProfile.skillManifest ?? []).map((entry) => entry.id.slice('project-'.length)).sort()))
+    fail('SKILL_PROFILE_EXISTS', 'Профиль уже настроен. Позднее изменение выбранных Skills пока не поддерживается; текущий профиль сохранен.');
+  if (existingProfile && options.skills !== undefined) {
+    const requestedActions = options['skill-actions'] === undefined ? null : csv(options['skill-actions']).map((value) => value.startsWith('ai-') ? value : `ai-${value}`).sort();
+    const requestedScope = options['skill-scope'] === undefined ? null : csv(options['skill-scope']).map((value) => value.replace(/\/$/, '')).sort();
+    if ((existingProfile.skillManifest ?? []).some((entry) =>
+      (requestedActions && JSON.stringify([...entry.actions].sort()) !== JSON.stringify(requestedActions)) ||
+      (requestedScope && JSON.stringify([...entry.scope].sort()) !== JSON.stringify(requestedScope))))
+      fail('SKILL_PROFILE_EXISTS', 'Профиль уже настроен. Позднее изменение этапов или области Skills пока не поддерживается; текущий профиль сохранен.');
+  }
   if (existingProfile && existsNoFollow(path.join(root, OWNER_FILE))) {
     readProjectFile(root, OWNER_FILE, 1024 * 1024);
     owner(root);
@@ -291,11 +342,15 @@ export function initializeProject(input, options = {}) {
       /^(?:sk-|sess-|Bearer\s)/i.test(value ?? ''),
     ) ||
       !ProjectProfileSchema.shape.ai.safeParse({
-        provider: options.provider ?? 'codex',
+        provider: options.provider ?? defaultProvider(),
         model: options.model,
       }).success)
   )
     fail('AI_CONFIG', 'Укажите --provider codex или openai и --model с ID модели (не API-ключом).');
+  if (!existingProfile && options['model-mode'] === 'manual' &&
+      ((options['review-model'] && options['review-model'] !== options.model) ||
+       (options['review-reasoning-effort'] && options['review-reasoning-effort'] !== options['reasoning-effort'])))
+    fail('AI_CONFIG', 'В ручном режиме модель и усиление одинаковы для всех этапов. Для отдельной настройки ревью выберите auto.');
   let pkg;
   try {
     pkg = JSON.parse(readRegular(path.join(root, 'package.json'), 256 * 1024).toString('utf8'));
@@ -317,6 +372,7 @@ export function initializeProject(input, options = {}) {
       'BRANCH_REQUIRED',
       'Git находится в detached HEAD. Переключитесь на рабочую ветку или укажите --branch.',
     );
+  validatePackageManagerProject(root, manager, pkg);
   const checks =
     options.checks === undefined
       ? CHECKS.filter(
@@ -333,8 +389,16 @@ export function initializeProject(input, options = {}) {
       checks,
       outputPaths: csv(options.outputs),
       manifests: discoverManifests(root, pkg, manager, options.manifests),
+      ...(options._skillManifest?.length ? { skillManifest: options._skillManifest } : {}),
+      ...(['read-consent', 'test-policy', 'coverage'].some((key) => options[key] !== undefined) ? { onboarding: {
+        version: 1, readConsent: options['read-consent'] === true, readScope: 'tracked-project',
+        testPolicy: options['test-policy'] ?? 'keep', coverage: options.coverage === true, instructions: 'preserve',
+      } } : {}),
       ai: {
-        provider: options.provider ?? 'codex',
+        ...(options['model-mode'] ? { modelMode: options['model-mode'] } : {}),
+        ...(options['reasoning-effort'] ? { reasoningEffort: options['reasoning-effort'] } : {}),
+        ...(options['review-reasoning-effort'] ? { reviewReasoningEffort: options['review-reasoning-effort'] } : {}),
+        provider: options.provider ?? defaultProvider(),
         model: options.model,
         ...(options['review-model'] ? { reviewModel: options['review-model'] } : {}),
         ...(options['codex-path'] ? { codexPath: path.resolve(options['codex-path']) } : {}),
@@ -371,6 +435,11 @@ export function initializeProject(input, options = {}) {
       ],
     };
   const tmp = path.join(root, `.flowcairn-ignore-${randomUUID()}.tmp`);
+  const exampleText = JSON.stringify({
+    id: 'ORCH-001', goal: 'Один проверяемый результат',
+    instructions: 'Опишите нужное поведение и ограничения', scope: ['README.md'],
+    acceptance: ['Как проверить результат'], checks: [],
+  }, null, 2) + '\n';
   const ownedFiles = [];
   let createdDirectory = false,
     ignoreWritten = false;
@@ -391,8 +460,12 @@ export function initializeProject(input, options = {}) {
           tool: 'flowcairn',
           owner: `flowcairn-${randomUUID()}`,
           profileHash: sha256(profileText),
+          ...(!existingProfile && options['read-consent'] === true ? { readConsentHash: onboardingConsentHash(root, profile) } : {}),
+          profileOwned: !existingProfile,
           ignoreBefore: oldIgnore,
           ignoreAfterHash: sha256(ignore),
+          ignoreBlockOwned: ignore !== oldIgnore,
+          exampleHash: sha256(exampleText),
         },
         null,
         2,
@@ -400,18 +473,7 @@ export function initializeProject(input, options = {}) {
     );
     createOwned(
       path.join(stateDirectory, 'task.example.json'),
-      JSON.stringify(
-        {
-          id: 'ORCH-001',
-          goal: 'Один проверяемый результат',
-          instructions: 'Опишите нужное поведение и ограничения',
-          scope: ['README.md'],
-          acceptance: ['Как проверить результат'],
-          checks: [],
-        },
-        null,
-        2,
-      ) + '\n',
+      exampleText,
     );
     if (ignore !== oldIgnore) {
       const ignoreMode = oldIgnore === null ? 0o644 : lstatSync(ignoreFile).mode & 0o777;
@@ -458,7 +520,9 @@ export function initializeProject(input, options = {}) {
     message:
       existingProfile && ignore === oldIgnore
         ? 'Локальное состояние создано по существующему профилю. Исходники не изменены; можно создать задачу.'
-        : 'Проект настроен. Можно создать первый граф без коммита; исходники будут сохранены в локальный проверяемый снимок. AI требует отдельного разрешения.',
+        : hasOnboardingConsent(root, profile)
+          ? 'Проект настроен. Введите задачу: Flowcairn проведет анализ и подготовит план. Разработка начнется после вашего согласования плана.'
+          : 'Проект настроен. Для анализа задачи разрешите чтение и передачу AI через npx flowcairn setup.',
   };
 }
 
@@ -477,146 +541,6 @@ function owner(root) {
     fail('INSTALL_CONFLICT', 'Некорректная локальная установка.');
   return value.owner;
 }
-function orchestrator(root, command, args) {
-  const result = spawnSync(
-    process.execPath,
-    [path.join(RUNTIME_ROOT, 'scripts/ai-orchestrator.mjs'), command, '--root', root, ...args],
-    { cwd: root, encoding: 'utf8', maxBuffer: 1024 * 1024, timeout: 120000 },
-  );
-  let value;
-  try {
-    value = JSON.parse(result.status === 0 ? result.stdout : result.stderr);
-  } catch {
-    fail('ORCHESTRATOR_ERROR', 'Orchestrator не вернул корректный ответ.');
-  }
-  if (result.status !== 0 || value.ok !== true)
-    fail(
-      value.error?.code ?? 'ORCHESTRATOR_ERROR',
-      ['SOURCE_SNAPSHOT_MISMATCH', 'SOURCE_HEAD_MISMATCH'].includes(value.error?.code)
-        ? 'Исходники изменились во время сохранения снимка. Граф не создан. Проверьте git status и повторите task.'
-        : sanitizeText(value.error?.message ?? 'Операция Orchestrator не выполнена.'),
-    );
-  return value;
-}
-
-export async function createTask(input, taskInput, options = {}) {
-  const root = projectRoot(input),
-    profile = loadProjectProfile(root),
-    ownerId = owner(root);
-  let task = TaskInputSchema.parse(taskInput);
-  if (options.run !== undefined) Id.parse(options.run);
-  if (options.operation !== undefined) Id.parse(options.operation);
-  if (
-    task.checks.some(
-      (check) => !CHECKS.includes(check) || !profile.checks.some((allowed) => allowed === check),
-    )
-  )
-    fail(
-      'CHECK_UNSUPPORTED',
-      'Доступны только tests, typecheck, lint и build, включенные в профиль проекта.',
-    );
-  const stateFile = path.join(root, '.ai-orchestrator/state.json');
-  const firstTask = !existsNoFollow(stateFile);
-  if (!firstTask && git(root, ['status', '--porcelain', '--untracked-files=all']))
-    fail(
-      'DIRTY_ROOT',
-      'В проекте есть незакоммиченные файлы. Сохраните изменения в Git; Flowcairn не коммитит и не прячет их автоматически. TaskSpec удобно хранить в .ai-orchestrator/.',
-    );
-  const service = await WorkflowService.open({ root });
-  let source;
-  if (firstTask) {
-    const untracked = git(root, ['ls-files', '--others', '--exclude-standard', '-z'])
-      .split('\0')
-      .filter(Boolean);
-    const installation = JSON.parse(
-      readProjectFile(root, OWNER_FILE, 1024 * 1024).toString('utf8'),
-    );
-    const owned = [
-      ...(sha256(readRegular(path.join(root, PROFILE))) === installation.profileHash
-        ? [PROFILE]
-        : []),
-      ...(existsNoFollow(path.join(root, '.gitignore')) &&
-      sha256(readRegular(path.join(root, '.gitignore'))) === installation.ignoreAfterHash
-        ? ['.gitignore']
-        : []),
-    ];
-    const changed = git(root, ['diff', 'HEAD', '--name-only', '-z']).split('\0').filter(Boolean);
-    if (!options.snapshot && changed.some((file) => !owned.includes(file)))
-      fail(
-        'DIRTY_ROOT',
-        'Есть незакоммиченные изменения проекта. Проверьте git diff и сохраните их в Git либо добавьте --snapshot: это явно включает текущее состояние отслеживаемых файлов в локальный снимок первого графа. AI не запускается.',
-      );
-    task = TaskInputSchema.parse({
-      ...task,
-      includeUntracked: [
-        ...new Set([...task.includeUntracked, ...owned.filter((file) => untracked.includes(file))]),
-      ],
-    });
-    if (untracked.some((file) => !task.includeUntracked.includes(file)))
-      fail(
-        'UNTRACKED_FILES',
-        'Есть новые файлы вне явного списка снимка. Проверьте git status. Сохраните их в Git или перечислите через --include-untracked path1,path2 (includeUntracked в JSON). Не включайте секреты.',
-      );
-    source = await service.adapters.capture(task);
-    orchestrator(root, 'init', [
-      '--owner',
-      ownerId,
-      '--goal',
-      'Локальные задачи Flowcairn с отдельной приемкой и Git-доставкой',
-      '--mode',
-      'autonomous',
-      '--max-tasks',
-      '100',
-      '--max-retries',
-      '2',
-      '--max-workers',
-      '1',
-      '--bootstrap-source-bundle',
-      source.bundlePath,
-    ]);
-  }
-  const state = JSON.parse(readRegular(stateFile, 16 * 1024 * 1024).toString('utf8'));
-  if (state.owner !== ownerId || state.runStatus !== 'active')
-    fail(
-      'ORCHESTRATOR_NOT_READY',
-      'Существующий Orchestrator принадлежит другому владельцу или закрыт. Используйте предусмотренное продолжение новой цели; состояние не удаляется.',
-    );
-  const existing = state.tasks.find((item) => item.id === task.id);
-  if (!existing) {
-    const descriptor = {
-      id: task.id,
-      title: task.goal,
-      outcome: task.goal,
-      why: 'Явная постановка задачи оператором Flowcairn',
-      sourceDocs: [PROFILE],
-      scope: task.scope,
-      resources: task.resources ?? [],
-      dependsOn: [],
-      acceptance: task.acceptance,
-      checks: [['/usr/bin/git', 'diff', '--check']],
-      model: profile.ai.model,
-      effort: 'medium',
-    };
-    const file = path.join(root, '.ai-orchestrator', `task-${randomUUID()}.json`);
-    writeNew(file, JSON.stringify(descriptor, null, 2) + '\n');
-    orchestrator(root, 'add', ['--owner', ownerId, '--spec', file]);
-  } else if (
-    existing.outcome !== task.goal ||
-    hashObject(existing.scope) !== hashObject(task.scope) ||
-    hashObject(existing.acceptance) !== hashObject(task.acceptance)
-  ) {
-    fail(
-      'TASK_CONFLICT',
-      'ID задачи уже зарегистрирован с другим содержимым. Используйте новый ID.',
-    );
-  }
-  return service.create(task, {
-    runId: options.run ?? `run-${randomUUID()}`,
-    ...(options.operation ? { operationId: options.operation } : {}),
-    ...(source ? { sourceOverride: source } : {}),
-  });
-}
-
 export async function doctorProject(input) {
   const root = projectRoot(input);
   let profile;
@@ -637,13 +561,29 @@ export async function doctorProject(input) {
   }
   const ai = await probeRunner({ root });
   const checks = probeChecks({ root });
+  let manager;
+  try {
+    manager = {
+      valid: true,
+      version: validatePackageManagerProject(root, profile.packageManager),
+      lockfile: packageManagerLock(profile.packageManager),
+      boundary: profile.packageManager === 'yarn'
+        ? 'Yarn 4, node_modules, только nodeLinker в .yarnrc.yml. PnP, plugins, custom/private registry пока не поддерживаются.'
+        : profile.packageManager === 'pnpm'
+          ? 'pnpm 9–11 с exact packageManager; без pin используется 11.8.0. Подготовка зависимостей с frozen lockfile, lifecycle scripts выключены.'
+          : 'npm из Node22 check image. Если packageManager задает exact npm version, она должна совпасть с bundled версией image.',
+    };
+  } catch (error) {
+    manager = { valid: false, code: error.code ?? 'PACKAGE_MANAGER', message: sanitizeText(error.message) };
+  }
   return {
-    ok: ai.ai.available && checks.available,
+    ok: ai.ai.available && checks.available && manager.valid,
     root,
     node: process.versions.node,
     branch: git(root, ['branch', '--show-current']),
     configuredBranch: profile.integrationBranch,
     packageManager: profile.packageManager,
+    manager,
     configuredChecks: profile.checks,
     ai: ai.ai,
     checks,
@@ -651,13 +591,18 @@ export async function doctorProject(input) {
   };
 }
 
+export function canHandoff(snapshot, state) {
+  return snapshot.status === 'passed' && snapshot.integrity?.valid === true &&
+    (snapshot.finalDisposition === 'accepted' || state.completion === 'ready-for-review');
+}
+
 export async function handoff(input, runId) {
   const root = projectRoot(input),
     service = await WorkflowService.open({ root });
   const snapshot = service.snapshot(runId);
-  if (snapshot.finalDisposition !== 'accepted' || snapshot.status !== 'passed')
-    fail('ACCEPT_REQUIRED', 'Сначала проверьте и примите результат Graph.');
   const state = service.store.readRun(runId);
+  if (!canHandoff(snapshot, state))
+    fail('ACCEPT_REQUIRED', 'Нужен проверенный результат, готовый к личному ревью, или явное принятие Graph.');
   return {
     runId,
     status: snapshot.status,
@@ -671,7 +616,7 @@ export async function handoff(input, runId) {
   };
 }
 
-const HELP = `Flowcairn — контролируемый AI Workflow + ReactFlow\n\n  init [--provider codex|openai] [--model MODEL] [--root PROJECT] [--dry-run] [--json]\n    В терминале init спросит ID модели. В скрипте --model обязателен.\n    Провайдер по умолчанию codex; для OpenAI используйте --provider openai.\n  doctor [--root PROJECT]\n  checks prepare [--root PROJECT]\n  task --file TASK.json [--run ID] [--root PROJECT]\n  task --id ORCH-001 --goal TEXT --scope src --accept TEXT\n    --snapshot явно включает изменения tracked-файлов в снимок первого графа.\n    --include-untracked path1,path2 явно включает новые файлы в этот снимок.\n  ui [--root PROJECT] [--port 4329]\n  status|plan|events --run ID\n  approve --run ID --plan-hash HASH --permissions ai.read,workspace.source.write,workspace.output.write\n  run|retry|recover|replan|stop|accept|reject --run ID --plan-hash HASH\n  receipt|artifact --run ID --hash HASH\n  handoff --run ID\n  orchestrator COMMAND ...   расширенное управление очередью и Git-интеграцией\n\nЗапуск AI требует approval конкретного плана. Init/task/ui не запускают AI.\nДокументация: https://github.com/IgorBabikov/flowcairn\n`;
+const HELP = `Flowcairn — контролируемый AI Workflow + ReactFlow\n\n  init [--provider codex|openai] [--model MODEL] [--root PROJECT] [--dry-run] [--json]\n    Первый запуск автоматически предложит короткую настройку. В скрипте --model обязателен.\n    --model-mode manual|auto --reasoning-effort low|medium|high|xhigh\n    --test-policy keep|add --coverage (только по вашему выбору) --read-consent\n  setup    изменить настройки после закрытия UI; текущие планы не переписываются.\n    Локальные Skills: выбор файлов, этапов и области в терминале.\n    В скрипте: --skills name --skill-actions plan,review --skill-scope src.\n    По умолчанию: macOS — codex, Linux — openai; --provider задает явный выбор.\n  doctor [--root PROJECT]\n  checks prepare [--root PROJECT]\n  task --file TASK.json [--run ID] [--root PROJECT]\n  task --id ORCH-001 --goal TEXT --scope src --accept TEXT\n    --snapshot явно включает изменения tracked-файлов в снимок первого графа.\n    --include-untracked path1,path2 явно включает новые файлы в этот снимок.\n  [--root PROJECT] [--port 4329] [--no-open]\n    Без команды открывает локальный UI и браузер.\n  ui [--root PROJECT] [--port 4329] [--no-open]\n  update    проверить npm metadata, без установки и изменения планов\n  instructions inspect\n  instructions activate --fingerprint HASH --consent\n  uninstall [--dry-run]    удалить только unchanged owned integration\n  status|plan|events --run ID\n  approve --run ID --plan-hash HASH --permissions ai.read,workspace.source.write,workspace.output.write\n  run|retry|recover|replan|stop|accept|reject --run ID --plan-hash HASH\n  receipt|artifact --run ID --hash HASH\n  handoff --run ID\n  orchestrator COMMAND ...   расширенное управление очередью и Git-интеграцией\n\nЗапуск AI требует approval конкретного плана. Init/task/ui не запускают AI.\nДокументация: https://github.com/IgorBabikov/flowcairn\n`;
 
 function printInitialization(result) {
   const profile = result.profile;
@@ -679,26 +624,24 @@ function printInitialization(result) {
     result.dryRun ? 'Предварительная проверка. Файлы не изменены.' : result.message,
     `Ветка: ${profile.integrationBranch}. Менеджер: ${profile.packageManager}. Проверки: ${profile.checks.join(', ') || 'не найдены'}.`,
     `AI: ${profile.ai.provider}, модель ${profile.ai.model}. Доступность модели не проверялась.`,
+    `Разрешение на чтение и передачу AI: ${hasOnboardingConsent(result.root, profile) ? 'задано для этой установки' : 'не предоставлено; настройте через npx flowcairn setup'}.`,
+    'Команды проекта выполняются в Docker. Изоляция через произвольный host shell не заменяется.',
   ];
   if (result.dryRun) summary.push(`Планируемые файлы: ${result.changes.join(', ')}.`);
   else
     summary.push(
-      'Далее из корня проекта:',
-      '  npx flowcairn doctor',
-      '  git status --short',
-      '  git diff',
-      'Задайте свою цель, разрешенные пути и критерий проверки:',
-      '  npx flowcairn task --id ORCH-001 --goal "Уточнить заголовок" --scope README.md --accept "Заголовок объясняет назначение"',
-      'После npm install есть изменения package.json: проверьте их и добавьте к task --snapshot либо сохраните в Git.',
-      'Если git status показывает новый package-lock.json, включите его явно: --include-untracked package-lock.json. Остальные новые файлы требуют такого же решения.',
-      '  npx flowcairn ui',
-      'Task сохраняет настоящий граф локально и ждет разрешения. AI пока не вызывается.',
+      'Далее: npx flowcairn — открыть локальный UI и создать задачу.',
+      'Разработка начнется после согласования плана.',
     );
+  if (result.checkPreparation && !result.checkPreparation.prepared &&
+      ['DECLINED', 'NON_INTERACTIVE'].includes(result.checkPreparation.reason))
+    summary.push('Проверки еще не подготовлены. Перед их запуском: npx flowcairn checks prepare.');
   process.stdout.write(sanitizeText(summary.join('\n')) + '\n');
 }
 
 export async function main(tokens = process.argv.slice(2)) {
-  const command = tokens.shift() ?? 'help';
+  tokens = [...tokens];
+  const command = !tokens.length || (tokens[0].startsWith('--') && !['--help', '--version'].includes(tokens[0])) ? 'ui' : tokens.shift();
   if (['help', '--help', '-h'].includes(command)) {
     process.stdout.write(HELP);
     return;
@@ -722,6 +665,7 @@ export async function main(tokens = process.argv.slice(2)) {
   }
   if (command === 'checks' && tokens.shift() !== 'prepare')
     fail('ARGUMENT', 'Используйте flowcairn checks prepare.');
+  const instructionsAction = command === 'instructions' ? tokens.shift() : undefined;
   const options = parseOptions(tokens),
     root = options.root ?? process.cwd();
   if (options.help) {
@@ -729,7 +673,11 @@ export async function main(tokens = process.argv.slice(2)) {
     return;
   }
   let result;
-  if (command === 'init') result = await initializeCommand(root, options);
+  if (command === 'update') result = await checkUpdate(JSON.parse(readRegular(path.join(RUNTIME_ROOT, 'package.json')).toString('utf8')).version);
+  else if (command === 'instructions') result = await instructionsCommand(projectRoot(root), instructionsAction, options);
+  else if (command === 'uninstall') result = await uninstallCommand(projectRoot(root), options);
+  else if (command === 'init') result = await initializeCommand(root, options);
+  else if (command === 'setup') result = await setupCommand(root, options);
   else if (command === 'doctor') result = await doctorProject(root);
   else if (command === 'task') {
     let input = options.file
@@ -760,20 +708,32 @@ export async function main(tokens = process.argv.slice(2)) {
     const port = Number(options.port ?? 4329);
     if (!Number.isInteger(port) || port < 1024 || port > 65535)
       fail('PORT', 'Порт должен быть от 1024 до 65535.');
-    const service = await WorkflowService.open({ root: projectRoot(root) }),
-      token = randomBytes(32).toString('base64url');
-    const server = startViewer({
-      service,
-      token,
-      port,
-      dist: path.join(RUNTIME_ROOT, 'tools/ai-graph-viewer/dist'),
+    const canonicalRoot = projectRoot(root);
+    if (!existsNoFollow(path.join(canonicalRoot, PROFILE))) {
+      const initialized = await initializeCommand(canonicalRoot, options);
+      if (options['dry-run']) { printInitialization(initialized); return; }
+      printInitialization(initialized);
+    } else {
+      initializeProject(canonicalRoot, options);
+    }
+    const { acquireRuntimeLease } = await import('../scripts/ai-graph/lib/lifecycle.mjs');
+    const release = acquireRuntimeLease({ root: canonicalRoot, kind: 'viewer' });
+    let server, service;
+    const token = randomBytes(32).toString('base64url');
+    const close = () => { release(); service?.close(); };
+    try {
+      service = await WorkflowService.open({ root: canonicalRoot });
+      server = startViewer({ service, token, port, dist: path.join(RUNTIME_ROOT, 'tools/ai-graph-viewer/dist') });
+    } catch (error) { close(); throw error; }
+    server.once('close', close);
+    server.on('listening', async () => {
+      const url = `http://127.0.0.1:${port}/#session=${token}`;
+      process.stdout.write(`Flowcairn: ${url}\nНе публикуйте временный URL с токеном. Ctrl+C завершает сервер.\n`);
+      if (!options['no-open'] && !(await openBrowser(url)))
+        process.stdout.write('Браузер не открылся автоматически. Откройте URL выше вручную.\n');
     });
-    server.on('listening', () =>
-      process.stdout.write(
-        `Flowcairn: http://127.0.0.1:${port}/#session=${token}\nНе публикуйте временный URL с токеном. Ctrl+C завершает сервер.\n`,
-      ),
-    );
     server.on('error', (error) => {
+      close();
       process.stderr.write(
         `Не удалось открыть Flowcairn: ${'code' in error ? String(error.code) : 'ERROR'}\n`,
       );
@@ -812,7 +772,7 @@ export async function main(tokens = process.argv.slice(2)) {
       await WorkflowService.open({ root: projectRoot(root) }),
     );
   }
-  if (command === 'init' && !options.json) printInitialization(result);
+  if (['init', 'setup'].includes(command) && !options.json) printInitialization(result);
   else if (command === 'task' && !options.json)
     process.stdout.write(
       `Граф ${result.runId} сохранен. AI не запускался.\nОткрыть граф: npx flowcairn ui\nВыполнение требует отдельного разрешения конкретного плана.\n`,

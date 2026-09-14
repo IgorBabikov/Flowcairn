@@ -12,7 +12,13 @@ async function fixture(t) {
   const dist = mkdtempSync(path.join(os.tmpdir(), 'graph-http-'));
   writeFileSync(path.join(dist, 'index.html'), '<html><head></head><body></body></html>');
   const calls = [];
+  const lifecycle = [];
   const service = {
+    acquireViewerLease: () => { lifecycle.push('acquire'); return () => lifecycle.push('release'); },
+    close: () => lifecycle.push('close'),
+    onboarding: () => ({configured:true,values:{modelMode:'manual'},limitations:[]}),
+    project: () => ({ project: { name: 'HTTP fixture' }, capabilities: { intake: { allowed: false, reason: 'Planner unavailable' } } }),
+    intake: async (...args) => { calls.push({ intake: args }); return { runId: 'run-intake' }; },
     capabilities: () => ({ create: { allowed: true, reason: null } }),
     listRuns: () => [{ runId: 'run-test' }],
     snapshot: () => {
@@ -45,6 +51,7 @@ async function fixture(t) {
     url,
     server,
     calls,
+    lifecycle,
     headers: { 'X-Flowcairn-Control': token, Origin: url, 'Content-Type': 'application/json' },
   };
 }
@@ -156,4 +163,65 @@ test('Unicode auth header with equal character length is denied without crashing
   });
   assert.equal(denied.status, 403);
   assert.equal((await fetch(`${f.url}/api/runs`, { headers: f.headers })).status, 200);
+});
+
+
+test('project and intake HTTP adapters preserve service DTOs and require local authorization', async (t) => {
+  const f = await fixture(t);
+  assert.equal((await fetch(`${f.url}/api/project`)).status, 403);
+  assert.equal((await fetch(`${f.url}/api/intake`, { method: 'POST', body: '{}' })).status, 403);
+  const project = await fetch(`${f.url}/api/project`, { headers: f.headers });
+  assert.deepEqual(await project.json(), { project: { name: 'HTTP fixture' }, capabilities: { intake: { allowed: false, reason: 'Planner unavailable' } } });
+  const body = { prompt: 'Исправить поиск', operationId: 'intake-fixture', plannerConsent: { challenge: 'opaque-from-service' } };
+  const intake = await fetch(`${f.url}/api/intake`, { method: 'POST', headers: f.headers, body: JSON.stringify(body) });
+  assert.equal(intake.status, 201);
+  assert.deepEqual(await intake.json(), { ok: true, result: { runId: 'run-intake' } });
+  assert.deepEqual(f.calls, [{ intake: [body, { actor: 'local-operator' }] }]);
+});
+
+
+test('viewer holds its lifecycle lease until the HTTP server closes', async (t) => {
+  const f = await fixture(t);
+  assert.deepEqual(f.lifecycle, ['acquire']);
+  f.server.closeAllConnections();
+  await new Promise(resolve => f.server.close(resolve));
+  assert.deepEqual(f.lifecycle, ['acquire', 'release', 'close']);
+});
+
+
+test('failed viewer listen releases its lease exactly once', async (t) => {
+  const f = await fixture(t);
+  const lifecycle = [];
+  const server = startViewer({
+    service: { acquireViewerLease: () => { lifecycle.push('acquire'); return () => lifecycle.push('release'); }, close: () => lifecycle.push('close') },
+    token, port: f.server.address().port,
+  });
+  const [error] = await once(server, 'error');
+  assert.equal(error.code, 'EADDRINUSE');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(lifecycle, ['acquire', 'release', 'close']);
+});
+
+
+test('a rejected service close does not crash the closed viewer or force owner cleanup', async () => {
+  let released = 0;
+  const server = startViewer({service:{
+    acquireViewerLease: () => () => { released += 1; },
+    close: () => { throw new Error('Active service retains its own lease'); },
+  }, token, port:0});
+  await once(server, 'listening');
+  await new Promise(resolve => server.close(resolve));
+  assert.equal(released, 1);
+});
+
+test('onboarding stays read-only and plan feedback uses the authenticated domain command', async t => {
+  const f=await fixture(t);
+  assert.equal((await fetch(`${f.url}/api/onboarding`)).status,403);
+  const setup=await fetch(`${f.url}/api/onboarding`,{headers:f.headers});
+  assert.equal((await setup.json()).values.modelMode,'manual');
+  assert.equal((await fetch(`${f.url}/api/onboarding`,{method:'POST',headers:f.headers,body:'{}'})).status,404);
+  const body={operationId:'op-revise',expectedRevision:2,planHash:'a'.repeat(64),feedback:'Проверить телефон'};
+  const response=await fetch(`${f.url}/api/runs/run-test/control/revise-plan`,{method:'POST',headers:f.headers,body:JSON.stringify(body)});
+  assert.equal(response.status,200);
+  assert.deepEqual(f.calls[0],['run-test','revise-plan',body,{actor:'local-operator'}]);
 });

@@ -20,9 +20,11 @@ export type CapabilityName =
   | 'stop'
   | 'requestReplan'
   | 'openReceipt'
-  | 'rerunCheck';
+  | 'rerunCheck'
+  | 'revisePlan';
 
 export interface Capability {
+  label?: string;
   allowed: boolean;
   reason: string | null;
 }
@@ -53,6 +55,8 @@ export interface CheckResult {
 }
 
 export interface GraphNodeSnapshot {
+  sourceRunId?: string;
+  sourcePlanHash?: string;
   id: string;
   title: string;
   outcome: string;
@@ -90,10 +94,30 @@ export interface GateSnapshot {
   expiresAt: number;
 }
 
+export interface WorkflowProgress {
+  nodeId: string;
+  title: string;
+  action: 'ai-analyze' | 'ai-plan';
+  outcome?: string;
+  attempt?: number;
+  durationMs?: number | null;
+  status: RunStatus;
+  sourceRunId: string;
+  planHash: string;
+  receiptIds: string[];
+  artifacts: ArtifactSummary[];
+}
 export interface Snapshot {
+  failureReason?: string | null;
+  workflowProgress?: WorkflowProgress[];
+  phase?: 'planning' | 'execution';
+  workflow?: 'autonomous' | null;
+  successorRunId?: string | null;
+  completion?: 'ready-for-review' | null;
+  delivery?: { workspacePath: string } | null;
   schemaVersion: 2;
   runId: string;
-  task?: { id: string; goal: string; scope: string[]; acceptance: string[] };
+  task?: { id: string; goal: string; title?: string; description?: string; taskNumber?: string; scope: string[]; acceptance: string[] };
   planVersion?: number;
   planHash?: string;
   revision?: number;
@@ -232,6 +256,7 @@ export interface ControlRequest {
   challenge?: string;
   draft?: { nodes: unknown[] };
   reason?: string;
+  feedback?: string;
 }
 
 export interface TaskInput {
@@ -267,4 +292,47 @@ export function isSnapshot(value: unknown): value is Snapshot {
     Boolean(candidate.capabilities) &&
     Boolean(candidate.integrity)
   );
+}
+
+export interface BootstrapContext {
+  firstTask: boolean;
+  required: boolean;
+  changedPaths: string[];
+  untrackedCandidates: string[];
+  requiredUntracked?: Array<{ path: string; hash: string }>;
+  snapshotHash: string;
+}
+export interface IntakeOptions {
+  scope?: string[];
+  snapshot?: true;
+  includeUntracked?: string[];
+  snapshotHash?: string;
+}
+export interface ProjectContext {
+  bootstrap?: BootstrapContext;
+  schemaVersion: 2;
+  name: string;
+  contextHash: string;
+  contextPaths: string[];
+  scopeCandidates: string[];
+  checks: string[];
+  ai: { provider: string | null; model: string | null };
+  capabilities: { intake: Capability };
+}
+export interface TaskFields {
+  title: string;
+  description: string;
+  taskNumber: string;
+}
+export interface IntakeInput extends TaskFields {
+  operationId: string;
+  contextHash: string;
+}
+
+export interface OnboardingStatus {
+  configured: boolean;
+  profileHash: string | null;
+  providers: Array<{id: string; label: string; supported: boolean; reason: string | null}>;
+  values: { provider: string; model: string | null; modelMode: string; reasoningEffort: string | null; testPolicy: string; coverage: boolean; readConsent: boolean };
+  limitations: string[];
 }

@@ -23,8 +23,7 @@ const WORKSPACE = '/workspace';
 const PREPARED_WORKSPACE = '/opt/flowcairn/workspace';
 const CONTRACT = '/contract.json';
 const NODE = '/usr/local/bin/node';
-const PNPM = '/opt/corepack/v1/pnpm/11.8.0/bin/pnpm.cjs';
-const NPM = '/usr/local/lib/node_modules/npm/bin/npm-cli.js';
+const PACKAGE_MANAGER = '/opt/flowcairn/package-manager.cjs';
 const HASH_PATTERN = /^[a-f0-9]{64}$/;
 const MAX_FILES = 20_000;
 const MAX_FILE_BYTES = 64 * 1024 * 1024;
@@ -80,7 +79,9 @@ function relativePath(value) {
         !part ||
         part === '.' ||
         part === '..' ||
-        ['.git', '.ai-orchestrator', 'node_modules'].includes(part.toLowerCase()),
+        ['.git', '.ai-orchestrator', 'node_modules', '.npmrc', '.netrc', '.pypirc'].includes(part.toLowerCase()) ||
+        /^(?:\.env(?:\.|$)|credentials(?:\.json)?$|id_rsa$|id_ed25519$)/i.test(part) ||
+        /\.(?:pem|key|p12|pfx)$/i.test(part),
     )
   ) {
     fail('INVALID_SOURCE_PATH');
@@ -146,12 +147,12 @@ export function registeredContainerCheck(actionId, { packageManager }) {
     'check-tests': 'test',
     'check-build': 'build',
   };
-  if (!['npm', 'pnpm'].includes(packageManager)) fail('INVALID_CONTRACT');
+  if (!['npm', 'pnpm', 'yarn'].includes(packageManager)) fail('INVALID_CONTRACT');
   const script = Object.hasOwn(scripts, actionId) ? scripts[actionId] : null;
   if (!script) fail('UNSUPPORTED_CHECK');
   return Object.freeze({
     executable: NODE,
-    args: Object.freeze([packageManager === 'npm' ? NPM : PNPM, 'run', script]),
+    args: Object.freeze([PACKAGE_MANAGER, 'run', script]),
   });
 }
 
@@ -379,6 +380,9 @@ export async function main({
         npm_config_manage_package_manager_versions: 'false',
         COREPACK_ENABLE_NETWORK: '0',
         COREPACK_HOME: '/opt/corepack',
+        YARN_NODE_LINKER: 'node-modules',
+        YARN_ENABLE_GLOBAL_CACHE: 'false',
+        YARN_ENABLE_NETWORK: 'false',
         HOME: '/tmp',
         PATH: '/workspace/node_modules/.bin:/usr/local/bin:/usr/bin:/bin',
         XDG_CACHE_HOME: '/tmp/cache',
