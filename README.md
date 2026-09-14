@@ -11,6 +11,7 @@
 
 <p align="center">
   <a href="https://github.com/IgorBabikov/flowcairn/actions/workflows/ci.yml"><img src="https://github.com/IgorBabikov/flowcairn/actions/workflows/ci.yml/badge.svg?branch=main" alt="Проверки проекта"></a>
+  <a href="https://www.npmjs.com/package/flowcairn"><img src="https://img.shields.io/npm/v/flowcairn?label=npm&amp;color=cb3837" alt="Актуальная версия Flowcairn в npm"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/лицензия-MIT-9163cb" alt="Лицензия MIT"></a>
   <a href="https://github.com/IgorBabikov/flowcairn/releases"><img src="https://img.shields.io/github/downloads/IgorBabikov/flowcairn/total?label=%D0%A1%D0%BA%D0%B0%D1%87%D0%B8%D0%B2%D0%B0%D0%BD%D0%B8%D1%8F%20%D0%B0%D1%80%D1%85%D0%B8%D0%B2%D0%BE%D0%B2&amp;color=397b5b" alt="Скачивания файлов GitHub Releases за все время"></a>
   <a href="docs/INSTALLATION.md"><img src="https://img.shields.io/badge/Node.js-22-42886d" alt="Нужен Node.js 22"></a>
