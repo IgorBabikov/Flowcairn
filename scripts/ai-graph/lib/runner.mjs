@@ -1134,6 +1134,8 @@ export async function runRegisteredAction({
       stopped,
       uncertain,
       failureReason,
+      timedOut: failureReason === 'TIMEOUT',
+      outputLimit: failureReason === 'OUTPUT_LIMIT',
       durationMs,
       process: processMetadata,
       execution: executionMetadata(prepared, output),

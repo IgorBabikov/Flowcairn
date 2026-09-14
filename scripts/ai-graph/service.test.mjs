@@ -1349,3 +1349,18 @@ test('uncertain implementation keeps a sanitized explanation without saving prop
   assert.doesNotMatch(artifact.content, /PROPOSED_CODE_MUST_NOT_BE_STORED/);
   assert.equal(applied, 0);
 });
+
+
+test('подтвержденный таймаут сохраняет причину и не разрешает слепой повтор', async (t) => {
+  const f = await fixture(t);
+  f.adapters.execute = async ({ onStart }) => {
+    await onStart({ pid: process.pid, ticket: 'timeout-fixture' });
+    return { exitCode: 0, stopped: true, uncertain: true, timedOut: true, failureReason: 'TIMEOUT' };
+  };
+  let s = await f.approve();
+  s = await f.service.command(s.runId, 'run', f.request(s));
+  const node = s.nodes.find(item => item.status === 'uncertain');
+  assert.match(node.reason, /Истек лимит времени/);
+  assert.equal(node.capabilities.retry.allowed, false);
+  assert.equal(f.service.receipt(s.runId, node.receiptIds.at(-1)).termination.timedOut, true);
+});

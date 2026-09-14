@@ -1965,7 +1965,9 @@ export class WorkflowService {
           reason ??
           (!assessment.allowed
             ? 'Нарушена граница изменений'
-            : 'Остановка процесса или результат не подтверждены');
+            : result.failureReason === 'TIMEOUT'
+              ? 'Истек лимит времени выполнения этапа; требуется восстановление'
+              : 'Остановка процесса или результат не подтверждены');
       } else if (result.exitCode !== 0) {
         verdict = 'fail';
         reason = reason ?? sanitizeText(result.failureReason ?? 'Действие завершилось с ошибкой');
