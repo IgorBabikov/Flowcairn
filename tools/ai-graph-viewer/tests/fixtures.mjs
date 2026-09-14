@@ -89,6 +89,7 @@ export function snapshot() {
     runId: 'run-demo',
     task: {
       id: 'TASK-101',
+      taskNumber: 'FORM-101',
       goal: 'Собрать надежный Graph',
       scope: ['tools/ai-graph-viewer'],
       acceptance: ['UI следует backend capabilities'],

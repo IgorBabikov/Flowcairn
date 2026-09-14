@@ -124,6 +124,14 @@ test('creates a task from ordinary text without ids, permissions or external cal
   expect(fixture.calls.filter(call => call.action === 'run' || call.action === 'gate')).toHaveLength(0);
 });
 
+test('shows the user task number in the run rail and graph header', async ({ page }) => {
+  await mockApi(page, snapshot());
+  await page.goto(`/#session=${token}`);
+  await expect(page.locator('.run-row').first()).toContainText('FORM-101');
+  await expect(page.locator('.run-row').first()).not.toContainText('TASK-101');
+  await expect(page.locator('.graph-goal summary')).toContainText('FORM-101');
+});
+
 test('replays a lost intake response with the exact same request', async ({ page }) => {
   const fixture = await mockApi(page, snapshot(), { loseFirstCreateResponse: true, loseFirstRunResponse: false });
   await page.goto(`/#session=${token}`);

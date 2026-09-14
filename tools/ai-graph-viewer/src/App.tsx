@@ -1248,7 +1248,12 @@ export function App() {
             <div>
               <h2>{labels.graph}</h2>
               <details className="graph-goal">
-                <summary><span>{snapshot?.task?.goal ?? (selectedRunId ? labels.loading : labels.noRuns)}</span></summary>
+                <summary>
+                  <span>
+                    {snapshot?.task?.taskNumber ?? snapshot?.task?.id ?? (selectedRunId ? labels.loading : labels.noRuns)}
+                    {snapshot?.task?.goal ? ` · ${snapshot.task.goal}` : ''}
+                  </span>
+                </summary>
                 <p>{snapshot?.task?.description ?? snapshot?.task?.goal ?? (selectedRunId ? labels.loading : labels.noRuns)}</p>
               </details>
             </div>
