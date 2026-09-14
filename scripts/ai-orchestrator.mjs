@@ -361,6 +361,82 @@ function readState(root, { allowProfileChange = false } = {}) {
   return state;
 }
 
+/**
+ * Moves only the registry's profile reference after the caller has stopped
+ * Graph work and atomically written the new profile. Plans, tasks and receipts
+ * remain historical evidence and are intentionally never rewritten.
+ * @param {string} root
+ * @param {{fromProfileHash?: string, toProfileHash?: string, verifyStoppedGraph?: () => {verified?: boolean, evidence?: string, bindings?: ReadonlyArray<object>}}} options
+ */
+export function migrateProjectProfile(root, { fromProfileHash, toProfileHash, verifyStoppedGraph } = {}) {
+  const canonicalRoot = resolveRoot(root);
+  if (!existsSync(pathsFor(canonicalRoot).state))
+    return { migrated: false, reason: 'REGISTRY_MISSING' };
+  if (!SOURCE_HASH.test(fromProfileHash ?? '') || !SOURCE_HASH.test(toProfileHash ?? ''))
+    throw new CliError('PROFILE_MIGRATION_INVALID', 'Profile migration requires exact previous and next hashes');
+  if (typeof verifyStoppedGraph !== 'function')
+    throw new CliError('STOP_PROOF_REQUIRED', 'Profile migration requires verified lifecycle stop proof');
+  return withLock(canonicalRoot, 'flowcairn-profile-migration', () => {
+    const stopProof = verifyStoppedGraph();
+    if (
+      !stopProof ||
+      stopProof.verified !== true ||
+      typeof stopProof.evidence !== 'string' ||
+      stopProof.evidence.length < 1 ||
+      stopProof.evidence.length > 1024 ||
+      !Array.isArray(stopProof.bindings) ||
+      stopProof.bindings.length > 128
+    )
+      throw new CliError('STOP_PROOF_REQUIRED', 'Profile migration requires verified lifecycle stop proof');
+    const state = readState(canonicalRoot, { allowProfileChange: true });
+    if (state.integrationBranch !== integrationBranch(canonicalRoot))
+      throw new CliError('PROFILE_MIGRATION_SCOPE', 'Migration cannot accept an integration branch change');
+    if (state.projectProfileHash !== fromProfileHash)
+      throw new CliError('PROFILE_MIGRATION_STALE', 'Registry profile changed before migration');
+    if (projectProfileHash(canonicalRoot) !== toProfileHash)
+      throw new CliError('PROFILE_MIGRATION_STALE', 'Project profile changed before migration');
+    const leases = activeLocks(state);
+    for (const lock of leases) {
+      const task = getTask(state, lock.task);
+      const attempt = latestAttempt(task);
+      const binding = attempt?.graphBinding;
+      const matched = stopProof.bindings.find((candidate) =>
+        candidate && typeof candidate === 'object' &&
+        candidate.runId === binding?.runId &&
+        candidate.taskId === task.id &&
+        candidate.attemptId === attempt?.number &&
+        candidate.leaseId === binding?.leaseId &&
+        candidate.sourceHash === binding?.sourceHash &&
+        candidate.worktree === attempt?.worktree &&
+        candidate.owner === state.owner,
+      );
+      if (
+        !binding ||
+        binding.owner !== state.owner ||
+        attempt.handle !== `graph:${binding.leaseId}` ||
+        !matched
+      )
+        throw new CliError('ACTIVE_LEASES', 'Recover every active worker before changing its project profile', leases);
+    }
+    if (fromProfileHash === toProfileHash)
+      return { migrated: false, reason: 'UNCHANGED', profileHash: state.projectProfileHash };
+    state.projectProfileHash = toProfileHash;
+    state.profileMigrations ??= [];
+    state.profileMigrations.push({
+      fromProfileHash,
+      toProfileHash,
+      at: now(),
+      stopProof: stopProof.evidence,
+    });
+    atomicWrite(canonicalRoot, state);
+    return {
+      migrated: true,
+      previousProfileHash: fromProfileHash,
+      profileHash: toProfileHash,
+    };
+  });
+}
+
 function atomicWrite(root, state) {
   const registryPaths = pathsFor(root);
   state.updatedAt = now();

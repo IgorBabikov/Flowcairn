@@ -133,6 +133,21 @@ export async function acquireUninstallGuard({ root }) {
       if (!proof?.stopped || field(proof, 'uncertain') || (field(metadata, 'kind') === 'docker-check' && field(field(proof, 'execution'), 'removed') !== true))
         fail('UNINSTALL_PROCESS_UNKNOWN', 'Нет доказательства остановки descendant process');
     }
+    const graphBindings = Object.freeze(states.flatMap((raw) => {
+      if (raw.kind === 'intake-operation') return [];
+      const state = RunStateSchema.parse(raw);
+      const binding = state.binding;
+      if (!binding || binding.runId !== state.runId || !binding.owner) return [];
+      return [Object.freeze({
+        runId: binding.runId,
+        taskId: binding.taskId,
+        attemptId: binding.attemptId,
+        leaseId: binding.leaseId,
+        sourceHash: binding.sourceHash,
+        worktree: binding.worktree,
+        owner: binding.owner,
+      })];
+    }));
     const inventory = () => {
       const worktrees = new Set(states.flatMap((raw) => [raw.binding, raw.pendingBinding].filter(Boolean).map((binding) => binding.worktree)));
     const worktreeRoot = path.join(ctx.control, 'worktrees');
@@ -173,6 +188,6 @@ export async function acquireUninstallGuard({ root }) {
       return { state: 'stopped', verified: true, evidence: `Lifecycle fence; stopped owner PIDs and immutable process receipts; fingerprint=${expected}` };
     };
     stoppedOwners = owners;
-    return { processProbe, worktreePaths, transientPaths: [LIFECYCLE_FENCE], release };
+    return { processProbe, graphBindings, worktreePaths, transientPaths: [LIFECYCLE_FENCE], release };
   } catch (error) { release(); throw error; }
 }

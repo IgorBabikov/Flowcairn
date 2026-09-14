@@ -14,6 +14,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { captureSourceBundle } from './ai-graph/lib/source.mjs';
+import { projectProfileHash } from './ai-graph/lib/project.mjs';
+import { migrateProjectProfile } from './ai-orchestrator.mjs';
 
 const SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'ai-orchestrator.mjs');
 const OWNER = 'orchestrator-session-1';
@@ -1337,6 +1339,68 @@ test('profile-change flag cannot replace an active goal', (t) => {
     cli(repo, 'start', { owner: OWNER, 'accept-profile-change': true }, { fail: true }).error.code,
     'RUN_ACTIVE',
   );
+});
+
+test('migration preserves a recovered Graph binding for the next replan', (t) => {
+  const { base, repo } = fixture(t);
+  addTasks(base, repo, taskSpec('ORCH-PROFILE'));
+  const sourceHash = 'a'.repeat(64);
+  const reserved = cli(repo, 'graph-reserve', {
+    owner: OWNER,
+    task: 'ORCH-PROFILE',
+    run: 'run-profile-previous',
+    'source-hash': sourceHash,
+  });
+  cli(repo, 'bind', {
+    owner: OWNER,
+    task: 'ORCH-PROFILE',
+    attempt: reserved.attemptId,
+    handle: `graph:${reserved.leaseId}`,
+  });
+  const before = JSON.parse(readFileSync(path.join(repo, '.ai-orchestrator', 'state.json')));
+  const profilePath = path.join(repo, '.flowcairn.json');
+  const profile = JSON.parse(readFileSync(profilePath, 'utf8'));
+  writeFileSync(profilePath, JSON.stringify({ ...profile, ai: { ...profile.ai, model: 'next-model' } }));
+  const migrated = migrateProjectProfile(repo, {
+    fromProfileHash: before.projectProfileHash,
+    toProfileHash: projectProfileHash(repo),
+    verifyStoppedGraph: () => ({
+      verified: true,
+      evidence: 'Graph recovery and lifecycle fence verified.',
+      bindings: [{ ...reserved, handle: `graph:${reserved.leaseId}` }],
+    }),
+  });
+  assert.equal(migrated.migrated, true);
+  assert.equal(migrated.previousProfileHash, before.projectProfileHash);
+  assert.equal(migrated.profileHash, projectProfileHash(repo));
+  const after = JSON.parse(readFileSync(path.join(repo, '.ai-orchestrator', 'state.json')));
+  assert.equal(after.tasks[0].attempts[0].number, reserved.attemptId);
+  assert.equal(after.tasks[0].attempts[0].status, 'active');
+  assert.deepEqual(after.tasks[0].attempts[0].graphBinding.runId, reserved.runId);
+  assert.equal(cli(repo, 'graph-verify', {
+    owner: OWNER,
+    task: 'ORCH-PROFILE',
+    attempt: reserved.attemptId,
+    run: reserved.runId,
+    lease: reserved.leaseId,
+    'source-hash': sourceHash,
+    worktree: reserved.worktree,
+  }).runId, reserved.runId);
+});
+
+test('migration still rejects an active legacy worker', (t) => {
+  const { base, repo } = fixture(t);
+  addTasks(base, repo, taskSpec('ORCH-LEGACY'));
+  claimBind(repo, 'ORCH-LEGACY');
+  const before = JSON.parse(readFileSync(path.join(repo, '.ai-orchestrator', 'state.json')));
+  const profilePath = path.join(repo, '.flowcairn.json');
+  const profile = JSON.parse(readFileSync(profilePath, 'utf8'));
+  writeFileSync(profilePath, JSON.stringify({ ...profile, ai: { ...profile.ai, model: 'next-model' } }));
+  assert.throws(() => migrateProjectProfile(repo, {
+    fromProfileHash: before.projectProfileHash,
+    toProfileHash: projectProfileHash(repo),
+    verifyStoppedGraph: () => ({ verified: true, evidence: 'Lifecycle fence verified.', bindings: [] }),
+  }), (error) => error.code === 'ACTIVE_LEASES');
 });
 
 test('legacy task data cannot select arbitrary programs or out-of-scope host checks', (t) => {

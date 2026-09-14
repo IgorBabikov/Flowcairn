@@ -1,11 +1,12 @@
 import path from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { z } from 'zod';
-import { GraphError, sha256 } from '../scripts/ai-graph/lib/io.mjs';
+import { GraphError, hashObject, sha256 } from '../scripts/ai-graph/lib/io.mjs';
 import { ProjectProfileSchema, loadProjectProfile, projectProfileHash, hasOnboardingConsent, onboardingConsentHash } from '../scripts/ai-graph/lib/project.mjs';
 import { defaultProvider } from '../scripts/ai-graph/lib/platform.mjs';
 import { acquireUninstallGuard } from '../scripts/ai-graph/lib/lifecycle.mjs';
 import { readIntegrationTarget, replaceIntegrationFile } from '../scripts/ai-graph/lib/integration.mjs';
+import { migrateProjectProfile } from '../scripts/ai-orchestrator.mjs';
 
 const effort = z.enum(['low', 'medium', 'high', 'xhigh']);
 const SetupSchema = z.strictObject({
@@ -120,6 +121,12 @@ function configuredProfile(previous, value) {
     });
 }
 
+function sameProfileStructure(previous, next) {
+  const { ai: _previousAi, onboarding: _previousOnboarding, ...previousStructure } = previous;
+  const { ai: _nextAi, onboarding: _nextOnboarding, ...nextStructure } = next;
+  return hashObject(previousStructure) === hashObject(nextStructure);
+}
+
 /** Изменение доступно только локальному CLI после остановки исполнителей. */
 export async function saveOnboarding(root, input, { dryRun = false } = {}) {
   const value = SetupSchema.parse(input);
@@ -130,7 +137,8 @@ export async function saveOnboarding(root, input, { dryRun = false } = {}) {
   if (dryRun) return {created:false,dryRun:true,root,profile:configuredProfile(loadProjectProfile(root),value),changes:['.flowcairn.json','.ai-orchestrator/flowcairn-install.json']};
   const guard = await acquireUninstallGuard({ root });
   try {
-    if (value.profileHash !== projectProfileHash(root) || guard.processProbe().verified !== true) fail('ONBOARDING_STALE', 'Состояние изменилось. Повторите настройку.');
+    const verifyStoppedGraph = () => ({ ...guard.processProbe(), bindings: guard.graphBindings });
+    if (value.profileHash !== projectProfileHash(root) || verifyStoppedGraph().verified !== true) fail('ONBOARDING_STALE', 'Состояние изменилось. Повторите настройку.');
     const profileBefore = readIntegrationTarget(root, '.flowcairn.json');
     const ownerBefore = readIntegrationTarget(root, '.ai-orchestrator/flowcairn-install.json', 1024 * 1024);
     if (!ownerBefore) fail('INIT_REQUIRED', 'Сначала выполните npx flowcairn init.');
@@ -138,11 +146,26 @@ export async function saveOnboarding(root, input, { dryRun = false } = {}) {
     if (owner.tool !== 'flowcairn' || !/^flowcairn-[a-f0-9-]+$/.test(owner.owner ?? '')) fail('INSTALL_CONFLICT', 'Владелец установки не подтвержден.');
     const previous = loadProjectProfile(root);
     const profile = configuredProfile(previous, value);
+    if (!sameProfileStructure(previous, profile))
+      fail('PROFILE_MIGRATION_SCOPE', 'Настройка может менять только AI и onboarding; структурные поля проекта сохранены.');
     const bytes = Buffer.from(JSON.stringify(profile,null,2)+'\n');
-    // При частичной записи старое согласие перестает подходить новому профилю.
-    replaceIntegrationFile(root,'.flowcairn.json',bytes,profileBefore);
-    const nextOwner = {...owner,profileHash:sha256(bytes),readConsentHash:value.readConsent ? onboardingConsentHash(root,profile) : null};
-    replaceIntegrationFile(root,'.ai-orchestrator/flowcairn-install.json',Buffer.from(JSON.stringify(nextOwner,null,2)+'\n'),ownerBefore,1024*1024);
-    return {created:false,root:path.resolve(root),profile,message:'Настройки сохранены. Запуск: npx flowcairn.'};
+    let profileAfter, ownerAfter;
+    try {
+      // При частичной записи старое согласие перестает подходить новому профилю.
+      profileAfter = replaceIntegrationFile(root,'.flowcairn.json',bytes,profileBefore);
+      const nextOwner = {...owner,profileHash:sha256(bytes),readConsentHash:value.readConsent ? onboardingConsentHash(root,profile) : null};
+      ownerAfter = replaceIntegrationFile(root,'.ai-orchestrator/flowcairn-install.json',Buffer.from(JSON.stringify(nextOwner,null,2)+'\n'),ownerBefore,1024*1024);
+      const profileMigration = migrateProjectProfile(root, {
+        fromProfileHash: value.profileHash,
+        toProfileHash: projectProfileHash(root),
+        verifyStoppedGraph,
+      });
+      return {created:false,root:path.resolve(root),profile,profileMigration,message:'Настройки сохранены. Запуск: npx flowcairn.'};
+    } catch (error) {
+      // Roll back only bytes still owned by this setup attempt; never replace a concurrent edit.
+      try { if (ownerAfter) replaceIntegrationFile(root,'.ai-orchestrator/flowcairn-install.json',ownerBefore.bytes,ownerAfter,1024*1024); } catch { /* Concurrent owner edits remain untouched. */ }
+      try { if (profileAfter) replaceIntegrationFile(root,'.flowcairn.json',profileBefore.bytes,profileAfter); } catch { /* Concurrent profile edits remain untouched. */ }
+      throw error;
+    }
   } finally { guard.release(); }
 }
