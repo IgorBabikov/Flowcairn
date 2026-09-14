@@ -653,6 +653,10 @@ function makeOpenAiCommand({
       node.action.id === 'ai-review' && Reflect.get(profile.ai, 'modelMode') !== 'manual'
         ? (profile.ai.reviewModel ?? profile.ai.model)
         : profile.ai.model;
+    // Передаем только явный выбор. Поддержку выбранной моделью проверяет API без подмены параметра.
+    const reasoningEffort = node.action.id === 'ai-review' && Reflect.get(profile.ai, 'modelMode') !== 'manual'
+      ? (Reflect.get(profile.ai, 'reviewReasoningEffort') ?? Reflect.get(profile.ai, 'reasoningEffort'))
+      : Reflect.get(profile.ai, 'reasoningEffort');
     const schema = z.toJSONSchema(
       node.action.id === 'ai-review' ? AIReviewResultSchema : node.action.id === 'ai-plan' ? AIPlanningResultSchema : node.action.id === 'ai-analyze' && plan?.workflow === 'autonomous' ? AIAnalysisResultSchema : AIResultSchema,
     );
@@ -680,6 +684,7 @@ function makeOpenAiCommand({
     const payload = {
       version: 1,
       model,
+      ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
       schema,
       prompt,
       source,
@@ -712,6 +717,7 @@ function makeOpenAiCommand({
         provider: 'openai',
         cliVersion: null,
         model,
+        ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
         sandboxDigest: sha256(
           canonicalJson({
             kind: 'trusted-tool-free-worker',

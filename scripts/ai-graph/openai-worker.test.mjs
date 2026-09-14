@@ -312,14 +312,23 @@ test('OpenAI payload uses canonical trailing-slash scope/deny boundaries and com
     dependencyToolchain: { dependencyPaths: [], hash: 'b'.repeat(64) },
     profile,
   };
-  for (const readScope of ['src', 'src/']) {
+  for (const readScope of ['src', 'src/']) for (const route of [
+    { ai: profile.ai, expected: undefined, model: profile.ai.model },
+    { ai: { ...profile.ai, modelMode: 'manual', reasoningEffort: 'low', reviewReasoningEffort: 'high', reviewModel: 'other-model' }, expected: 'low', model: profile.ai.model },
+    { ai: { ...profile.ai, modelMode: 'auto', reasoningEffort: 'low', reviewReasoningEffort: 'high', reviewModel: 'other-model' }, expected: 'high', model: 'other-model' },
+  ]) {
     const prepared = RUNNER_TESTING.makeOpenAiCommand({
       ...preparation,
+      profile: { ...profile, ai: route.ai },
       node: { ...node, resources: { ...node.resources, reads: [readScope] } },
     });
     try {
       const body = readFileSync(prepared.inputFile, 'utf8');
       const input = JSON.parse(body);
+      assert.equal(input.reasoningEffort,route.expected);
+      assert.equal(input.model,route.model);
+      assert.equal(prepared.execution.reasoningEffort,route.expected);
+      assert.deepEqual(buildResponsesRequest(input).reasoning,route.expected ? { effort: route.expected } : undefined);
       assert.deepEqual(
         input.source.map((file) => file.path),
         ['src/main.js', 'src/private-other/customer.txt'],
@@ -343,4 +352,19 @@ test('OpenAI payload uses canonical trailing-slash scope/deny boundaries and com
   assert.throws(() => RUNNER_TESTING.makeOpenAiCommand(preparation), {
     code: 'SENSITIVE_WORKSPACE_PATH',
   });
+});
+
+// Контракт: https://developers.openai.com/api/docs/guides/reasoning
+test('явное усиление передается Responses без подмены и без молчаливого fallback', async () => {
+ for (const effort of ['low','medium','high','xhigh']) {
+   const request=buildResponsesRequest({...payload(),reasoningEffort:effort});
+   assert.deepEqual(request.reasoning,{effort});
+ }
+ assert.equal(Object.hasOwn(buildResponsesRequest(payload()),'reasoning'),false);
+ for(const effort of ['automatic','',null,3])assert.throws(()=>buildResponsesRequest({...payload(),reasoningEffort:effort}),/AI_INPUT_INVALID/);
+ let calls=0;
+ await assert.rejects(requestResult({...payload(),reasoningEffort:'xhigh'},{apiKey:'fixture',fetchImpl:async(_url,options)=>{
+   calls++;assert.deepEqual(JSON.parse(options.body).reasoning,{effort:'xhigh'});return new Response('unsupported effort',{status:400});
+ }}),/AI_REQUEST_REJECTED/);
+ assert.equal(calls,1,'не повторять запрос с другим effort');
 });
