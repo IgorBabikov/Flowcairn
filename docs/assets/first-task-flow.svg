@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="260" viewBox="0 0 1280 260" role="img" aria-labelledby="title desc">
+  <title id="title">Путь первой задачи в Flowcairn</title>
+  <desc id="desc">От постановки задачи через анализ, план и согласование к разработке, проверкам и личному ревью.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#8b98a9"/>
+    </marker>
+  </defs>
+  <rect width="1280" height="260" rx="20" fill="#fafbfc"/>
+  <path d="M 152 130H188M330 130H366M508 130H544M670 130H706M878 130H914M1086 130H1122" fill="none" stroke="#a9b3c2" stroke-width="2" marker-end="url(#arrow)"/>
+  <g font-family="Arial, Helvetica, sans-serif" text-anchor="middle">
+    <g transform="translate(28 89)">
+      <rect width="124" height="82" rx="12" fill="#f0efff" stroke="#a89cff"/>
+      <text x="62" y="35" fill="#30305b" font-size="15" font-weight="700">Задача</text>
+      <text x="62" y="57" fill="#62627d" font-size="12">Три поля</text>
+    </g>
+    <g transform="translate(188 89)">
+      <rect width="142" height="82" rx="12" fill="#e7f5ee" stroke="#61a983"/>
+      <text x="71" y="35" fill="#24523b" font-size="15" font-weight="700">Анализ</text>
+      <text x="71" y="57" fill="#547464" font-size="12">Проект и задача</text>
+    </g>
+    <g transform="translate(366 89)">
+      <rect width="142" height="82" rx="12" fill="#fff4d6" stroke="#c89a3c"/>
+      <text x="71" y="35" fill="#5d4516" font-size="15" font-weight="700">План</text>
+      <text x="71" y="57" fill="#806a40" font-size="12">Этапы и границы</text>
+    </g>
+    <g transform="translate(544 89)">
+      <rect width="126" height="82" rx="41" fill="#fff4d6" stroke="#c89a3c"/>
+      <text x="63" y="35" fill="#5d4516" font-size="15" font-weight="700">Согласен?</text>
+      <text x="63" y="57" fill="#806a40" font-size="12">Один gate</text>
+    </g>
+    <g transform="translate(706 89)">
+      <rect width="172" height="82" rx="12" fill="#eef0ff" stroke="#a89cff"/>
+      <text x="86" y="35" fill="#35325f" font-size="15" font-weight="700">Разработка</text>
+      <text x="86" y="57" fill="#68637e" font-size="12">По согласованному плану</text>
+    </g>
+    <g transform="translate(914 89)">
+      <rect width="172" height="82" rx="12" fill="#eef0ff" stroke="#a89cff"/>
+      <text x="86" y="35" fill="#35325f" font-size="15" font-weight="700">Проверки и ревью</text>
+      <text x="86" y="57" fill="#68637e" font-size="12">Evidence по этапам</text>
+    </g>
+    <g transform="translate(1122 89)">
+      <rect width="130" height="82" rx="12" fill="#e0f3cf" stroke="#6da34d"/>
+      <text x="65" y="30" fill="#28512f" font-size="14" font-weight="700">Готово</text>
+      <text x="65" y="50" fill="#28512f" font-size="14" font-weight="700">к ревью</text>
+      <text x="65" y="68" fill="#547253" font-size="11">Решение за вами</text>
+    </g>
+  </g>
+</svg>

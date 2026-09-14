@@ -112,20 +112,7 @@ npx flowcairn checks prepare
 
 [Пройти весь сценарий с объяснениями →](docs/FIRST-TASK.md)
 
-```mermaid
-flowchart LR
-  task["Три поля задачи"] --> analysis["Анализ проекта"]
-  analysis --> plan["План"]
-  plan --> agree{"Согласен"}
-  agree --> work["Разработка"]
-  work --> checks["Проверки и ревью"]
-  checks --> result["Готово к личному ревью"]
-  checks -->|"Исправление в рамках плана"| work
-  style analysis fill:#e6f3eb,stroke:#59856a,color:#173d2a
-  style plan fill:#fff1c8,stroke:#b89038,color:#423115
-  style agree fill:#fff1c8,stroke:#b89038,color:#423115
-  style result fill:#d9efc9,stroke:#5f8d46,color:#173d2a
-```
+![Путь первой задачи: задача, анализ, план, согласование, разработка, проверки, личное ревью](docs/assets/first-task-flow.svg)
 
 ## Если что-то пошло не так
 

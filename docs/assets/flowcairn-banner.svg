@@ -19,5 +19,5 @@
 <rect x="305" y="153" width="195" height="73" rx="14" fill="#322b40" stroke="#8c7d9d" stroke-dasharray="5 4"/><text x="325" y="181" fill="#c1b5cc" font-size="13" letter-spacing="1.2">СЛЕДУЮЩИЙ ЭТАП</text><text x="325" y="207" fill="#f9f3ff" font-size="19">Проверки и ревью</text>
 <rect x="0" y="312" width="280" height="64" rx="14" fill="#42352c" stroke="#d6b170"/><text x="20" y="350" fill="#ffe0a3" font-size="20">Приемка — за вами</text>
 </g>
-<g font-size="14" fill="#284d36"><rect x="60" y="369" width="170" height="35" rx="17" fill="#d3e7cb"/><text x="79" y="392">План до изменений</text><rect x="243" y="369" width="170" height="35" rx="17" fill="#d3e7cb"/><text x="263" y="392">Проверки и ревью</text><rect x="426" y="369" width="150" height="35" rx="17" fill="#d3e7cb"/><text x="445" y="392">Открытый код · MIT</text></g>
+<g font-size="14" fill="#284d36"><rect x="60" y="369" width="170" height="35" rx="17" fill="#d3e7cb"/><text x="79" y="392">План до изменений</text><rect x="243" y="369" width="170" height="35" rx="17" fill="#d3e7cb"/><text x="263" y="392">Проверки и ревью</text></g>
 </g></svg>
