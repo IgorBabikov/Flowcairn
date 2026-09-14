@@ -2629,6 +2629,8 @@ export class WorkflowService {
         [request.operationId]: { ...prior, digest, status: 'finished' },
       },
     });
-    return this.snapshot(next.runId);
+    const snapshot = this.snapshot(next.runId);
+    if (preparation.workflow === 'autonomous' && preparation.stage === 'planning') this.#schedule(next.runId);
+    return snapshot;
   }
 }

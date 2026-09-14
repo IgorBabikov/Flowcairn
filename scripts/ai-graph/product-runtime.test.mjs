@@ -297,3 +297,20 @@ test('final review сохраняет подтвержденные partial chang
  const overflow={...evidence,previousExecutions:Array.from({length:21},()=>evidence.previousExecutions[0])};
  assert.throws(()=>validateReviewEvidence(overflow,{node:plan.nodes.find(item=>item.action.id==='ai-review'),task:currentTask,plan}),{code:'REVIEW_EVIDENCE_INVALID'});
 });
+
+test('ручное повторное планирование продолжает автономный read-only цикл до согласования', async(t)=>{
+ const f=await fixture(t,{maxReplans:3});
+ const execute=f.service.adapters.execute;let firstPlan=true;
+ f.service.adapters.execute=async(args)=>{
+  const result=await execute(args);
+  if(args.node.action.id==='ai-plan' && firstPlan){firstPlan=false;result.output.verdict='fail';}
+  return result;
+ };
+ let s=await f.settle(await f.intake());assert.equal(s.status,'failed');
+ const previousHash=s.planHash;
+ s=await f.service.command(s.runId,'replan',request(s));s=await f.settle(s);
+ assert.equal(s.status,'waiting-for-human');assert.notEqual(s.planHash,previousHash);
+ assert.equal(f.calls.filter(call=>call.action==='ai-plan').length,2);
+ assert.equal(f.calls.some(call=>call.action==='ai-implement'),false);
+ s=await f.approve(s);s=await f.settle(s);assert.equal(s.completion,'ready-for-review');
+});
