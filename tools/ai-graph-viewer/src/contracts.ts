@@ -114,6 +114,7 @@ export interface Snapshot {
   workflow?: 'autonomous' | null;
   successorRunId?: string | null;
   completion?: 'ready-for-review' | null;
+  delivery?: { workspacePath: string } | null;
   schemaVersion: 2;
   runId: string;
   task?: { id: string; goal: string; title?: string; description?: string; taskNumber?: string; scope: string[]; acceptance: string[] };

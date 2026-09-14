@@ -32,7 +32,7 @@ export function WorkflowPanel({ snapshot, plan, busy, onApprove, onRevise }: {
     <ol className="workflow-steps">
       {snapshot.nodes.filter(node => node.action.kind !== 'gate').map(node => <li key={node.id}>
         <StatusIcon status={node.status} />
-        <div><strong>{nodeTitle(node, 'ru')}</strong><p>{node.outcome}</p></div>
+        <div><strong>{nodeTitle(node, 'ru')}</strong><p>{node.status === 'passed' ? 'Результат: ' : 'Ожидаемый результат: '}{node.outcome}</p></div>
       </li>)}
     </ol>
     {gate && <>
@@ -62,6 +62,11 @@ export function WorkflowPanel({ snapshot, plan, busy, onApprove, onRevise }: {
         <p>Версия плана: {snapshot.planVersion}</p><code>{gate.planHash}</code>
       </details>
     </>}
+    {done && snapshot.delivery && <section className="plan-boundaries">
+      <h3>Рабочая копия с результатом</h3>
+      <p>Откройте эту папку внутри проекта в редакторе для личного ревью, коммита и PR.</p>
+      <code>{snapshot.delivery.workspacePath}</code>
+    </section>}
     {(done || approved) && <>
       {changes.length > 0 && <><h3>Измененные файлы</h3><ul className="path-list">{changes.map(path => <li key={path}><code>{path}</code></li>)}</ul></>}
       {checks.length > 0 && <><h3>Проверки</h3><ul className="result-checks">{checks.map((check, index) => <li key={`${check.id}-${index}`}><StatusIcon status={check.passed ? 'passed' : 'failed'} /><span>{check.id}: {check.passed ? 'пройдена' : 'не пройдена'}</span></li>)}</ul></>}

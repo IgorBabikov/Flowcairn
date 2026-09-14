@@ -413,7 +413,7 @@ test('explicit refresh discovers a run from an initially empty list', async ({ p
   await page.goto(`/#session=${token}`);
   await expect(page.getByRole('region', { name: 'Новая задача' })).toBeVisible();
   await page.getByRole('button', { name: 'Обновить' }).click();
-  await expect(page.getByRole('button', { name: /TASK-101/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /FORM-101/ })).toBeVisible();
 });
 
 test('dark status text tokens meet 4.5 to 1 contrast', async ({ page }) => {
@@ -497,14 +497,14 @@ test('mobile focuses active, waiting, failed, and completed nodes again on run s
     runId: 'run-active',
     activeNodeId: 'node-5',
     status: 'running',
-    task: { ...snapshot().task, id: 'TASK-ACTIVE' },
+    task: { ...snapshot().task, id: 'TASK-ACTIVE', taskNumber: 'TASK-ACTIVE' },
   });
   active.nodes[5] = { ...active.nodes[5], status: 'running' };
   const waiting = chainSnapshot({
     runId: 'run-waiting',
     activeNodeId: null,
     status: 'waiting-for-human',
-    task: { ...snapshot().task, id: 'TASK-WAITING' },
+    task: { ...snapshot().task, id: 'TASK-WAITING', taskNumber: 'TASK-WAITING' },
   });
   waiting.nodes[3] = { ...waiting.nodes[3], status: 'waiting-for-human' };
   waiting.gates = [{ ...snapshot().gates[0], nodeId: 'node-3' }];
@@ -514,7 +514,7 @@ test('mobile focuses active, waiting, failed, and completed nodes again on run s
     gates: [],
     status: 'failed',
     finalDisposition: null,
-    task: { ...snapshot().task, id: 'TASK-FAILED' },
+    task: { ...snapshot().task, id: 'TASK-FAILED', taskNumber: 'TASK-FAILED' },
   });
   failed.nodes[4] = { ...failed.nodes[4], status: 'failed' };
   const completed = chainSnapshot({
@@ -523,7 +523,7 @@ test('mobile focuses active, waiting, failed, and completed nodes again on run s
     gates: [],
     status: 'passed',
     finalDisposition: 'accepted',
-    task: { ...snapshot().task, id: 'TASK-COMPLETED' },
+    task: { ...snapshot().task, id: 'TASK-COMPLETED', taskNumber: 'TASK-COMPLETED' },
   });
   completed.nodes = completed.nodes.map((node) => ({ ...node, status: 'passed' }));
   const snapshots = new Map(

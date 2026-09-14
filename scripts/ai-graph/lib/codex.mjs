@@ -15,6 +15,7 @@ export function buildPrompt({ nodeId, task, plan, skills, priorEvidence, reviewE
       ? 'Ты planner: используй полный priorEvidence.analysis и накопленные feedback, не начинай анализ заново. Предложи от 1 до 12 task-specific implementation steps в steps: id, title, outcome, needs (IDs других steps), paths (только разрешенные write paths). Разделяй работу по проверяемым outcomes и зависимостям исходя из задачи и исходников. Не предлагай actions, Skills, permissions, shell или checks: их назначает trusted compiler. Не включай planning/check/review/gate как steps: их добавляет runtime. При нехватке контекста верни uncertain с findings и steps=[]; не угадывай. edits=[], changedFiles=[], plan=[].'
       : '',
     `Контракт текущего узла:\n${JSON.stringify(node)}`,
+    `skillsUsed должен содержать точные runtime IDs назначенных инструкций: ${JSON.stringify(node.skills ?? [])}. Подтверди соблюдение всех назначенных правил; не заменяй runtime ID именем из YAML frontmatter и не добавляй свои Skills.`,
     `Разрешенный scope изменений: ${task.scope.join(', ')}`,
     `Объявленный read context: ${node.resources?.reads?.join(', ') ?? ''}`,
     `Acceptance:\n- ${task.acceptance.join('\n- ')}`,

@@ -40,10 +40,11 @@ test('mismatched plan is never approved', async ({page}) => {
   await expect(page.getByText('Проверяем сохраненный план…')).toBeVisible();
 });
 test('completion requires explicit ready-for-review evidence', async ({page}) => {
-  const current=workflow();current.status='passed';current.completion='ready-for-review';current.gates=[];
+  const current=workflow();current.status='passed';current.completion='ready-for-review';current.gates=[];current.delivery={workspacePath:'.ai-orchestrator/worktrees/form-12-1'};
   current.nodes=current.nodes.map(node=>({...node,status:'passed',capabilities:allDenied}));current.capabilities=allDenied;
   await mockApi(page,current);await page.goto(`/#session=${token}`);
   await expect(page.getByRole('heading',{name:'Готово к вашему ревью'})).toBeVisible();
+  await expect(page.getByText('.ai-orchestrator/worktrees/form-12-1',{exact:true})).toBeVisible();
   await expect(page.getByRole('button',{name:/Согласен|Принять результат|коммит|PR/})).toHaveCount(0);
 });
 test('settings stay outside three-field task form', async ({page}) => {

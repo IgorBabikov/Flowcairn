@@ -435,6 +435,7 @@ test('review file transport grants exactly one trusted read without enlarging pr
   const node = {
     ...contract.node,
     id: 'review',
+    skills: ['project-context', 'code-review'],
     action: { id: 'ai-review' },
     resources: { reads: ['scripts/ai-graph'], writes: [], exclusive: [] },
   };
@@ -468,6 +469,9 @@ test('review file transport grants exactly one trusted read without enlarging pr
     assert.ok(Buffer.byteLength(prepared.input) < 128 * 1024);
     const schema = JSON.parse(readFileSync(prepared.schemaFile, 'utf8'));
     assert.ok(schema.required.includes('reviewEvidenceHash'));
+    assert.deepEqual(schema.properties.skillsUsed.items.enum, node.skills);
+    assert.equal(schema.properties.skillsUsed.minItems, node.skills.length);
+    assert.equal(schema.properties.skillsUsed.maxItems, node.skills.length);
     assert.equal(schema.additionalProperties, false);
   } finally {
     RUNNER_TESTING.cleanupPrepared(prepared);

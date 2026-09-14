@@ -460,6 +460,15 @@ function createExclusiveFile(file, contents) {
   }
 }
 
+// Формат подтверждения Skills задается доверенным узлом, а не свободным текстом модели.
+function aiResponseSchema(node, plan) {
+  const schema = z.toJSONSchema(node.action.id === 'ai-review' ? AIReviewResultSchema : node.action.id === 'ai-plan' ? AIPlanningResultSchema : node.action.id === 'ai-analyze' && plan?.workflow === 'autonomous' ? AIAnalysisResultSchema : AIResultSchema);
+  if (schema.properties?.skillsUsed && node.skills?.length) {
+    schema.properties.skillsUsed = { type: 'array', items: { type: 'string', enum: [...node.skills] }, minItems: node.skills.length, maxItems: node.skills.length };
+  }
+  return schema;
+}
+
 function makeAiCommand({
   worktree,
   node,
@@ -480,7 +489,7 @@ function makeAiCommand({
   try {
     createExclusiveFile(
       schemaFile,
-      `${JSON.stringify(z.toJSONSchema(node.action.id === 'ai-review' ? AIReviewResultSchema : node.action.id === 'ai-plan' ? AIPlanningResultSchema : node.action.id === 'ai-analyze' && plan?.workflow === 'autonomous' ? AIAnalysisResultSchema : AIResultSchema))}\n`,
+      `${JSON.stringify(aiResponseSchema(node, plan))}\n`,
     );
     createExclusiveFile(resultFile, '');
     reviewFile = reviewBundle ? createReviewEvidenceFile(outputPath, reviewBundle) : null;
@@ -657,9 +666,7 @@ function makeOpenAiCommand({
     const reasoningEffort = node.action.id === 'ai-review' && Reflect.get(profile.ai, 'modelMode') !== 'manual'
       ? (Reflect.get(profile.ai, 'reviewReasoningEffort') ?? Reflect.get(profile.ai, 'reasoningEffort'))
       : Reflect.get(profile.ai, 'reasoningEffort');
-    const schema = z.toJSONSchema(
-      node.action.id === 'ai-review' ? AIReviewResultSchema : node.action.id === 'ai-plan' ? AIPlanningResultSchema : node.action.id === 'ai-analyze' && plan?.workflow === 'autonomous' ? AIAnalysisResultSchema : AIResultSchema,
-    );
+    const schema = aiResponseSchema(node, plan);
     // Responses strict mode requires every object property, including nullable/defaulted fields.
     const requireProperties = (value) => {
       if (!value || typeof value !== 'object') return;
