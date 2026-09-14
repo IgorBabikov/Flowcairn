@@ -76,4 +76,4 @@ flowchart LR
 
 ## Основатель
 
-[Личный Telegram-канал основателя Flowcairn — Babikov.build](https://t.me/Babikov_build)
+[Личный Telegram-канал основателя Flowcairn](https://t.me/Babikov_build)
