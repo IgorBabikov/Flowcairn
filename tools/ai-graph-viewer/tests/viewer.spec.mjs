@@ -132,6 +132,28 @@ test('shows the user task number in the run rail and graph header', async ({ pag
   await expect(page.locator('.graph-goal summary')).toContainText('FORM-101');
 });
 
+test('keeps the newest plan in the rail when an older run becomes stale later', async ({ page }) => {
+  const stale = snapshot();
+  stale.runId = 'run-old';
+  stale.planVersion = 4;
+  stale.status = 'stale';
+  stale.updatedAt = '2026-09-14T12:30:00.000Z';
+  stale.task = { ...stale.task, id: 'task-form-102', taskNumber: 'FORM-102' };
+  const latest = {
+    ...stale,
+    runId: 'run-new',
+    planVersion: 5,
+    status: 'waiting-for-human',
+    updatedAt: '2026-09-14T12:00:00.000Z',
+  };
+  await mockApi(page, stale, { extraRuns: [runSummary(latest)] });
+  await page.goto(`/#session=${token}`);
+  const rail = page.locator('.run-list');
+  await expect(rail).toContainText('FORM-102');
+  await expect(rail).toContainText('Версия плана 5');
+  await expect(rail).not.toContainText('Версия плана 4');
+});
+
 test('replays a lost intake response with the exact same request', async ({ page }) => {
   const fixture = await mockApi(page, snapshot(), { loseFirstCreateResponse: true, loseFirstRunResponse: false });
   await page.goto(`/#session=${token}`);

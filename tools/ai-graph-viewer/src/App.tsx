@@ -317,6 +317,31 @@ function getCapability(set: Partial<Record<CapabilityName, Capability>>, name: C
   return set[name] ?? { allowed: false, reason: 'Сервер не сообщил о доступности действия' };
 }
 
+function taskLifecycleKey(run: RunSummary): string {
+  const task = run.task;
+  return task?.id && task.taskNumber ? `${task.id}\u0000${task.taskNumber}` : run.runId;
+}
+
+function isNewerPlan(candidate: RunSummary, current: RunSummary): boolean {
+  const candidateVersion = candidate.planVersion ?? -1;
+  const currentVersion = current.planVersion ?? -1;
+  if (candidateVersion !== currentVersion) return candidateVersion > currentVersion;
+  if ((candidate.updatedAt ?? '') !== (current.updatedAt ?? ''))
+    return (candidate.updatedAt ?? '') > (current.updatedAt ?? '');
+  return candidate.runId > current.runId;
+}
+
+/** One task lifecycle is shown once, always at its newest immutable plan version. */
+function newestRunsByTask(runs: RunSummary[]): RunSummary[] {
+  const latest = new Map<string, RunSummary>();
+  for (const run of runs) {
+    const key = taskLifecycleKey(run);
+    const current = latest.get(key);
+    if (!current || isNewerPlan(run, current)) latest.set(key, run);
+  }
+  return runs.filter((run) => latest.get(taskLifecycleKey(run)) === run);
+}
+
 function relevantNodeId(snapshot: Snapshot): string | null {
   const ids = new Set(snapshot.nodes.map((node) => node.id));
   if (snapshot.activeNodeId && ids.has(snapshot.activeNodeId)) return snapshot.activeNodeId;
@@ -526,6 +551,7 @@ export function App() {
   const stopInFlightRef = useRef(false);
   const pollInFlightRef = useRef(false);
   const snapshotRefreshesRef = useRef(new Map<string, SnapshotRefresh>());
+  const visibleRuns = useMemo(() => newestRunsByTask(runs), [runs]);
 
   const selectRun = useCallback((runId: string | null) => {
     if (selectedRunRef.current !== runId) {
@@ -1232,7 +1258,7 @@ export function App() {
 
           </div>
           <div className="run-list">
-            {runs.filter((run, index) => !run.task?.taskNumber || runs.findIndex(item => item.task?.taskNumber === run.task?.taskNumber && item.task?.id === run.task?.id) === index).map((run) => (
+            {visibleRuns.map((run) => (
               <RunButton
                 key={run.runId}
                 run={run}
