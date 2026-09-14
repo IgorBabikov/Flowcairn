@@ -654,3 +654,28 @@ test('схема edits ограничена буквальными путями 
     assert.match(prepared.input, /только для текущего узла: src\/form.mjs, styles.css/);
   } finally { RUNNER_TESTING.cleanupPrepared(prepared); }
 });
+
+test('prompt отделяет запрет корня worktree от разрешенных read paths', async () => {
+  const { RUNNER_TESTING } = await import('./lib/runner.mjs');
+  const outputPath = realpathSync(fixture());
+  const contract = runnerContract();
+  const node = {
+    ...contract.node,
+    action: { id: 'ai-implement', version: 1, inputs: {} },
+    resources: { reads: ['index.html', 'styles.css', 'src'], writes: ['src/form.mjs'], exclusive: [] },
+  };
+  const worktree = '/private/tmp/isolated-worktree';
+  const prepared = RUNNER_TESTING.makeAiCommand({ ...contract, node, plan: { ...contract.plan, nodes: [node] }, worktree, skills: [], priorEvidence: null, outputPath,
+    profile: { ai: { model: 'fixture-model' }, outputPaths: [] },
+    toolchain: { node: process.execPath, codexEntry: '/trusted/codex.js', digest: 'a'.repeat(64) },
+    dependencyToolchain: { dependencyPaths: [], hash: 'b'.repeat(64) },
+  });
+  try {
+    const filesystem = prepared.command.args.find((item) => item.startsWith('permissions.graph-ai-implement.filesystem='));
+    assert.ok(filesystem.includes(`${JSON.stringify(worktree)}="deny"`));
+    for (const relative of node.resources.reads)
+      assert.ok(filesystem.includes(`${JSON.stringify(path.join(worktree, relative))}="read"`));
+    assert.match(prepared.input, /не запускай ls \./i);
+    assert.match(prepared.input, /точно перечисленные paths/i);
+  } finally { RUNNER_TESTING.cleanupPrepared(prepared); }
+});
