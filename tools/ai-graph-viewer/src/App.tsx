@@ -535,6 +535,7 @@ export function App() {
       setPlan(null);
       setEvents([]);
       setSelectedNodeId(null);
+      setTab('overview');
       setEvidence(null);
       setCompareRunId('');
       setComparePlan(null);
@@ -655,7 +656,7 @@ export function App() {
               continue;
             }
             setSelectedNodeId((current) =>
-              current && next.nodes.some((node) => node.id === current)
+              current && workflowProjection(next).nodes.some((node) => node.id === current)
                 ? current
                 : (next.activeNodeId ?? next.nodes[0]?.id ?? null),
             );
@@ -1369,8 +1370,8 @@ export function App() {
             ))}
           </nav>
           <div className="detail-scroll">
-            {snapshot?.workflow === 'autonomous' && (tab === 'overview' || tab === 'plan') ? (
-              <WorkflowPanel key={snapshot.runId} snapshot={snapshot} plan={plan} busy={busy || Boolean(pending)} onApprove={approveWorkflow} onRevise={reviseWorkflow} />
+            {snapshot?.workflow === 'autonomous' ? (
+              <div hidden={tab !== 'overview' && tab !== 'plan'}><WorkflowPanel key={snapshot.runId} snapshot={snapshot} plan={plan} busy={busy || Boolean(pending)} onApprove={approveWorkflow} onRevise={reviseWorkflow} /></div>
             ) : tab === 'overview' &&
               (selectedNode ? (
                 <NodeDetails

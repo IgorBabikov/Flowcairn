@@ -73,3 +73,15 @@ test('historical analysis opens the original receipt and never creates a write c
   await page.getByRole('button',{name:/Отчет 1/}).click();await request;
   expect(fixture.calls.filter(call=>['run','gate'].includes(call.action))).toHaveLength(0);
 });
+
+test('plan feedback survives reading reports and historical selection survives refresh', async ({page}) => {
+  const fixture=await mockApi(page,workflow());await page.goto(`/#session=${token}`);
+  await page.getByLabel('Что дополнить или исправить?').fill('Сохранить введенные значения после ошибки');
+  await page.getByRole('button',{name:'Анализ задачи: Завершен',exact:true}).click();
+  const reads=fixture.snapshotReads();fixture.current().revision+=1;
+  await expect.poll(()=>fixture.snapshotReads()).toBeGreaterThan(reads);
+  await expect(page.getByText(/Сохраненный анализ из предыдущей версии/)).toBeVisible();
+  await page.getByRole('tab',{name:'План',exact:true}).click();
+  await expect(page.getByLabel('Что дополнить или исправить?')).toHaveValue('Сохранить введенные значения после ошибки');
+  await expect(page.getByRole('button',{name:'Согласен',exact:true})).toBeDisabled();
+});
