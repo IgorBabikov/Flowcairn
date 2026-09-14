@@ -122,3 +122,32 @@ test('после перезапуска готовый read-only анализ п
  const next=reopened.snapshot(previous.successorRunId);assert.equal(next.status,'waiting-for-human');
  assert.deepEqual(f.calls.map(c=>c.action),['ai-analyze','ai-plan']);assert.equal(reopened.close(),true);
 });
+
+test('финальный review после no-op исправления получает полный исходный diff с прежним runId',async(t)=>{
+ const f=await fixture(t,{reviewFails:1});
+ let content='export const valid = false;';let implementations=0;
+ const a=f.service.adapters;
+ const fingerprint=()=>({hash:hashObject(content),files:[{path:'src/form.mjs',hash:hashObject(content),mode:'100644',size:content.length}],git:{head:'a'.repeat(40),indexHash:hash}});
+ a.fingerprint=fingerprint;
+ a.capture=()=>({manifest:{sourceHash:fingerprint().hash},bundlePath:'fixture-source'});
+ a.inspectChanges=(before,after)=>({allowed:true,changedFiles:before.hash===after.hash?[]:['src/form.mjs']});
+ a.applyEdits=(_root,_before,_node,_task,edits)=>{if(edits.length)content=edits[0].content;};
+ a.diff=(_root,before,after)=>({complete:true,content:before.hash===after.hash?'':'--- a/src/form.mjs\n+++ b/src/form.mjs\n-export const valid = false;\n+export const valid = true;\n'});
+ a.replaceBinding=({binding,newRunId,sourceHash})=>({...binding,runId:newRunId,sourceHash});
+ const execute=a.execute;
+ a.execute=async(args)=>{
+   const result=await execute(args);
+   if(args.node.action.id==='ai-implement' && implementations++===0){
+     result.output.changedFiles=['src/form.mjs'];result.output.edits=[{path:'src/form.mjs',previousHash:hashObject(content),content:'export const valid = true;',executable:false}];
+   }
+   return result;
+ };
+ let s=await f.settle(await f.intake());const original=s.runId;
+ s=await f.approve(s);s=await f.settle(s);
+ assert.equal(s.status,'passed',s.failureReason??s.nodes.find(n=>n.reason)?.reason);
+ const evidence=f.calls.filter(c=>c.action==='ai-review').at(-1).reviewEvidence;
+ assert.equal(evidence.previousExecutions[0].evidence.runId,original);
+ assert.match(evidence.previousExecutions[0].evidence.implementations[0].diff.artifact.content,/valid = false/);
+ assert.equal(evidence.implementations[0].diff.artifact.content,'');
+ assert.equal(evidence.implementations[0].receipt.beforeFingerprint,evidence.previousExecutions[0].evidence.implementations[0].receipt.afterFingerprint);
+});
