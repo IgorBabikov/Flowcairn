@@ -33,7 +33,7 @@ import { POLICY_HASH, REGISTRY_HASH, resolveAction, pathAllowed, overlaps } from
 import { initialNodes, reconcile, calculateCapabilities } from './state.mjs';
 import { captureSourceBundle, verifySourceBundle } from './source.mjs';
 import { captureBeforeContents, buildAttemptDiff } from './artifacts.mjs';
-import { buildReviewEvidence } from './review-evidence.mjs';
+import { buildHistoricalReviewEvidence, buildReviewEvidence } from './review-evidence.mjs';
 import { applyProposedEdits } from './patch.mjs';
 import { prepareToolchain, verifyToolchain } from './toolchain.mjs';
 
@@ -435,10 +435,10 @@ export class WorkflowService {
 
   #reviewHistory(state) {
     return this.#executionHistory(state).map((source) => ({ task: source.task, plan: source.plan,
-      evidence: buildReviewEvidence({ state: source.state, task: source.task, plan: source.plan,
+      evidence: buildHistoricalReviewEvidence({ state: source.state, task: source.task, plan: source.plan,
         node: source.plan.nodes.find((node) => node.action.id === 'ai-review'), fingerprint: source.state.workspaceFingerprint,
         readReceipt: (hash) => ReceiptSchema.parse(this.store.readObject('receipts', hash)), readArtifact: (hash) => this.#artifact(hash),
-      }).evidence }));
+      }) }));
   }
 
   #executionDeadline(state, plan) {

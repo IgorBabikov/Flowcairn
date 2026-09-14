@@ -34,7 +34,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 const request=(s,extra={})=>({operationId:`op-${randomUUID()}`,expectedRevision:s.revision,planHash:s.planHash,...extra});
 const analysis={requirements:['Валидация email'],constraints:['Сохранить интерфейс'],projectFacts:[{path:'src/form.mjs',fact:'Форма уже существует'}],acceptance:['Неверный email отклонен'],risks:[]};
-async function fixture(t,{consent=true,reviewFails=0,checkFails=0,uncertain=false}={}) {
+async function fixture(t,{consent=true,reviewFails=0,checkFails=0,uncertain=false,steps=output.steps}={}) {
  const root=mkdtempSync(path.join(os.tmpdir(),'flowcairn-product-'));
  t.after(()=>rmSync(root,{recursive:true,force:true}));
  const worktree=path.join(root,'.ai-orchestrator','worktrees','fixture-1');
@@ -49,11 +49,11 @@ async function fixture(t,{consent=true,reviewFails=0,checkFails=0,uncertain=fals
  runner:{ai:{available:true},checks:{available:true}},loadSkills:ids=>ids.map(name=>({name,text:'fixture',hash,path:`skills/${name}/SKILL.md`})),
  projectSummary:()=>({schemaVersion:2,name:'fixture',contextHash:hash,contextPaths:[],scopeCandidates:['src'],checks:['tests'],ai:{provider:'codex',model:'fixture'},capabilities:{intake:{allowed:true}}}),
  registerTask:async(_root,input,options)=>options.service.create(input,{runId:options.run,operationId:options.operation,stage:options.stage,workflow:options.workflow,naturalIntakeHash:options.naturalIntakeHash}),
- execute:async({node,onStart,priorEvidence,reviewEvidence,task})=>{
-  calls.push({action:node.action.id,priorEvidence,reviewEvidence,task});await onStart({ticket:'fixture',pid:process.pid});
+ execute:async({node,onStart,priorEvidence,reviewEvidence,task,plan})=>{
+  calls.push({nodeId:node.id,action:node.action.id,priorEvidence,reviewEvidence,task,planVersion:plan.version});await onStart({ticket:'fixture',pid:process.pid});
   if(node.action.id==='check-tests')return {exitCode:checks++<checkFails?1:0,stopped:true,uncertain:false};
   const fail=node.action.id==='ai-review' && reviews++<reviewFails;
-  return {exitCode:0,stopped:true,uncertain:false,output:{...output,steps:undefined,verdict:uncertain&&node.action.id==='ai-analyze'?'uncertain':fail?'fail':'pass',skillsUsed:node.skills,findings:fail?[{severity:'blocking',message:'Неверный email принят',path:'src/form.mjs'}]:[],...(node.action.id==='ai-plan'?{steps:output.steps}:{}),...(node.action.id==='ai-analyze'?{analysis}:{}),...(reviewEvidence?{reviewEvidenceHash:hashObject(reviewEvidence)}:{})}};
+  return {exitCode:0,stopped:true,uncertain:false,output:{...output,steps:undefined,verdict:uncertain&&node.action.id==='ai-analyze'?'uncertain':fail?'fail':'pass',skillsUsed:node.skills,findings:fail?[{severity:'blocking',message:'Неверный email принят',path:'src/form.mjs'}]:[],...(node.action.id==='ai-plan'?{steps}:{}),...(node.action.id==='ai-analyze'?{analysis}:{}),...(reviewEvidence?{reviewEvidenceHash:hashObject(reviewEvidence)}:{})}};
  }
  };
  // optional fields не включаются в strict JSON fixture.
@@ -106,7 +106,7 @@ for(const failure of ['review','check'])test(`${failure}: bounded policy исп�
  const receipt=f.service.store.readObject('receipts',state.nodes['approve-plan'].receipts[0]);assert.equal(receipt.phase,'policy');assert.equal(receipt.actor,'approved-repair-policy');
  const finalReview=f.calls.filter(c=>c.action==='ai-review').at(-1).reviewEvidence;
  assert.equal(finalReview.previousExecutions.length,1);assert.equal(finalReview.previousExecutions[0].evidence.runId,approvedId);
- assert.ok(finalReview.previousExecutions[0].evidence.implementations.length>0);
+ assert.ok(finalReview.previousExecutions[0].evidence.completedImplementations.length>0);
 });
 test('повторный review failure останавливается после двух исправлений',async(t)=>{
  const f=await fixture(t,{reviewFails:9});let s=await f.settle(await f.intake());s=await f.approve(s);s=await f.settle(s);
@@ -164,9 +164,9 @@ test('финальный review после no-op исправления полу
  assert.equal(s.status,'passed',s.failureReason??s.nodes.find(n=>n.reason)?.reason);
  const evidence=f.calls.filter(c=>c.action==='ai-review').at(-1).reviewEvidence;
  assert.equal(evidence.previousExecutions[0].evidence.runId,original);
- assert.match(evidence.previousExecutions[0].evidence.implementations[0].diff.artifact.content,/valid = false/);
+ assert.match(evidence.previousExecutions[0].evidence.completedImplementations[0].diff.artifact.content,/valid = false/);
  assert.equal(evidence.implementations[0].diff.artifact.content,'');
- assert.equal(evidence.implementations[0].receipt.beforeFingerprint,evidence.previousExecutions[0].evidence.implementations[0].receipt.afterFingerprint);
+ assert.equal(evidence.implementations[0].receipt.beforeFingerprint,evidence.previousExecutions[0].evidence.completedImplementations[0].receipt.afterFingerprint);
 });
 
 test('ручной replan сохраняет полный diff исходной execution-версии для final review',async(t)=>{
@@ -198,6 +198,58 @@ test('ручной replan сохраняет полный diff исходной 
  const evidence=f.calls.filter(call=>call.action==='ai-review').at(-1).reviewEvidence;
  assert.equal(evidence.previousExecutions.length,1);
  assert.equal(evidence.previousExecutions[0].evidence.runId,originalRunId);
- assert.match(evidence.previousExecutions[0].evidence.implementations[0].diff.artifact.content,/valid = false/);
+ assert.match(evidence.previousExecutions[0].evidence.completedImplementations[0].diff.artifact.content,/valid = false/);
  assert.equal(evidence.implementations[0].diff.artifact.content,'');
+});
+
+test('final review сохраняет подтвержденные partial changes прошлых execution-версий',async(t)=>{
+ const steps=[
+   {id:'validation',title:'Валидация',outcome:'Проверка готова',needs:[],paths:['src/validation.mjs']},
+   {id:'markup',title:'Разметка',outcome:'Разметка готова',needs:['validation'],paths:['src/markup.mjs']},
+   {id:'css',title:'Стили',outcome:'Стили готовы',needs:['markup'],paths:['src/styles.css']},
+   {id:'js',title:'Поведение',outcome:'Поведение готово',needs:['css'],paths:['src/form.mjs']},
+ ];
+ const f=await fixture(t,{steps});
+ const files=new Map();
+ const fingerprint=()=>{
+   const entries=[...files].sort(([left],[right])=>left.localeCompare(right)).map(([path,content])=>({path,hash:hashObject(content),mode:'100644',size:content.length}));
+   return {hash:hashObject(entries),files:entries,git:{head:'a'.repeat(40),indexHash:hash}};
+ };
+ const adapters=f.service.adapters;
+ adapters.fingerprint=fingerprint;
+ adapters.capture=()=>({manifest:{sourceHash:fingerprint().hash},bundlePath:'fixture-source'});
+ adapters.inspectChanges=(before,after)=>({allowed:true,changedFiles:[...new Set([...before.files,...after.files].map(file=>file.path))].filter(path=>before.files.find(file=>file.path===path)?.hash!==after.files.find(file=>file.path===path)?.hash)});
+ adapters.applyEdits=(_root,_before,_node,_task,edits)=>{for(const edit of edits)files.set(edit.path,edit.content);};
+ adapters.diff=(_root,before,after)=>({complete:true,content:before.hash===after.hash?'':'--- a/src/form\n+++ b/src/form\n+confirmed change\n'});
+ adapters.inspectProcess=()=>({stopped:true,uncertain:false});
+ const execute=adapters.execute;
+ adapters.execute=async(args)=>{
+   const result=await execute(args);
+   if(args.node.action.id!=='ai-implement')return result;
+   if(args.plan.version===2&&['step-validation','step-markup'].includes(args.node.id)){
+     const path=args.node.id==='step-validation'?'src/validation.mjs':'src/markup.mjs';
+     result.output.changedFiles=[path];result.output.edits=[{path,previousHash:null,content:`${args.node.id}\n`,executable:false}];
+   } else if(args.plan.version===2&&args.node.id==='step-css'){
+     result.output.verdict='uncertain';result.output.findings=[{severity:'warning',message:'CSS timeout без изменений',path:'src/styles.css'}];
+   } else if(args.plan.version===3&&args.node.id==='step-fix-2'){
+     result.output.verdict='fail';result.output.findings=[{severity:'blocking',message:'Skill разметки не выполнил узел',path:'src/markup.mjs'}];
+   }
+   return result;
+ };
+ let snapshot=await f.settle(await f.intake());
+ snapshot=await f.approve(snapshot);snapshot=await f.settle(snapshot);
+ assert.equal(snapshot.status,'uncertain');
+ snapshot=await f.service.command(snapshot.runId,'recover',request(snapshot));
+ snapshot=await f.service.command(snapshot.runId,'replan',request(snapshot));
+ snapshot=await f.settle(await f.approve(snapshot));
+ assert.equal(snapshot.status,'failed');
+ snapshot=await f.service.command(snapshot.runId,'replan',request(snapshot));
+ snapshot=await f.settle(await f.approve(snapshot));
+ assert.equal(snapshot.status,'passed');
+ const evidence=f.calls.filter(call=>call.action==='ai-review').at(-1).reviewEvidence;
+ assert.equal(evidence.previousExecutions.length,2);
+ assert.equal(evidence.previousExecutions[0].evidence.completedImplementations.length,2);
+ assert.deepEqual(evidence.previousExecutions[0].evidence.incompleteImplementations.map(item=>[item.nodeId,item.status]),[['step-css','uncertain'],['step-js','pending']]);
+ assert.equal(evidence.previousExecutions[1].evidence.completedImplementations.length,1);
+ assert.deepEqual(evidence.previousExecutions[1].evidence.incompleteImplementations.map(item=>[item.nodeId,item.status]),[['step-fix-2','failed'],['step-fix-3','pending'],['step-fix-4','pending']]);
 });
