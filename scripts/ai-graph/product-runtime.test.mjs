@@ -154,3 +154,36 @@ test('финальный review после no-op исправления полу
  assert.equal(evidence.implementations[0].diff.artifact.content,'');
  assert.equal(evidence.implementations[0].receipt.beforeFingerprint,evidence.previousExecutions[0].evidence.implementations[0].receipt.afterFingerprint);
 });
+
+test('ручной replan сохраняет полный diff исходной execution-версии для final review',async(t)=>{
+ const f=await fixture(t);
+ let content='export const valid = false;';let implementations=0;
+ const adapters=f.service.adapters;
+ const fingerprint=()=>({hash:hashObject(content),files:[{path:'src/form.mjs',hash:hashObject(content),mode:'100644',size:content.length}],git:{head:'a'.repeat(40),indexHash:hash}});
+ adapters.fingerprint=fingerprint;
+ adapters.capture=()=>({manifest:{sourceHash:fingerprint().hash},bundlePath:'fixture-source'});
+ adapters.inspectChanges=(before,after)=>({allowed:true,changedFiles:before.hash===after.hash?[]:['src/form.mjs']});
+ adapters.applyEdits=(_root,_before,_node,_task,edits)=>{if(edits.length)content=edits[0].content;};
+ adapters.diff=(_root,before,after)=>({complete:true,content:before.hash===after.hash?'':'--- a/src/form.mjs\n+++ b/src/form.mjs\n-export const valid = false;\n+export const valid = true;\n'});
+ adapters.replaceBinding=({binding,newRunId,sourceHash})=>({...binding,runId:newRunId,sourceHash});
+ const execute=adapters.execute;
+ adapters.execute=async(args)=>{
+   const result=await execute(args);
+   if(args.node.action.id==='ai-implement' && implementations++===0){
+     result.output.changedFiles=['src/form.mjs'];
+     result.output.edits=[{path:'src/form.mjs',previousHash:hashObject(content),content:'export const valid = true;',executable:false}];
+   }
+   return result;
+ };
+ let snapshot=await f.settle(await f.intake());
+ snapshot=await f.approve(snapshot);snapshot=await f.settle(snapshot);
+ const originalRunId=snapshot.runId;
+ assert.equal(snapshot.status,'passed');
+ snapshot=await f.service.command(snapshot.runId,'replan',request(snapshot));
+ await f.settle(await f.approve(snapshot));
+ const evidence=f.calls.filter(call=>call.action==='ai-review').at(-1).reviewEvidence;
+ assert.equal(evidence.previousExecutions.length,1);
+ assert.equal(evidence.previousExecutions[0].evidence.runId,originalRunId);
+ assert.match(evidence.previousExecutions[0].evidence.implementations[0].diff.artifact.content,/valid = false/);
+ assert.equal(evidence.implementations[0].diff.artifact.content,'');
+});

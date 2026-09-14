@@ -411,8 +411,30 @@ export class WorkflowService {
     return previous;
   }
 
+  #executionHistory(state) {
+    const previous = [];
+    let runId = state.supersedesRunId;
+    const visited = new Set([state.runId]);
+    for (let depth = 0; runId; depth++) {
+      if (depth >= 100 || visited.has(runId))
+        fail('EXECUTION_HISTORY', 'Цепочка предыдущих execution-версий повреждена');
+      visited.add(runId);
+      const source = this.#read(runId, { current: false, verifySource: false, verifyBinding: false });
+      if (source.plan.workflow === 'autonomous' && source.plan.stage === 'execution') {
+        const implementations = source.plan.nodes.filter((node) => node.action.id === 'ai-implement');
+        if (implementations.some((node) => source.state.nodes[node.id].attempts > 0)) {
+          previous.unshift(source);
+          if (previous.length > 2)
+            fail('EXECUTION_HISTORY_LIMIT', 'Полная история review превышает две execution-версии');
+        }
+      }
+      runId = source.state.supersedesRunId;
+    }
+    return previous;
+  }
+
   #reviewHistory(state) {
-    return this.#previousExecutions(state).map((source) => ({ task: source.task, plan: source.plan,
+    return this.#executionHistory(state).map((source) => ({ task: source.task, plan: source.plan,
       evidence: buildReviewEvidence({ state: source.state, task: source.task, plan: source.plan,
         node: source.plan.nodes.find((node) => node.action.id === 'ai-review'), fingerprint: source.state.workspaceFingerprint,
         readReceipt: (hash) => ReceiptSchema.parse(this.store.readObject('receipts', hash)), readArtifact: (hash) => this.#artifact(hash),
@@ -536,6 +558,9 @@ export class WorkflowService {
     if (!grant || plan.workflow !== 'autonomous' || plan.stage !== 'execution' || grant.runId === state.runId)
       fail('POLICY_GRANT', 'Отсутствует ограниченное разрешение исходного плана');
     if (!state.supersedesRunId || state.supersedesRunId === state.runId) fail('POLICY_GRANT', 'Нет предыдущей версии исправления');
+    const policyHistory = this.#previousExecutions(state);
+    if (policyHistory.length !== grant.cycle || policyHistory[0]?.state.runId !== grant.runId)
+      fail('POLICY_GRANT', 'Цепочка исправлений не начинается с согласованного плана');
     const parent = RunStateSchema.parse(this.store.readRun(state.supersedesRunId));
     if ((parent.policyGrant?.cycle ?? 0) !== grant.cycle - 1 ||
         (grant.cycle === 1 && parent.runId !== grant.runId) ||
@@ -1793,8 +1818,8 @@ export class WorkflowService {
             acceptance: task.acceptance,
             planHash: state.planHash,
             receipts: evidence,
-            previousExecutions: this.#previousExecutions(state).map((source) => ({ runId: source.state.runId, planHash: source.state.planHash, receipts: Object.values(source.state.nodes).flatMap((node) => node.receipts) })),
-            changedFiles: unique([state, ...this.#previousExecutions(state).map((source) => source.state)].flatMap((item) => Object.values(item.nodes).flatMap((n) => n.changedFiles))),
+            previousExecutions: this.#executionHistory(state).map((source) => ({ runId: source.state.runId, planHash: source.state.planHash, receipts: Object.values(source.state.nodes).flatMap((node) => node.receipts) })),
+            changedFiles: unique([state, ...this.#executionHistory(state).map((source) => source.state)].flatMap((item) => Object.values(item.nodes).flatMap((n) => n.changedFiles))),
             integration: plan.workflow === 'autonomous' ? 'Готово к личному ревью. Commit и PR пользователь выполняет самостоятельно.' :
               'Требуется отдельная проверка и интеграция Orchestrator; commit/push/deploy не выполнялись',
           }),
