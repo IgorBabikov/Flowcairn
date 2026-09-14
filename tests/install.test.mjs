@@ -331,10 +331,16 @@ test('TTY init asks for a model; non-TTY, JSON and dry-run never prompt or write
   input.isTTY = output.isTTY = true;
   let transcript = '';
   output.on('data', (bytes) => {
-    transcript += bytes.toString();
+    const text = bytes.toString();
+    transcript += text;
+    const replies = [
+      ['Выбор модели [', 'manual'], ['ID модели: ', 'configured-test-model'],
+      ['Усиление [', 'medium'], ['Тесты:', 'keep'],
+      ['Нужно измерять', 'нет'], ['Разрешить это чтение', 'да'], ['Добавить в AGENTS', 'нет'],
+    ];
+    for (const [marker, answer] of replies) if (text.includes(marker)) setImmediate(() => input.write(answer + '\n'));
   });
   const pending = initializeCommand(root, { provider: 'openai' }, { input, output });
-  input.write('configured-test-model\n');
   const installed = await pending;
   assert.equal(installed.profile.ai.model, options.model);
   assert.match(transcript, /не API-ключ/);
@@ -556,7 +562,7 @@ test('actual npm tarball install provides executable bin and offline npx init/ta
   assert.equal(existsSync(path.join(root, '.flowcairn.json')), false);
   const help = run('init', '--help');
   assert.equal(help.status, 0, help.stderr);
-  assert.match(help.stdout, /В терминале init спросит ID модели/);
+  assert.match(help.stdout, /Первый запуск автоматически предложит короткую настройку/);
   assert.equal(existsSync(path.join(root, '.flowcairn.json')), false);
   const installed = run('init', '--provider', 'openai', '--model', options.model, '--json');
   assert.equal(installed.status, 0, installed.stderr);

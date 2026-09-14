@@ -18,10 +18,11 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createInterface } from 'node:readline/promises';
 import { GraphError, sha256 } from '../scripts/ai-graph/lib/io.mjs';
 import {
   ProjectProfileSchema,
+  onboardingConsentHash,
+  hasOnboardingConsent,
   loadProjectProfile,
   RUNTIME_ROOT,
   PACKAGE_MANAGER_LOCKS,
@@ -42,6 +43,7 @@ import { instructionsCommand } from './instructions.mjs';
 import { uninstallCommand } from './uninstall.mjs';
 import { selectProjectSkills } from './skills-selection.mjs';
 import { createTask } from '../scripts/ai-graph/lib/task-registration.mjs';
+import { collectOnboarding, inspectOnboarding, onboardingInput, saveOnboarding } from './onboarding.mjs';
 export { createTask };
 
 const OWNER_FILE = '.ai-orchestrator/flowcairn-install.json';
@@ -51,6 +53,10 @@ const CHECKS = ['typecheck', 'lint', 'tests', 'build'];
 const VALUE_OPTIONS = new Set([
   'root',
   'provider',
+  'model-mode',
+  'reasoning-effort',
+  'review-reasoning-effort',
+  'test-policy',
   'model',
   'review-model',
   'branch',
@@ -84,7 +90,7 @@ const VALUE_OPTIONS = new Set([
   'skill-actions',
   'skill-scope',
 ]);
-const BOOLEAN_OPTIONS = new Set(['json', 'dry-run', 'help', 'snapshot', 'no-open', 'consent']);
+const BOOLEAN_OPTIONS = new Set(['json', 'dry-run', 'help', 'snapshot', 'no-open', 'consent', 'read-consent', 'coverage']);
 
 function fail(code, message) {
   throw new GraphError(code, message);
@@ -216,42 +222,44 @@ function packageManager(root, pkg, explicit) {
   return declared ?? detected[0] ?? 'npm';
 }
 
-/** One explicit model choice; never probe accounts or read global configuration. */
+/** Первый запуск спрашивает настройки один раз, не читая глобальные аккаунты. */
 export async function initializeCommand(input, options = {}, terminal = {}) {
   const root = projectRoot(input);
-  if (existsNoFollow(path.join(root, PROFILE)))
+  if (existsNoFollow(path.join(root, PROFILE)) || existsNoFollow(path.join(root, '.ai-orchestrator')))
     return initializeProject(root, options);
-  // Preflight errors take precedence over asking the user for a model.
-  if (existsNoFollow(path.join(root, '.ai-orchestrator'))) return initializeProject(root, options);
   assertProviderPlatform(options);
-  if (options.model)
-    return initializeProject(root, { ...options, _skillManifest: await selectProjectSkills(root, options, terminal) });
-  const stdin = terminal.input ?? process.stdin;
-  const stdout = terminal.output ?? process.stderr;
-  if (!stdin.isTTY || !stdout.isTTY || options.json || options['dry-run'])
-    return initializeProject(root, options);
-  const prompt = createInterface({ input: stdin, output: stdout });
-  try {
-    stdout.write(
-      `Настройка Flowcairn. Провайдер: ${options.provider ?? defaultProvider()}. AI пока не запускается.\n`,
-    );
-    stdout.write(
-      'Введите ID доступной вам модели, не API-ключ. Доступность здесь не проверяется.\n',
-    );
-    const model = (await prompt.question('ID модели: ')).trim();
-    if (!model)
-      fail(
-        'MODEL_REQUIRED',
-        'Модель не указана. Файлы не изменены. Повторите init --model MODEL_ID.',
-      );
-    const skillManifest = await selectProjectSkills(root, options, { ...terminal, input: stdin, output: stdout, prompt });
-    return initializeProject(root, { ...options, model, _skillManifest: skillManifest });
-  } finally {
-    prompt.close();
+  const selected = await collectOnboarding(root, options, terminal);
+  const result = initializeProject(root, { ...selected, _skillManifest: await selectProjectSkills(root, selected, terminal) });
+  if (selected.consent === true && !selected['dry-run']) {
+    const inspected = await instructionsCommand(root, 'inspect');
+    await instructionsCommand(root, 'activate', {consent:true, fingerprint:inspected.instructions.fingerprint});
   }
+  return result;
+}
+
+export async function setupCommand(input, options = {}, terminal = {}) {
+  const root = projectRoot(input);
+  if (!existsNoFollow(path.join(root, PROFILE))) return initializeCommand(root, options, terminal);
+  const current = inspectOnboarding(root);
+  const selected = await collectOnboarding(root, { ...options, advanced: true }, terminal);
+  const resolved = {
+    provider:current.values.provider, model:current.values.model,
+    'model-mode':current.values.modelMode, 'reasoning-effort':current.values.reasoningEffort,
+    'test-policy':current.values.testPolicy, coverage:current.values.coverage,
+    ...selected,
+  };
+  // В скриптах требуется новое явное разрешение; прежнее не считается ответом.
+  const result = await saveOnboarding(root, onboardingInput(resolved, current.profileHash), {dryRun:options['dry-run'] === true});
+  if (selected.consent === true && !options['dry-run']) {
+    const inspected = await instructionsCommand(root, 'inspect');
+    await instructionsCommand(root, 'activate', {consent:true, fingerprint:inspected.instructions.fingerprint});
+  }
+  return result;
 }
 
 function assertProviderPlatform(options) {
+  if (options.provider && !['codex', 'openai'].includes(options.provider))
+    fail('PROVIDER_UNSUPPORTED', 'Claude и Cursor пока не подключены к исполнителю Flowcairn. Выберите Codex на macOS или OpenAI API; автоматическое наследование настроек IDE недоступно.');
   if (process.platform !== 'darwin' && (options.provider ?? defaultProvider()) === 'codex')
     fail(
       'PROVIDER_PLATFORM',
@@ -309,6 +317,10 @@ export function initializeProject(input, options = {}) {
       }).success)
   )
     fail('AI_CONFIG', 'Укажите --provider codex или openai и --model с ID модели (не API-ключом).');
+  if (!existingProfile && options['model-mode'] === 'manual' &&
+      ((options['review-model'] && options['review-model'] !== options.model) ||
+       (options['review-reasoning-effort'] && options['review-reasoning-effort'] !== options['reasoning-effort'])))
+    fail('AI_CONFIG', 'В ручном режиме модель и усиление одинаковы для всех этапов. Для отдельной настройки ревью выберите auto.');
   let pkg;
   try {
     pkg = JSON.parse(readRegular(path.join(root, 'package.json'), 256 * 1024).toString('utf8'));
@@ -348,7 +360,14 @@ export function initializeProject(input, options = {}) {
       outputPaths: csv(options.outputs),
       manifests: discoverManifests(root, pkg, manager, options.manifests),
       ...(options._skillManifest?.length ? { skillManifest: options._skillManifest } : {}),
+      ...(['read-consent', 'test-policy', 'coverage'].some((key) => options[key] !== undefined) ? { onboarding: {
+        version: 1, readConsent: options['read-consent'] === true, readScope: 'tracked-project',
+        testPolicy: options['test-policy'] ?? 'keep', coverage: options.coverage === true, instructions: 'preserve',
+      } } : {}),
       ai: {
+        ...(options['model-mode'] ? { modelMode: options['model-mode'] } : {}),
+        ...(options['reasoning-effort'] ? { reasoningEffort: options['reasoning-effort'] } : {}),
+        ...(options['review-reasoning-effort'] ? { reviewReasoningEffort: options['review-reasoning-effort'] } : {}),
         provider: options.provider ?? defaultProvider(),
         model: options.model,
         ...(options['review-model'] ? { reviewModel: options['review-model'] } : {}),
@@ -411,6 +430,7 @@ export function initializeProject(input, options = {}) {
           tool: 'flowcairn',
           owner: `flowcairn-${randomUUID()}`,
           profileHash: sha256(profileText),
+          ...(!existingProfile && options['read-consent'] === true ? { readConsentHash: onboardingConsentHash(root, profile) } : {}),
           profileOwned: !existingProfile,
           ignoreBefore: oldIgnore,
           ignoreAfterHash: sha256(ignore),
@@ -559,7 +579,7 @@ export async function handoff(input, runId) {
   };
 }
 
-const HELP = `Flowcairn — контролируемый AI Workflow + ReactFlow\n\n  init [--provider codex|openai] [--model MODEL] [--root PROJECT] [--dry-run] [--json]\n    В терминале init спросит ID модели. В скрипте --model обязателен.\n    Локальные Skills: выбор файлов, этапов и области в терминале.\n    В скрипте: --skills name --skill-actions plan,review --skill-scope src.\n    По умолчанию: macOS — codex, Linux — openai; --provider задает явный выбор.\n  doctor [--root PROJECT]\n  checks prepare [--root PROJECT]\n  task --file TASK.json [--run ID] [--root PROJECT]\n  task --id ORCH-001 --goal TEXT --scope src --accept TEXT\n    --snapshot явно включает изменения tracked-файлов в снимок первого графа.\n    --include-untracked path1,path2 явно включает новые файлы в этот снимок.\n  [--root PROJECT] [--port 4329] [--no-open]\n    Без команды открывает локальный UI и браузер.\n  ui [--root PROJECT] [--port 4329] [--no-open]\n  update    проверить npm metadata, без установки и изменения планов\n  instructions inspect\n  instructions activate --fingerprint HASH --consent\n  uninstall [--dry-run]    удалить только unchanged owned integration\n  status|plan|events --run ID\n  approve --run ID --plan-hash HASH --permissions ai.read,workspace.source.write,workspace.output.write\n  run|retry|recover|replan|stop|accept|reject --run ID --plan-hash HASH\n  receipt|artifact --run ID --hash HASH\n  handoff --run ID\n  orchestrator COMMAND ...   расширенное управление очередью и Git-интеграцией\n\nЗапуск AI требует approval конкретного плана. Init/task/ui не запускают AI.\nДокументация: https://github.com/IgorBabikov/flowcairn\n`;
+const HELP = `Flowcairn — контролируемый AI Workflow + ReactFlow\n\n  init [--provider codex|openai] [--model MODEL] [--root PROJECT] [--dry-run] [--json]\n    Первый запуск автоматически предложит короткую настройку. В скрипте --model обязателен.\n    --model-mode manual|auto --reasoning-effort low|medium|high|xhigh\n    --test-policy keep|add --coverage (только по вашему выбору) --read-consent\n  setup    изменить настройки после закрытия UI; текущие планы не переписываются.\n    Локальные Skills: выбор файлов, этапов и области в терминале.\n    В скрипте: --skills name --skill-actions plan,review --skill-scope src.\n    По умолчанию: macOS — codex, Linux — openai; --provider задает явный выбор.\n  doctor [--root PROJECT]\n  checks prepare [--root PROJECT]\n  task --file TASK.json [--run ID] [--root PROJECT]\n  task --id ORCH-001 --goal TEXT --scope src --accept TEXT\n    --snapshot явно включает изменения tracked-файлов в снимок первого графа.\n    --include-untracked path1,path2 явно включает новые файлы в этот снимок.\n  [--root PROJECT] [--port 4329] [--no-open]\n    Без команды открывает локальный UI и браузер.\n  ui [--root PROJECT] [--port 4329] [--no-open]\n  update    проверить npm metadata, без установки и изменения планов\n  instructions inspect\n  instructions activate --fingerprint HASH --consent\n  uninstall [--dry-run]    удалить только unchanged owned integration\n  status|plan|events --run ID\n  approve --run ID --plan-hash HASH --permissions ai.read,workspace.source.write,workspace.output.write\n  run|retry|recover|replan|stop|accept|reject --run ID --plan-hash HASH\n  receipt|artifact --run ID --hash HASH\n  handoff --run ID\n  orchestrator COMMAND ...   расширенное управление очередью и Git-интеграцией\n\nЗапуск AI требует approval конкретного плана. Init/task/ui не запускают AI.\nДокументация: https://github.com/IgorBabikov/flowcairn\n`;
 
 function printInitialization(result) {
   const profile = result.profile;
@@ -567,12 +587,14 @@ function printInitialization(result) {
     result.dryRun ? 'Предварительная проверка. Файлы не изменены.' : result.message,
     `Ветка: ${profile.integrationBranch}. Менеджер: ${profile.packageManager}. Проверки: ${profile.checks.join(', ') || 'не найдены'}.`,
     `AI: ${profile.ai.provider}, модель ${profile.ai.model}. Доступность модели не проверялась.`,
+    `Разрешение на чтение и передачу AI: ${hasOnboardingConsent(result.root, profile) ? 'задано для этой установки' : 'не предоставлено; настройте через npx flowcairn setup'}.`,
+    'Команды проекта выполняются в Docker. Изоляция через произвольный host shell не заменяется.',
   ];
   if (result.dryRun) summary.push(`Планируемые файлы: ${result.changes.join(', ')}.`);
   else
     summary.push(
       'Далее: npx flowcairn — открыть локальный UI и создать задачу.',
-      'Для headless: npx flowcairn --no-open. AI требует отдельного разрешения.',
+      'Разработка начнется после согласования плана.',
     );
   process.stdout.write(sanitizeText(summary.join('\n')) + '\n');
 }
@@ -615,6 +637,7 @@ export async function main(tokens = process.argv.slice(2)) {
   else if (command === 'instructions') result = await instructionsCommand(projectRoot(root), instructionsAction, options);
   else if (command === 'uninstall') result = await uninstallCommand(projectRoot(root), options);
   else if (command === 'init') result = await initializeCommand(root, options);
+  else if (command === 'setup') result = await setupCommand(root, options);
   else if (command === 'doctor') result = await doctorProject(root);
   else if (command === 'task') {
     let input = options.file
@@ -646,6 +669,13 @@ export async function main(tokens = process.argv.slice(2)) {
     if (!Number.isInteger(port) || port < 1024 || port > 65535)
       fail('PORT', 'Порт должен быть от 1024 до 65535.');
     const canonicalRoot = projectRoot(root);
+    if (!existsNoFollow(path.join(canonicalRoot, PROFILE))) {
+      const initialized = await initializeCommand(canonicalRoot, options);
+      if (options['dry-run']) { printInitialization(initialized); return; }
+      printInitialization(initialized);
+    } else {
+      initializeProject(canonicalRoot, options);
+    }
     const { acquireRuntimeLease } = await import('../scripts/ai-graph/lib/lifecycle.mjs');
     const release = acquireRuntimeLease({ root: canonicalRoot, kind: 'viewer' });
     let server, service;
@@ -702,7 +732,7 @@ export async function main(tokens = process.argv.slice(2)) {
       await WorkflowService.open({ root: projectRoot(root) }),
     );
   }
-  if (command === 'init' && !options.json) printInitialization(result);
+  if (['init', 'setup'].includes(command) && !options.json) printInitialization(result);
   else if (command === 'task' && !options.json)
     process.stdout.write(
       `Граф ${result.runId} сохранен. AI не запускался.\nОткрыть граф: npx flowcairn ui\nВыполнение требует отдельного разрешения конкретного плана.\n`,

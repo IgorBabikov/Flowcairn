@@ -76,10 +76,21 @@ export const ProjectProfileSchema = z.strictObject({
     actions: z.array(z.enum(['ai-plan', 'ai-analyze', 'ai-implement', 'ai-review'])).min(1).max(4)
       .refine((values) => new Set(values).size === values.length),
   })).max(4).refine((values) => new Set(values.map((item) => item.id)).size === values.length).optional(),
+  onboarding: z.strictObject({
+    version: z.literal(1),
+    readConsent: z.boolean(),
+    readScope: z.literal('tracked-project'),
+    testPolicy: z.enum(['keep', 'add']),
+    coverage: z.boolean(),
+    instructions: z.literal('preserve'),
+  }).optional(),
   ai: z.strictObject({
     provider: z.enum(['codex', 'openai']),
     model,
     reviewModel: model.optional(),
+    modelMode: z.enum(['manual', 'auto']).optional(),
+    reasoningEffort: z.enum(['low', 'medium', 'high', 'xhigh']).optional(),
+    reviewReasoningEffort: z.enum(['low', 'medium', 'high', 'xhigh']).optional(),
     codexPath: z
       .string()
       .max(1024)
@@ -193,9 +204,32 @@ export function projectProfileHash(root) {
 export function projectContextPaths(root, profile = loadProjectProfile(root)) {
   return [
     ...new Set([
-      ...['AGENTS.md', 'README.md'].filter((name) => existsSync(path.join(root, name))),
+      ...['AGENTS.md', 'AGENT.md', 'README.md'].filter((name) => existsSync(path.join(root, name))),
       ...profile.contextPaths,
       ...profile.manifests.filter((file) => /(?:^|\/)package\.json$/.test(file)),
     ]),
   ];
+}
+
+/** Разрешение хранится локально и связано с точным профилем и корнем проекта. */
+export function onboardingConsentHash(root, profile) {
+  return hashObject({ root: realpathSync(root), profile });
+}
+
+export function hasOnboardingConsent(root, profile = loadProjectProfile(root)) {
+  if (profile.onboarding?.readConsent !== true) return false;
+  try {
+    const directory = path.join(realpathSync(root), '.ai-orchestrator');
+    const stat = lstatSync(directory);
+    if (!stat.isDirectory() || stat.isSymbolicLink() || (stat.mode & 0o077)) return false;
+    const file = path.join(directory, 'flowcairn-install.json');
+    const fd = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      const entry = fstatSync(fd);
+      if (!entry.isFile() || entry.nlink !== 1 || entry.size > 1024 * 1024 || (entry.mode & 0o077)) return false;
+      const value = JSON.parse(readFileSync(fd, 'utf8'));
+      return value.tool === 'flowcairn' && /^flowcairn-[a-f0-9-]+$/.test(value.owner ?? '') &&
+        value.readConsentHash === onboardingConsentHash(root, profile);
+    } finally { closeSync(fd); }
+  } catch { return false; }
 }
