@@ -189,6 +189,21 @@ test('keeps run rail actions on one compact line', async ({ page }) => {
   expect(newTask.y + newTask.height).toBeLessThanOrEqual(heading.y + heading.height);
 });
 
+test('keeps run rail actions readable on mobile', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockApi(page, chain());
+  await page.goto(`/#session=${token}`);
+  const heading = await page.locator('.rail-heading').boundingBox();
+  const newTask = await page.locator('#new-task').boundingBox();
+  const refresh = await page.getByRole('button', { name: 'Обновить', exact: true }).boundingBox();
+  expect(heading).not.toBeNull();
+  expect(newTask).not.toBeNull();
+  expect(refresh).not.toBeNull();
+  expect(newTask.height).toBeLessThanOrEqual(34);
+  expect(newTask.x + newTask.width).toBeLessThanOrEqual(heading.x + heading.width);
+  expect(refresh.x + refresh.width).toBeLessThanOrEqual(newTask.x);
+});
+
 test('keeps canvas controls in a reserved top-left zone away from graph nodes', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
   await mockApi(page, chain());

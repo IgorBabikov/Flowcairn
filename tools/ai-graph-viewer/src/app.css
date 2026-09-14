@@ -310,11 +310,10 @@ button {
   flex-direction: column;
 }
 .rail-heading {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px;
+  justify-content: space-between;
+  padding: 12px;
   border-block-end: 1px solid var(--border);
 }
 .rail-heading h2,
@@ -326,6 +325,11 @@ button {
 .rail-heading .button {
   white-space: nowrap;
 }
+.rail-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
 .rail-heading .button.compact {
   min-height: 32px;
   padding: 5px 6px;
@@ -336,6 +340,16 @@ button {
   padding: 0;
   font-size: 1rem;
   line-height: 1;
+}
+.rail-heading .rail-create {
+  border-color: var(--border-strong);
+  background: var(--strong);
+  color: var(--plum-strong);
+  font-weight: 700;
+}
+.rail-heading .rail-create:hover:not(:disabled) {
+  border-color: var(--plum);
+  background: color-mix(in srgb, var(--strong) 72%, var(--surface));
 }
 .run-list {
   flex: 1;

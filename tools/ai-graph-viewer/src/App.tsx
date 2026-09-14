@@ -71,6 +71,7 @@ const COPY = {
     active: 'Активные',
     archive: 'История',
     create: 'Новая задача',
+    createCompact: '+ Задача',
     noRuns: 'Опишите, что нужно сделать. Здесь появится план работы.',
     loading: 'Загружаем сохраненное состояние…',
     retryLoad: 'Повторить загрузку',
@@ -147,6 +148,7 @@ const COPY = {
     active: 'Active',
     archive: 'History',
     create: 'New run',
+    createCompact: '+ New',
     noRuns: 'No runs yet. Create a task with exact scope and acceptance.',
     loading: 'Loading committed state…',
     retryLoad: 'Retry loading',
@@ -1241,21 +1243,23 @@ export function App() {
         {runs.length > 0 && <aside className="run-rail" aria-label={labels.runs}>
           <div className="rail-heading">
             <h2>{labels.runs}</h2>
-            <button
-              aria-label={labels.refresh}
-              className="button compact quiet icon-button"
-              onClick={() => void refreshRuns()}
-              title={labels.refresh}
-              type="button"
-            >↻</button>
-            <button
-              id="new-task"
-              type="button"
-              className="button compact quiet"
-              disabled={!project?.capabilities.intake.allowed}
-              onClick={() => { setError(null); setShowCreate(true); }}
-            >{labels.create}</button>
-
+            <div className="rail-actions">
+              <button
+                aria-label={labels.refresh}
+                className="button compact quiet icon-button"
+                onClick={() => void refreshRuns()}
+                title={labels.refresh}
+                type="button"
+              >↻</button>
+              <button
+                id="new-task"
+                aria-label={labels.create}
+                type="button"
+                className="button compact rail-create"
+                disabled={!project?.capabilities.intake.allowed}
+                onClick={() => { setError(null); setShowCreate(true); }}
+              >{labels.createCompact}</button>
+            </div>
           </div>
           <div className="run-list">
             {visibleRuns.map((run) => (
