@@ -17,23 +17,21 @@ export function graphLayout(nodes: ReadonlyArray<Pick<GraphNodeSnapshot, 'id' | 
     return level;
   };
   nodes.forEach((node) => levels.set(node.id, levelOf(node.id)));
+  const ranks = new Map<number, string[]>();
+  nodes.forEach((node) => {
+    const rank = levels.get(node.id)!;
+    ranks.set(rank, [...(ranks.get(rank) ?? []), node.id]);
+  });
   const ordered = [...nodes].sort((a, b) => levels.get(a.id)! - levels.get(b.id)!);
-  const chain = ordered.every((node, index) =>
-    index === 0
-      ? node.needs.length === 0
-      : node.needs.length === 1 && node.needs[0] === ordered[index - 1]?.id,
-  );
+  // A compiler may retain transitive edges for evidence. One node per rank still means
+  // the visible workflow is serial, so preserve its compact route without rewriting edges.
+  const chain = [...ranks.values()].every((rank) => rank.length === 1);
   const columns = Math.min(3, nodes.length);
   const positionAt = (index: number) => {
     const row = Math.floor(index / columns);
     const column = row % 2 === 0 ? index % columns : columns - 1 - (index % columns);
     return { x: column * 316, y: row * 240 };
   };
-  const ranks = new Map<number, string[]>();
-  nodes.forEach((node) => {
-    const rank = levels.get(node.id)!;
-    ranks.set(rank, [...(ranks.get(rank) ?? []), node.id]);
-  });
   return new Map(
     ordered.map((node, index) => {
       if (chain) {
