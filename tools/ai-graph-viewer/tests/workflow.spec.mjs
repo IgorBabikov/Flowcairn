@@ -98,3 +98,32 @@ test('scheduler failure is visible even without a failed node', async ({page}) =
   await expect(page.getByText('Выполняем задачу',{exact:true})).toHaveCount(0);
   await expect(page.locator('.current-stage')).toHaveCount(0);
 });
+
+test('shows only runtime-authorized recovery controls after autonomous failure', async ({page}) => {
+  const state=workflow();state.status='stale';state.failureReason='Нужна проверка результата';state.gates=[];
+  state.nodes=[
+    {...state.nodes[0],status:'passed',capabilities:allDenied},
+    {...state.nodes[1],id:'review',title:'Проверка изменений',status:'stale',capabilities:{...allDenied,retry:allowed,recover:allowed,requestReplan:allowed}},
+  ];
+  state.activeNodeId='review';state.capabilities={...allDenied,requestReplan:allowed};
+  const fixture=await mockApi(page,state);await page.goto(`/#session=${token}`);
+  const details=page.locator('.node-details');
+  await expect(details.getByRole('heading',{name:'Проверка изменений'})).toBeVisible();
+  await expect(details.getByRole('button',{name:'Повторить',exact:true})).toBeVisible();
+  await expect(details.getByRole('button',{name:'Восстановить',exact:true})).toBeVisible();
+  await expect(details.getByRole('button',{name:'Новая версия плана',exact:true})).toBeVisible();
+  await expect(details.getByRole('button',{name:'Запустить',exact:true})).toHaveCount(0);
+  await details.getByRole('button',{name:'Восстановить',exact:true}).click();
+  await expect.poll(()=>fixture.calls.filter(call=>call.action==='recover').length).toBe(1);
+  expect(fixture.calls.find(call=>call.action==='recover').body.nodeId).toBe('review');
+});
+
+test('hides the MiniMap for a compact ten-node workflow', async ({page}) => {
+  const state=workflow();
+  state.workflowProgress=[];
+  state.nodes=Array.from({length:10},(_,index)=>({...state.nodes[1],id:`step-${index}`,needs:index?[`step-${index-1}`]:[],capabilities:allDenied}));
+  state.edges=state.nodes.slice(1).map((node,index)=>({id:`edge-${index}`,source:`step-${index}`,target:node.id}));
+  await mockApi(page,state);await page.goto(`/#session=${token}`);
+  await expect(page.locator('.graph-node')).toHaveCount(10);
+  await expect(page.getByLabel('Мини-карта графа')).toHaveCount(0);
+});

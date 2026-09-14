@@ -847,6 +847,13 @@ export function App() {
     });
   }, [snapshot, visualSnapshot]);
   const currentGraphNodeId = snapshot ? relevantNodeId(snapshot) : null;
+  const autonomousRecoveryNode =
+    snapshot?.workflow === 'autonomous' &&
+    (Boolean(snapshot.failureReason) || ['failed', 'uncertain', 'stale'].includes(snapshot.status)) &&
+    selectedNode &&
+    !selectedNode.sourceRunId
+      ? selectedNode
+      : null;
 
   const focusGraphNode = useCallback(
     (nodeId: string) => {
@@ -1342,12 +1349,14 @@ export function App() {
                 proOptions={{ hideAttribution: false }}
               >
                 <Background color="var(--flow-grid)" gap={24} size={1} />
-                <MiniMap
-                  ariaLabel={locale === 'ru' ? 'Мини-карта графа' : 'Graph minimap'}
-                  pannable
-                  zoomable
-                  nodeColor={(node) => `var(--status-${String(node.data.status)})`}
-                />
+                {(visualSnapshot?.nodes.length ?? 0) > 12 && (
+                  <MiniMap
+                    ariaLabel={locale === 'ru' ? 'Мини-карта графа' : 'Graph minimap'}
+                    pannable
+                    zoomable
+                    nodeColor={(node) => `var(--status-${String(node.data.status)})`}
+                  />
+                )}
                 <Controls showInteractive={false} />
               </ReactFlow>
             ) : selectedRunId && !snapshot ? (
@@ -1377,7 +1386,20 @@ export function App() {
           </nav>
           <div className="detail-scroll">
             {snapshot?.workflow === 'autonomous' ? (
-              <div hidden={tab !== 'overview' && tab !== 'plan'}><WorkflowPanel key={snapshot.runId} snapshot={snapshot} plan={plan} busy={busy || Boolean(pending)} onApprove={approveWorkflow} onRevise={reviseWorkflow} /></div>
+              <>
+                <div hidden={tab !== 'overview' && tab !== 'plan'}><WorkflowPanel key={snapshot.runId} snapshot={snapshot} plan={plan} busy={busy || Boolean(pending)} onApprove={approveWorkflow} onRevise={reviseWorkflow} /></div>
+                {tab === 'overview' && autonomousRecoveryNode && (
+                  <NodeDetails
+                    node={autonomousRecoveryNode}
+                    locale={locale}
+                    busy={busy}
+                    onAction={(action) => void execute(action, autonomousRecoveryNode.id)}
+                    onGate={() => undefined}
+                    onReplan={requestReplan}
+                    replanLabel={getCapability(autonomousRecoveryNode.capabilities, 'requestReplan').label ?? labels.replan}
+                  />
+                )}
+              </>
             ) : tab === 'overview' &&
               (selectedNode ? (
                 <NodeDetails
