@@ -19,6 +19,7 @@ import { isWithin, pathAllowed } from './registry.mjs';
 
 // Separate from the 32 KiB prior-evidence / 128 KiB prompt budgets; never truncate a diff.
 export const MAX_REVIEW_EVIDENCE_BYTES = 512 * 1024;
+export const MAX_HISTORICAL_EXECUTIONS = 20;
 const Artifact = z.strictObject({ hash: Hash, artifact: ArtifactSchema });
 const CompletedImplementation = z.strictObject({
   receiptHash: Hash,
@@ -52,7 +53,7 @@ const HistoricalEvidence = z.strictObject({
   incompleteImplementations: z.array(HistoricalIncompleteImplementation).max(100),
 });
 const PreviousExecution = z.strictObject({ task: TaskSpecSchema, plan: GraphPlanSchema, evidence: HistoricalEvidence });
-const Evidence = CurrentEvidence.extend({ previousExecutions: z.array(PreviousExecution).max(2).optional() });
+const Evidence = CurrentEvidence.extend({ previousExecutions: z.array(PreviousExecution).max(MAX_HISTORICAL_EXECUTIONS).optional() });
 function fail(message) {
   throw new GraphError('REVIEW_EVIDENCE_INVALID', message);
 }
@@ -233,7 +234,7 @@ export function validateReviewEvidence(value, { node, task, plan }) {
   for (const entry of previous) {
     const priorNode = entry.plan.nodes.find((candidate) => candidate.action.id === 'ai-review');
     if (!priorNode || plan.workflow !== 'autonomous' || entry.plan.workflow !== 'autonomous' ||
-        entry.plan.runtimeHash !== plan.runtimeHash || entry.plan.version >= plan.version ||
+        entry.plan.version >= plan.version ||
         hashObject(entry.task.scope) !== hashObject(task.scope) || entry.task.id !== task.id ||
         entry.task.instructions !== task.instructions || hashObject(entry.task.checks) !== hashObject(task.checks))
       fail('Предыдущая версия не относится к согласованной задаче');

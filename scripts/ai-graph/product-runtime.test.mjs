@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { TaskSpecSchema } from './lib/schemas.mjs';
 import { compilePlanningPlan, compileTaskProposal } from './lib/planning.mjs';
 import { validatePlan } from './lib/validator.mjs';
+import { validateReviewEvidence } from './lib/review-evidence.mjs';
 import { SKILL_ROUTES } from './lib/config.mjs';
 import { hashObject } from './lib/io.mjs';
 const hash = hashObject('product-runtime-fixture');
@@ -34,21 +35,22 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 const request=(s,extra={})=>({operationId:`op-${randomUUID()}`,expectedRevision:s.revision,planHash:s.planHash,...extra});
 const analysis={requirements:['Валидация email'],constraints:['Сохранить интерфейс'],projectFacts:[{path:'src/form.mjs',fact:'Форма уже существует'}],acceptance:['Неверный email отклонен'],risks:[]};
-async function fixture(t,{consent=true,reviewFails=0,checkFails=0,uncertain=false,steps=output.steps}={}) {
+async function fixture(t,{consent=true,reviewFails=0,checkFails=0,uncertain=false,steps=output.steps,maxReplans=2}={}) {
  const root=mkdtempSync(path.join(os.tmpdir(),'flowcairn-product-'));
  t.after(()=>rmSync(root,{recursive:true,force:true}));
  const worktree=path.join(root,'.ai-orchestrator','worktrees','fixture-1');
  mkdirSync(worktree,{recursive:true,mode:0o700});
  const calls=[]; let reviews=0,checks=0;
+ let runtimeHash=hash;
  const fingerprint=()=>({hash,files:[],git:{head:'a'.repeat(40),indexHash:hash}});
- const adapters={identity:()=>hash,skills:()=>skills,hasReadConsent:()=>consent,
+ const adapters={identity:()=>runtimeHash,skills:()=>skills,hasReadConsent:()=>consent,
  capture:()=>({manifest:{sourceHash:hash},bundlePath:'fixture-source'}),
  allocate:({task,runId})=>({worktree,taskId:task.id,attemptId:1,leaseId:'fixture',sourceHash:hash,runId}),
  verifyBinding:()=>true,replaceBinding:({binding,newRunId})=>({...binding,runId:newRunId}),fingerprint,
  inspectChanges:()=>({allowed:true,changedFiles:[]}),applyEdits:()=>{},diff:()=>({content:'',complete:true}),
  runner:{ai:{available:true},checks:{available:true}},loadSkills:ids=>ids.map(name=>({name,text:'fixture',hash,path:`skills/${name}/SKILL.md`})),
  projectSummary:()=>({schemaVersion:2,name:'fixture',contextHash:hash,contextPaths:[],scopeCandidates:['src'],checks:['tests'],ai:{provider:'codex',model:'fixture'},capabilities:{intake:{allowed:true}}}),
- registerTask:async(_root,input,options)=>options.service.create(input,{runId:options.run,operationId:options.operation,stage:options.stage,workflow:options.workflow,naturalIntakeHash:options.naturalIntakeHash}),
+ registerTask:async(_root,input,options)=>options.service.create({...input,limits:{...input.limits,maxReplans}},{runId:options.run,operationId:options.operation,stage:options.stage,workflow:options.workflow,naturalIntakeHash:options.naturalIntakeHash}),
  execute:async({node,onStart,priorEvidence,reviewEvidence,task,plan})=>{
   calls.push({nodeId:node.id,action:node.action.id,priorEvidence,reviewEvidence,task,planVersion:plan.version});await onStart({ticket:'fixture',pid:process.pid});
   if(node.action.id==='check-tests')return {exitCode:checks++<checkFails?1:0,stopped:true,uncertain:false};
@@ -62,7 +64,7 @@ async function fixture(t,{consent=true,reviewFails=0,checkFails=0,uncertain=fals
  const intake=()=>service.intake({title:'Форма регистрации',description:'Добавить проверку email',taskNumber:'ФОРМА-12',operationId:'intake-product',contextHash:hash});
  const settle=async(s)=>{for(let i=0;i<8;i++){await Promise.all([...service.drives.values()]);s=service.snapshot(s.runId);if(s.successorRunId){s=service.snapshot(s.successorRunId);continue;}return s;}throw Error('too many transitions');};
  const approve=s=>service.command(s.runId,'gate',request(s,{nodeId:'approve-plan',decision:'approve',permissions:s.gates[0].requiredPermissions,challenge:s.gates[0].challenge}));
- return {service,root,intake,settle,approve,calls};
+ return {service,root,intake,settle,approve,calls,setRuntimeHash:(value)=>{runtimeHash=value;}};
 }
 test('product intake требует локальное согласие и не принимает browser scope',async(t)=>{
  const f=await fixture(t,{consent:false});await assert.rejects(f.intake(),e=>e.code==='ONBOARDING_REQUIRED');assert.equal(f.calls.length,0);
@@ -202,6 +204,39 @@ test('ручной replan сохраняет полный diff исходной 
  assert.equal(evidence.implementations[0].diff.artifact.content,'');
 });
 
+test('manual replan сохраняет historical evidence после обновления runtime',async(t)=>{
+ const f=await fixture(t);
+ let content='export const valid = false;';let implementations=0;
+ const adapters=f.service.adapters;
+ const fingerprint=()=>({hash:hashObject(content),files:[{path:'src/form.mjs',hash:hashObject(content),mode:'100644',size:content.length}],git:{head:'a'.repeat(40),indexHash:hash}});
+ adapters.fingerprint=fingerprint;
+ adapters.capture=()=>({manifest:{sourceHash:fingerprint().hash},bundlePath:'fixture-source'});
+ adapters.inspectChanges=(before,after)=>({allowed:true,changedFiles:before.hash===after.hash?[]:['src/form.mjs']});
+ adapters.applyEdits=(_root,_before,_node,_task,edits)=>{if(edits.length)content=edits[0].content;};
+ adapters.diff=(_root,before,after)=>({complete:true,content:before.hash===after.hash?'':'--- a/src/form.mjs\n+++ b/src/form.mjs\n-export const valid = false;\n+export const valid = true;\n'});
+ adapters.replaceBinding=({binding,newRunId,sourceHash})=>({...binding,runId:newRunId,sourceHash});
+ const execute=adapters.execute;
+ adapters.execute=async(args)=>{
+   const result=await execute(args);
+   if(args.node.action.id==='ai-implement' && implementations++===0){
+     result.output.changedFiles=['src/form.mjs'];
+     result.output.edits=[{path:'src/form.mjs',previousHash:hashObject(content),content:'export const valid = true;',executable:false}];
+   }
+   return result;
+ };
+ let snapshot=await f.settle(await f.intake());
+ snapshot=await f.settle(await f.approve(snapshot));
+ const oldPlan=f.service.store.readObject('plans',f.service.store.readRun(snapshot.runId).planHash);
+ f.setRuntimeHash(hashObject('updated runtime'));
+ snapshot=await f.service.command(snapshot.runId,'replan',request(snapshot));
+ snapshot=await f.settle(await f.approve(snapshot));
+ assert.equal(snapshot.status,'passed');
+ const evidence=f.calls.filter(call=>call.action==='ai-review').at(-1).reviewEvidence;
+ const currentPlan=f.service.store.readObject('plans',f.service.store.readRun(snapshot.runId).planHash);
+ assert.notEqual(evidence.previousExecutions[0].plan.runtimeHash,currentPlan.runtimeHash);
+ assert.equal(evidence.previousExecutions[0].evidence.completedImplementations[0].receipt.runtimeHash,oldPlan.runtimeHash);
+});
+
 test('final review сохраняет подтвержденные partial changes прошлых execution-версий',async(t)=>{
  const steps=[
    {id:'validation',title:'Валидация',outcome:'Проверка готова',needs:[],paths:['src/validation.mjs']},
@@ -209,7 +244,7 @@ test('final review сохраняет подтвержденные partial chang
    {id:'css',title:'Стили',outcome:'Стили готовы',needs:['markup'],paths:['src/styles.css']},
    {id:'js',title:'Поведение',outcome:'Поведение готово',needs:['css'],paths:['src/form.mjs']},
  ];
- const f=await fixture(t,{steps});
+ const f=await fixture(t,{steps,maxReplans:3});
  const files=new Map();
  const fingerprint=()=>{
    const entries=[...files].sort(([left],[right])=>left.localeCompare(right)).map(([path,content])=>({path,hash:hashObject(content),mode:'100644',size:content.length}));
@@ -246,10 +281,19 @@ test('final review сохраняет подтвержденные partial chang
  snapshot=await f.service.command(snapshot.runId,'replan',request(snapshot));
  snapshot=await f.settle(await f.approve(snapshot));
  assert.equal(snapshot.status,'passed');
+ snapshot=await f.service.command(snapshot.runId,'replan',request(snapshot));
+ snapshot=await f.settle(await f.approve(snapshot));
+ assert.equal(snapshot.status,'passed');
  const evidence=f.calls.filter(call=>call.action==='ai-review').at(-1).reviewEvidence;
- assert.equal(evidence.previousExecutions.length,2);
+ assert.equal(evidence.previousExecutions.length,3);
  assert.equal(evidence.previousExecutions[0].evidence.completedImplementations.length,2);
  assert.deepEqual(evidence.previousExecutions[0].evidence.incompleteImplementations.map(item=>[item.nodeId,item.status]),[['step-css','uncertain'],['step-js','pending']]);
  assert.equal(evidence.previousExecutions[1].evidence.completedImplementations.length,1);
  assert.deepEqual(evidence.previousExecutions[1].evidence.incompleteImplementations.map(item=>[item.nodeId,item.status]),[['step-fix-2','failed'],['step-fix-3','pending'],['step-fix-4','pending']]);
+ assert.equal(evidence.previousExecutions[2].evidence.completedImplementations.length,4);
+ const state=f.service.store.readRun(snapshot.runId);
+ const plan=f.service.store.readObject('plans',state.planHash);
+ const currentTask=f.service.store.readObject('tasks',state.taskHash);
+ const overflow={...evidence,previousExecutions:Array.from({length:21},()=>evidence.previousExecutions[0])};
+ assert.throws(()=>validateReviewEvidence(overflow,{node:plan.nodes.find(item=>item.action.id==='ai-review'),task:currentTask,plan}),{code:'REVIEW_EVIDENCE_INVALID'});
 });

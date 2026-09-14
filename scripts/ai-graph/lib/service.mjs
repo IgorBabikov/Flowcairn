@@ -33,7 +33,7 @@ import { POLICY_HASH, REGISTRY_HASH, resolveAction, pathAllowed, overlaps } from
 import { initialNodes, reconcile, calculateCapabilities } from './state.mjs';
 import { captureSourceBundle, verifySourceBundle } from './source.mjs';
 import { captureBeforeContents, buildAttemptDiff } from './artifacts.mjs';
-import { buildHistoricalReviewEvidence, buildReviewEvidence } from './review-evidence.mjs';
+import { buildHistoricalReviewEvidence, buildReviewEvidence, MAX_HISTORICAL_EXECUTIONS } from './review-evidence.mjs';
 import { applyProposedEdits } from './patch.mjs';
 import { prepareToolchain, verifyToolchain } from './toolchain.mjs';
 
@@ -424,8 +424,8 @@ export class WorkflowService {
         const implementations = source.plan.nodes.filter((node) => node.action.id === 'ai-implement');
         if (implementations.some((node) => source.state.nodes[node.id].attempts > 0)) {
           previous.unshift(source);
-          if (previous.length > 2)
-            fail('EXECUTION_HISTORY_LIMIT', 'Полная история review превышает две execution-версии');
+          if (previous.length > MAX_HISTORICAL_EXECUTIONS)
+            fail('EXECUTION_HISTORY_LIMIT', `Полная история review превышает ${MAX_HISTORICAL_EXECUTIONS} execution-версий`);
         }
       }
       runId = source.state.supersedesRunId;
