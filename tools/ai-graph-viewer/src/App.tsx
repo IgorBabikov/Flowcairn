@@ -649,7 +649,7 @@ export function App() {
     }
     const current = selectedRunRef.current;
     if (!current || !result.runs.some((run) => run.runId === current))
-      selectRun(result.runs[0]?.runId ?? null);
+      selectRun(newestRunsByTask(result.runs)[0]?.runId ?? null);
   }, [selectRun]);
 
   const refreshSnapshot = useCallback(

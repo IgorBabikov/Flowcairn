@@ -146,12 +146,15 @@ test('keeps the newest plan in the rail when an older run becomes stale later', 
     status: 'waiting-for-human',
     updatedAt: '2026-09-14T12:00:00.000Z',
   };
+  latest.nodes = latest.nodes.map(node => ({ ...node, title: 'Этап актуального плана' }));
   await mockApi(page, stale, { extraRuns: [runSummary(latest)] });
+  await page.route('**/api/runs/run-new/snapshot', route => route.fulfill({ json: latest }));
   await page.goto(`/#session=${token}`);
   const rail = page.locator('.run-list');
   await expect(rail).toContainText('FORM-102');
   await expect(rail).toContainText('Версия плана 5');
   await expect(rail).not.toContainText('Версия плана 4');
+  await expect(page.locator('.graph-node').first()).toContainText('Этап актуального плана');
 });
 
 test('replays a lost intake response with the exact same request', async ({ page }) => {
@@ -774,5 +777,6 @@ test('actual service fixture smoke', async ({ page }, testInfo) => {
     }),
   ).toBeVisible();
   await expect(page.locator('.operator-layout')).toBeVisible();
+  await expect(page.locator('.graph-node').first()).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath('actual-workflow.png'), fullPage: true });
 });
