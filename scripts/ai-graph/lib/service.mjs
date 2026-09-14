@@ -468,6 +468,32 @@ export class WorkflowService {
     return ['ai-analyze','ai-plan'].flatMap((id) => result.has(id) ? [result.get(id)] : []);
   }
 
+  #delivery(state, plan, driftReason) {
+    if (
+      driftReason ||
+      plan.workflow !== 'autonomous' ||
+      plan.stage !== 'execution' ||
+      state.status !== 'passed' ||
+      !state.binding
+    )
+      return null;
+    try {
+      this.adapters.verifyBinding(state.binding);
+      const relative = path.relative(this.root, realpathSync(state.binding.worktree)).split(path.sep).join('/');
+      if (
+        !relative ||
+        relative === '..' ||
+        relative.startsWith('../') ||
+        path.isAbsolute(relative) ||
+        !/^\.ai-orchestrator\/worktrees\/[a-z][a-z0-9-]{1,79}-[1-9][0-9]*$/.test(relative)
+      )
+        return null;
+      return { workspacePath: relative };
+    } catch {
+      return null;
+    }
+  }
+
   #hasReadConsent() {
     return this.adapters.hasReadConsent ? this.adapters.hasReadConsent() === true :
       typeof Reflect.get(ProjectPolicy, 'hasOnboardingConsent') === 'function' && Reflect.get(ProjectPolicy, 'hasOnboardingConsent')(this.root, this.adapters.project);
@@ -1235,6 +1261,7 @@ export class WorkflowService {
         challenge: this.#challenge(state, node.id, expiresAt),
         expiresAt,
       }));
+    const delivery = this.#delivery(state, plan, driftReason);
     return {
       schemaVersion: 2,
       runId,
@@ -1250,7 +1277,8 @@ export class WorkflowService {
       },
       workflow: plan.workflow ?? null,
       workflowProgress: this.#workflowProgress(state, plan),
-      completion: plan.workflow === 'autonomous' && plan.stage === 'execution' && state.status === 'passed' && !driftReason ? 'ready-for-review' : null,
+      completion: delivery ? 'ready-for-review' : null,
+      delivery,
       successorRunId: Object.values(state.operations).find((operation) => operation.resultRunId && operation.status === 'finished')?.resultRunId ?? null,
       failureReason: state.failureReason ? sanitizeText(state.failureReason) : null,
       phase: plan.stage ?? 'execution',

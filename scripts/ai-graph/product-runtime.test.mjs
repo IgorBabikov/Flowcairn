@@ -28,7 +28,7 @@ test('product execution требует одно согласование и за
 });
 
 import { WorkflowService } from './lib/service.mjs';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -37,11 +37,13 @@ const analysis={requirements:['Валидация email'],constraints:['Сохр
 async function fixture(t,{consent=true,reviewFails=0,checkFails=0,uncertain=false}={}) {
  const root=mkdtempSync(path.join(os.tmpdir(),'flowcairn-product-'));
  t.after(()=>rmSync(root,{recursive:true,force:true}));
+ const worktree=path.join(root,'.ai-orchestrator','worktrees','fixture-1');
+ mkdirSync(worktree,{recursive:true,mode:0o700});
  const calls=[]; let reviews=0,checks=0;
  const fingerprint=()=>({hash,files:[],git:{head:'a'.repeat(40),indexHash:hash}});
  const adapters={identity:()=>hash,skills:()=>skills,hasReadConsent:()=>consent,
  capture:()=>({manifest:{sourceHash:hash},bundlePath:'fixture-source'}),
- allocate:({task,runId})=>({worktree:root,taskId:task.id,attemptId:1,leaseId:'fixture',sourceHash:hash,runId}),
+ allocate:({task,runId})=>({worktree,taskId:task.id,attemptId:1,leaseId:'fixture',sourceHash:hash,runId}),
  verifyBinding:()=>true,replaceBinding:({binding,newRunId})=>({...binding,runId:newRunId}),fingerprint,
  inspectChanges:()=>({allowed:true,changedFiles:[]}),applyEdits:()=>{},diff:()=>({content:'',complete:true}),
  runner:{ai:{available:true},checks:{available:true}},loadSkills:ids=>ids.map(name=>({name,text:'fixture',hash,path:`skills/${name}/SKILL.md`})),
@@ -60,7 +62,7 @@ async function fixture(t,{consent=true,reviewFails=0,checkFails=0,uncertain=fals
  const intake=()=>service.intake({title:'Форма регистрации',description:'Добавить проверку email',taskNumber:'ФОРМА-12',operationId:'intake-product',contextHash:hash});
  const settle=async(s)=>{for(let i=0;i<8;i++){await Promise.all([...service.drives.values()]);s=service.snapshot(s.runId);if(s.successorRunId){s=service.snapshot(s.successorRunId);continue;}return s;}throw Error('too many transitions');};
  const approve=s=>service.command(s.runId,'gate',request(s,{nodeId:'approve-plan',decision:'approve',permissions:s.gates[0].requiredPermissions,challenge:s.gates[0].challenge}));
- return {service,intake,settle,approve,calls};
+ return {service,root,intake,settle,approve,calls};
 }
 test('product intake требует локальное согласие и не принимает browser scope',async(t)=>{
  const f=await fixture(t,{consent:false});await assert.rejects(f.intake(),e=>e.code==='ONBOARDING_REQUIRED');assert.equal(f.calls.length,0);
@@ -81,8 +83,20 @@ test('анализ передается полностью, план уточн�
  assert.equal(s.capabilities.revisePlan.allowed,true);
  s=await f.approve(s);s=await f.settle(s);
  assert.equal(s.status,'passed');assert.equal(s.completion,'ready-for-review');assert.equal(s.finalDisposition,null);assert.equal(s.gates.length,0);
+ assert.deepEqual(s.delivery,{workspacePath:'.ai-orchestrator/worktrees/fixture-1'});
  assert.deepEqual(f.calls.map(c=>c.action),['ai-analyze','ai-plan','ai-plan','ai-implement','check-tests','ai-review']);
  assert.equal(f.service.snapshot(initial.runId).planHash,initial.planHash);
+});
+
+test('внешний binding не получает delivery и ready-for-review',async(t)=>{
+ const f=await fixture(t);let s=await f.settle(await f.intake());
+ s=await f.approve(s);s=await f.settle(s);
+ const state=f.service.store.readRun(s.runId);
+ f.service.store.updateRun(s.runId,state.revision,current=>({
+   ...current,binding:{...current.binding,worktree:f.root},
+ }));
+ s=f.service.snapshot(s.runId);
+ assert.equal(s.delivery,null);assert.equal(s.completion,null);
 });
 for(const failure of ['review','check'])test(`${failure}: bounded policy исправляет без нового human approval`,async(t)=>{
  const f=await fixture(t,{reviewFails:failure==='review'?1:0,checkFails:failure==='check'?1:0});let s=await f.settle(await f.intake());const approvedId=s.runId;
