@@ -830,6 +830,7 @@ export function App() {
       // activeNodeId also points to gates/ready steps; only committed statuses indicate work.
       const active = Boolean(
         snapshot?.integrity.valid &&
+        !snapshot.failureReason &&
         !['stale', 'uncertain'].includes(snapshot.status) &&
         byId.get(edge.target)?.status === 'running' &&
         byId.get(edge.source)?.status === 'passed' &&

@@ -108,6 +108,7 @@ export interface WorkflowProgress {
   artifacts: ArtifactSummary[];
 }
 export interface Snapshot {
+  failureReason?: string | null;
   workflowProgress?: WorkflowProgress[];
   phase?: 'planning' | 'execution';
   workflow?: 'autonomous' | null;

@@ -14,21 +14,21 @@ export function WorkflowPanel({ snapshot, plan, busy, onApprove, onRevise }: {
   const gate = snapshot.gates.find(item => item.type === 'approve-plan');
   const gateNode = snapshot.nodes.find(node => node.id === gate?.nodeId);
   const approved = Boolean(snapshot.nodes.find(node => node.id === 'approve-plan' && node.status === 'passed'));
-  const done = snapshot.integrity.valid && snapshot.status === 'passed' && snapshot.completion === 'ready-for-review';
-  const blocked = ['failed', 'uncertain', 'stale'].includes(snapshot.status) || !snapshot.integrity.valid;
+  const done = snapshot.integrity.valid && snapshot.status === 'passed' && snapshot.completion === 'ready-for-review' && !snapshot.failureReason;
+  const blocked = Boolean(snapshot.failureReason) || ['failed', 'uncertain', 'stale'].includes(snapshot.status) || !snapshot.integrity.valid;
   const current = snapshot.nodes.find(node => node.id === snapshot.activeNodeId) ?? snapshot.nodes.find(node => ['failed', 'uncertain', 'running'].includes(node.status));
   const reviewable = Boolean(plan && gate && snapshot.integrity.valid && gate.planHash === snapshot.planHash);
   const changes = [...new Set(snapshot.nodes.flatMap(node => node.changedFiles))];
   const checks = snapshot.nodes.flatMap(node => node.checks);
   return <section className="workflow-panel" aria-label="План и результат">
-    <h2>{done ? 'Готово к вашему ревью' : gate ? 'План работы' : blocked ? 'Работа приостановлена' : approved ? 'Выполняем задачу' : 'Разбираемся в задаче'}</h2>
+    <h2>{done ? 'Готово к вашему ревью' : blocked ? 'Работа приостановлена' : gate ? 'План работы' : approved ? 'Выполняем задачу' : 'Разбираемся в задаче'}</h2>
     <p className="workflow-summary" role="status">{done
       ? 'Реализация и проверки завершены. Проверьте изменения, затем создайте коммит и PR.'
+      : blocked ? humanText(snapshot.failureReason || current?.reason || snapshot.integrity.reason) || 'Откройте отчеты этапа: продолжение требует проверки.'
       : gate ? 'Проверьте шаги и границы изменений. Можно дополнить план перед разработкой.'
-      : blocked ? humanText(current?.reason ?? snapshot.integrity.reason) || 'Откройте отчеты этапа: продолжение требует проверки.'
       : approved ? 'Реализация, проверки и исправления пройдут автоматически. Можно вернуться к результату позже.'
       : 'Изучаем проект и требования. Затем покажем план для согласования.'}</p>
-    {current && !done && <p className="current-stage"><StatusIcon status={current.status} /><span>{nodeTitle(current, 'ru')}</span></p>}
+    {current && !done && !blocked && <p className="current-stage"><StatusIcon status={current.status} /><span>{nodeTitle(current, 'ru')}</span></p>}
     <ol className="workflow-steps">
       {snapshot.nodes.filter(node => node.action.kind !== 'gate').map(node => <li key={node.id}>
         <StatusIcon status={node.status} />

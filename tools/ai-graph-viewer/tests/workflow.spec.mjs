@@ -85,3 +85,15 @@ test('plan feedback survives reading reports and historical selection survives r
   await expect(page.getByLabel('Что дополнить или исправить?')).toHaveValue('Сохранить введенные значения после ошибки');
   await expect(page.getByRole('button',{name:'Согласен',exact:true})).toBeDisabled();
 });
+
+test('scheduler failure is visible even without a failed node', async ({page}) => {
+  const state=workflow();state.status='ready';state.activeNodeId=null;state.gates=[];
+  state.failureReason='Автономный запуск остановлен: истек лимит времени';
+  state.nodes=state.nodes.map(node=>({...node,status:'pending',capabilities:allDenied}));
+  await mockApi(page,state);await page.goto(`/#session=${token}`);
+  await expect(page.getByRole('heading',{name:'Работа приостановлена'})).toBeVisible();
+  await expect(page.getByText(state.failureReason,{exact:true})).toBeVisible();
+  await expect(page.getByText('Разбираемся в задаче',{exact:true})).toHaveCount(0);
+  await expect(page.getByText('Выполняем задачу',{exact:true})).toHaveCount(0);
+  await expect(page.locator('.current-stage')).toHaveCount(0);
+});
