@@ -11,61 +11,61 @@
     'Segoe UI',
     sans-serif;
   font-synthesis: none;
-  --page: #f5f3f6;
-  --surface: #fffdfd;
-  --soft: #f0edf3;
-  --strong: #e8e2ed;
-  --text: #2e2033;
-  --muted: #6f6473;
-  --faint: #8c818f;
-  --border: #ded7e1;
-  --border-strong: #c9bdce;
-  --plum: #5c2d66;
-  --plum-strong: #46204f;
+  --page: #f3f8f4;
+  --surface: #fcfefb;
+  --soft: #eaf2ec;
+  --strong: #dcebe1;
+  --text: #173f36;
+  --muted: #536e62;
+  --faint: #60766a;
+  --border: #d5e2d8;
+  --border-strong: #b2c8b9;
+  --plum: #21644e;
+  --plum-strong: #184e3c;
   --danger: #a23946;
   --warning: #9b5b16;
   --info: #356f83;
-  --shadow: 0 14px 34px rgba(65, 43, 72, 0.11);
-  --flow-grid: #d6ceda;
-  --status-idle: #827487;
+  --shadow: 0 14px 34px rgba(27, 61, 44, 0.09);
+  --flow-grid: #cdded2;
+  --status-idle: #6b7d71;
   --status-waiting: var(--status-waiting-for-human);
-  --status-pending: #938697;
-  --status-ready: #5c2d66;
+  --status-pending: #6b7d71;
+  --status-ready: #21644e;
   --status-running: #287288;
   --status-waiting-for-human: #a86519;
   --status-passed: #26775a;
   --status-failed: #a23946;
   --status-uncertain: #a86519;
-  --status-stale: #7a5a7e;
+  --status-stale: #667463;
 }
 
 :root[data-dark] {
   color-scheme: dark;
-  --page: #171319;
-  --surface: #211b24;
-  --soft: #2a232d;
-  --strong: #352b39;
-  --text: #f5eff6;
-  --muted: #c4b8c7;
-  --faint: #a497a8;
-  --border: #443849;
-  --border-strong: #5d4e63;
-  --plum: #d5a8de;
-  --plum-strong: #e7c0ee;
+  --page: #101f19;
+  --surface: #192c24;
+  --soft: #20392e;
+  --strong: #2a493a;
+  --text: #eef7ee;
+  --muted: #bbcebd;
+  --faint: #a0b9a5;
+  --border: #385844;
+  --border-strong: #587764;
+  --plum: #a1d3b4;
+  --plum-strong: #c0e5ca;
   --danger: #ed9ba6;
   --warning: #f0bc73;
   --info: #8fc9dc;
   --shadow: 0 16px 38px rgba(0, 0, 0, 0.28);
-  --flow-grid: #44394a;
-  --status-idle: #c4b8c7;
-  --status-pending: #c4b8c7;
-  --status-ready: #d5a8de;
+  --flow-grid: #314c3d;
+  --status-idle: #bbcebd;
+  --status-pending: #bbcebd;
+  --status-ready: #a1d3b4;
   --status-running: #8fc9dc;
   --status-waiting-for-human: #f0bc73;
   --status-passed: #80d4b0;
   --status-failed: #ed9ba6;
   --status-uncertain: #f0bc73;
-  --status-stale: #c9afcf;
+  --status-stale: #bed0b6;
 }
 
 * {
@@ -1235,3 +1235,65 @@ dialog::backdrop {
 .graph-goal summary { cursor: pointer; }
 .graph-goal summary span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
 .graph-goal[open] summary span { -webkit-line-clamp: 1; }
+
+/* Основной сценарий: задача, план и результат. Технические отчеты доступны отдельно. */
+input, textarea { caret-color: var(--plum); }
+a { text-underline-offset: 3px; }
+.task-composer form { gap: 0; }
+.task-composer header { margin-bottom: 26px; }
+.task-composer header h2 { font-size: clamp(1.5rem, 2.5vw, 2rem); letter-spacing: -.025em; }
+.task-composer label { margin: 22px 0 8px; display: block; font-weight: 600; font-size: .9rem; }
+.task-composer input, .task-composer textarea { width: 100%; padding: 12px 14px; background: var(--surface); }
+.task-composer textarea { min-height: 180px; resize: vertical; }
+.task-composer #task-number { max-width: 240px; }
+.task-composer footer { justify-content: flex-end; margin-top: 26px; }
+.autonomous .graph-facts { display: none; }
+.autonomous .node-mode, .autonomous .node-meta, .autonomous .node-hint { display: none; }
+.autonomous .graph-node { min-height: 124px; }
+.workflow-panel h2 { font-size: 1.35rem; letter-spacing: -.02em; margin: 0 0 12px; }
+.workflow-summary { color: var(--muted); line-height: 1.6; margin: 0 0 22px; }
+.current-stage { display: flex; align-items: center; gap: 10px; color: var(--plum); }
+.workflow-steps { list-style: none; margin: 20px 0 28px; padding: 0; }
+.workflow-steps li { display: flex; align-items: flex-start; gap: 12px; padding: 14px 0; border-bottom: 1px solid var(--border); }
+.workflow-steps li > svg { margin-top: 2px; }
+.workflow-steps strong { font-size: .9rem; line-height: 1.4; }
+.workflow-steps p { color: var(--muted); font-size: .82rem; line-height: 1.5; margin: 5px 0 0; }
+.workflow-panel h3 { margin: 26px 0 10px; font-size: .9rem; }
+.workflow-panel ul { padding-left: 20px; line-height: 1.6; font-size: .85rem; }
+.workflow-panel .plan-boundaries p { font-size: .85rem; line-height: 1.6; }
+.plan-feedback { margin-top: 28px; }
+.plan-feedback label { font-size: .85rem; font-weight: 600; }
+.plan-feedback textarea { display: block; width: 100%; min-height: 95px; padding: 10px; margin: 10px 0; resize: vertical; }
+.approve-workflow { width: 100%; margin: 22px 0 10px; min-height: 44px; }
+.plan-technical { margin-top: 20px; color: var(--muted); font-size: .8rem; }
+.plan-technical code { display: block; overflow-wrap: anywhere; }
+.field-hint { font-size: .8rem; color: var(--muted); }
+.result-checks { list-style: none; padding: 0 !important; }
+.result-checks li { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
+.status-icon[data-status='passed'] { color: var(--status-passed); }
+.status-icon[data-status='running'] { color: var(--status-running); }
+.status-icon[data-status='failed'] { color: var(--status-failed); }
+.status-icon[data-status='waiting-for-human'] { color: var(--status-waiting-for-human); }
+.graph-node.status-waiting-for-human { background: color-mix(in srgb, var(--status-waiting-for-human) 7%, var(--surface)); }
+.graph-node.status-waiting-for-human::after { content: ''; position: absolute; inset: -5px; border: 1px solid var(--status-waiting-for-human); border-radius: 17px; pointer-events: none; animation: plan-wait 2.8s ease-in-out infinite; }
+@keyframes plan-wait { 0%, 100% { opacity: .22; } 50% { opacity: .8; } }
+[data-page-hidden] .graph-node::after { animation-play-state: paused; }
+@media (prefers-reduced-motion: reduce) { .graph-node.status-waiting-for-human::after { animation: none; opacity: .55; } }
+@media (max-width: 720px) {
+  .autonomous .detail-panel { order: 1; }
+  .autonomous .graph-region { order: 2; }
+  .autonomous .run-rail { order: 3; }
+  .task-composer header { margin-bottom: 12px; }
+  .task-composer textarea { min-height: 150px; }
+}
+
+.setup-panel { padding: 24px; max-width: 760px; width: calc(100% - 32px); margin: 16px auto; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; }
+.setup-panel header { display: flex; justify-content: space-between; gap: 16px; align-items: start; }
+.setup-panel h2 { margin: 0; font-size: 1.25rem; }
+.setup-panel p, .setup-panel li { font-size: .88rem; line-height: 1.6; color: var(--muted); }
+.setup-command { display: block; padding: 14px; background: var(--soft); border-radius: 8px; }
+
+@media (max-width: 720px) {
+  .autonomous .detail-panel { height: auto; max-height: none; }
+  .autonomous .detail-scroll { overflow: visible; max-height: none; }
+}

@@ -10,6 +10,7 @@ import type {
   Snapshot,
   IntakeInput,
   ProjectContext,
+  OnboardingStatus,
 } from './contracts';
 import { isSnapshot } from './contracts';
 
@@ -96,6 +97,13 @@ async function requestJson<T>(url: string, init: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
+  async onboarding(): Promise<OnboardingStatus> {
+    const body = await requestJson<OnboardingStatus>('/api/onboarding');
+    if (!body || typeof body.configured !== 'boolean' || !body.values ||
+        !Array.isArray(body.providers) || !Array.isArray(body.limitations))
+      throw { code: 'INVALID_ONBOARDING', message: 'Не удалось прочитать настройки проекта.', retryable: true } satisfies ApiError;
+    return body;
+  },
   async listRuns(): Promise<{
     runs: RunSummary[];
     capabilities: ServiceCapabilities;

@@ -108,16 +108,18 @@ test('renders backend state, confirms a gate, and retries one operation id', asy
 test('creates a task from ordinary text without ids, permissions or external calls', async ({ page }) => {
   const fixture = await mockApi(page, snapshot(), { emptyUntilIntake: true });
   await page.goto(`/#session=${token}`);
-  const composer = page.getByRole('region', { name: 'Что нужно сделать?' });
+  const composer = page.getByRole('region', { name: 'Новая задача' });
   await expect(composer).toBeVisible();
   await expect(page.getByText('flowcairn task --file task.json')).toHaveCount(0);
   await expect(page.getByLabel('ID зарегистрированной задачи')).toHaveCount(0);
-  await expect(composer.getByRole('button', { name: 'Составить план' })).toBeDisabled();
-  await composer.getByLabel('Задача', {exact:true}).fill('Исправить поиск и добавить проверку пустого ввода');
-  await composer.getByRole('button', { name: 'Составить план' }).click();
+  await expect(composer.getByRole('button', { name: 'Запустить' })).toBeDisabled();
+  await composer.getByLabel('Заголовок задачи', {exact:true}).fill('Исправить поиск');
+  await composer.getByLabel('Номер задачи', {exact:true}).fill('TASK-101');
+  await composer.getByLabel('Полное описание задачи', {exact:true}).fill('Исправить поиск и добавить проверку пустого ввода');
+  await composer.getByRole('button', { name: 'Запустить' }).click();
   await expect(page.locator('.react-flow')).toBeVisible();
   const request = fixture.calls.find(call => call.action === 'intake').body;
-  expect(Object.keys(request).sort()).toEqual(['contextHash', 'operationId', 'prompt']);
+  expect(Object.keys(request).sort()).toEqual(['contextHash', 'description', 'operationId', 'taskNumber', 'title']);
   expect(request.contextHash).toBe(projectContext.contextHash);
   expect(fixture.calls.filter(call => call.action === 'run' || call.action === 'gate')).toHaveLength(0);
 });
@@ -126,14 +128,16 @@ test('replays a lost intake response with the exact same request', async ({ page
   const fixture = await mockApi(page, snapshot(), { loseFirstCreateResponse: true, loseFirstRunResponse: false });
   await page.goto(`/#session=${token}`);
   await page.getByRole('button', { name: 'Новая задача' }).click();
-  const composer = page.getByRole('region', { name: 'Что нужно сделать?' });
-  await composer.getByLabel('Задача', {exact:true}).fill('Проверить стабильный intake');
-  await composer.getByRole('button', { name: 'Составить план' }).click();
+  const composer = page.getByRole('region', { name: 'Новая задача' });
+  await composer.getByLabel('Заголовок задачи', {exact:true}).fill('Исправить поиск');
+  await composer.getByLabel('Номер задачи', {exact:true}).fill('TASK-101');
+  await composer.getByLabel('Полное описание задачи', {exact:true}).fill('Проверить стабильный intake');
+  await composer.getByRole('button', { name: 'Запустить' }).click();
   await expect(composer.getByRole('alert')).toContainText('Результат операции неизвестен');
-  await expect(composer.getByLabel('Задача', {exact:true})).toBeDisabled();
+  await expect(composer.getByLabel('Полное описание задачи', {exact:true})).toBeDisabled();
   await expect(composer.getByRole('button', {name:'Закрыть', exact:true})).toHaveCount(0);
   await page.keyboard.press('Escape');
-  await expect(composer.getByLabel('Задача', {exact:true})).toHaveValue('Проверить стабильный intake');
+  await expect(composer.getByLabel('Полное описание задачи', {exact:true})).toHaveValue('Проверить стабильный intake');
   await composer.getByRole('button', { name: 'Повторить тот же запрос' }).click();
   await expect(composer).toHaveCount(0);
   const requests = fixture.calls.filter(call => call.action === 'intake').map(call => call.body);
@@ -300,9 +304,9 @@ test('uses native modal lifecycle and keeps toolbar keyboard activation', async 
   const create = page.getByRole('button', { name: 'Новая задача' });
   await create.focus();
   await create.click();
-  const createDialog = page.getByRole('region', { name: 'Что нужно сделать?' });
+  const createDialog = page.getByRole('region', { name: 'Новая задача' });
   await expect(createDialog).toBeVisible();
-  await expect(createDialog.getByLabel('Задача', {exact:true})).toBeFocused();
+  await expect(createDialog.getByLabel('Заголовок задачи', {exact:true})).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(createDialog).toHaveCount(0);
   await expect(create).toBeFocused();
@@ -399,7 +403,7 @@ test('does not run two-second list polling while SSE is connected', async ({ pag
 test('explicit refresh discovers a run from an initially empty list', async ({ page }) => {
   await mockApi(page, snapshot(), { emptyFirstList: true });
   await page.goto(`/#session=${token}`);
-  await expect(page.getByRole('region', { name: 'Что нужно сделать?' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Новая задача' })).toBeVisible();
   await page.getByRole('button', { name: 'Обновить' }).click();
   await expect(page.getByRole('button', { name: /TASK-101/ })).toBeVisible();
 });

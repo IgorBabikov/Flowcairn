@@ -85,7 +85,7 @@ export async function control(service, request, response, url) {
     });
   }
   const match = url.pathname.match(
-    /^\/api\/runs\/([a-z][a-z0-9-]{1,79})\/control\/(run|retry|rerun-check|recover|gate|stop|replan)$/,
+    /^\/api\/runs\/([a-z][a-z0-9-]{1,79})\/control\/(run|retry|rerun-check|recover|gate|stop|replan|revise-plan)$/,
   );
   if (!match)
     return send(response, 404, {

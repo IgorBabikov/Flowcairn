@@ -249,6 +249,9 @@ export async function mockApi(page, initial = snapshot(), options = {}) {
     const request = route.request();
     expect(request.headers()['x-flowcairn-control']).toBe(token);
     const url = new URL(request.url());
+    if (url.pathname === '/api/onboarding') {
+      await route.fulfill({json: {configured:true, profileHash:hash('a'), providers:[{id:'codex',label:'Codex',supported:true,reason:null}], values:{provider:'codex',model:'gpt-test',modelMode:'manual',reasoningEffort:'high',testPolicy:'keep',coverage:false,readConsent:true}, limitations:[]}}); return;
+    }
     if (url.pathname === '/api/project') {
       await route.fulfill({ json: options.projectContext ?? projectContext }); return;
     }
@@ -272,7 +275,7 @@ export async function mockApi(page, initial = snapshot(), options = {}) {
       if (options.intakeError) { await route.fulfill({ status: 409, json: {error: options.intakeError} }); return; }
       current = {
         ...current, runId: 'run-intake-fixture', revision: 0, phase: 'planning',
-        task: { id: 'TASK-GENERATED', goal: body.prompt, scope: ['src'], acceptance: [] },
+        task: { id: 'TASK-GENERATED', goal: body.title, title: body.title, description: body.description, taskNumber: body.taskNumber, scope: ['src'], acceptance: [] },
       };
       intakeCreated = true;
       if (options.loseFirstCreateResponse && createAttempts === 1) {
@@ -411,6 +414,14 @@ export async function mockApi(page, initial = snapshot(), options = {}) {
           content: '<script>attack()</script>',
         },
       });
+    }
+    if (url.pathname.endsWith('/control/revise-plan')) {
+      const body = request.postDataJSON();
+      calls.push({action:'revise-plan',body});
+      const parent = current.runId;
+      current = {...current,runId:'run-revised',supersedesRunId:parent,revision:0,planVersion:2,planHash:objectHash(planForVersion(2))};
+      current.gates = current.gates.map(gate => ({...gate,planHash:current.planHash,challenge:'revised-challenge'}));
+      await route.fulfill({json:{result:current}}); return;
     }
     if (url.pathname.endsWith('/control/gate')) {
       const body = request.postDataJSON();

@@ -38,6 +38,8 @@ export function startViewer({ service, token, port = 4329, dist = path.join(DIRE
       try {
         if (request.method === 'POST') return await control(service, request, response, url);
         if (request.method !== 'GET') return send(response, 405, { error: 'method-not-allowed' });
+        if (url.pathname === '/api/onboarding')
+          return send(response, 200, await service.onboarding());
         if (url.pathname === '/api/project')
           return send(response, 200, await service.project());
         if (url.pathname === '/api/runs')

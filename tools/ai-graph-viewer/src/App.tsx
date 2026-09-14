@@ -18,6 +18,9 @@ import { api, sessionToken, watchRevisions } from './api';
 import { humanText, nodeTitle, statusHint, StatusIcon } from './presentation';
 import { graphLayout } from './graph-layout';
 import { TaskComposer } from './TaskComposer';
+import { WorkflowPanel } from './WorkflowPanel';
+import { SetupPanel } from './SetupPanel';
+import { workflowProjection } from './workflow-projection';
 import type {
   ApiError,
   Artifact,
@@ -34,7 +37,7 @@ import type {
   ProjectContext,
   Snapshot,
   IntakeInput,
-  IntakeOptions,
+  TaskFields,
 } from './contracts';
 
 type Locale = 'ru' | 'en';
@@ -427,7 +430,7 @@ function GraphNodeCard({ data }: NodeProps<Node<GraphNodeData, 'operator'>>) {
       <strong>{nodeTitle(data, data.locale)}</strong>
       <span className="node-status">{STATUS[data.locale][data.status]}</span>
       <span className="node-hint">{statusHint(data.status, data.locale)}</span>
-      <div className="node-meta">
+      {!data.sourceRunId && <div className="node-meta">
         <span>
           {labels.attempt}: {data.attempt}
         </span>
@@ -435,7 +438,7 @@ function GraphNodeCard({ data }: NodeProps<Node<GraphNodeData, 'operator'>>) {
         <span>
           {data.receiptIds.length} {data.locale === 'ru' ? 'отчетов' : 'receipts'}
         </span>
-      </div>
+      </div>}
       <Handle type="source" position={data.sourcePosition} isConnectable={false} />
     </article>
   );
@@ -509,6 +512,7 @@ export function App() {
   const [compareLoading, setCompareLoading] = useState(false);
   const [compareError, setCompareError] = useState<ApiError | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [showSetup, setShowSetup] = useState(false);
   const [showDraft, setShowDraft] = useState(false);
   const [gate, setGate] = useState<GateSnapshot | null>(null);
   const [flowInstance, setFlowInstance] = useState<ReactFlowInstance | null>(null);
@@ -564,6 +568,14 @@ export function App() {
     },
     [selectRun],
   );
+
+  useEffect(() => {
+    if (snapshot?.workflow === 'autonomous' && snapshot.successorRunId &&
+        snapshot.successorRunId !== snapshot.runId && snapshot.integrity.valid) {
+      const successor = snapshot.successorRunId;
+      queueMicrotask(() => selectRun(successor));
+    }
+  }, [snapshot?.workflow, snapshot?.successorRunId, snapshot?.runId, snapshot?.integrity.valid, selectRun]);
 
   const commitPlan = useCallback(
     async (runId: string, expectedHash: string | undefined, next: GraphPlan | null) => {
@@ -795,21 +807,25 @@ export function App() {
     };
   }, [refreshSnapshot, selectedRunId, snapshot?.revision]);
 
-  const selectedNode = snapshot?.nodes.find((node) => node.id === selectedNodeId) ?? null;
+  const visualSnapshot = useMemo(() => snapshot ? workflowProjection(snapshot) : null, [snapshot]);
+  const selectedNode = visualSnapshot?.nodes.find((node) => node.id === selectedNodeId) ?? null;
   const graphNodes = useMemo(
     () =>
-      snapshot
-        ? layoutNodes(snapshot, locale, selectedNodeId, setSelectedNodeId, (action, nodeId) => {
+      visualSnapshot
+        ? layoutNodes(visualSnapshot, locale, selectedNodeId, id => {
+            setSelectedNodeId(id);
+            if (visualSnapshot.nodes.find(node => node.id === id)?.sourceRunId) setTab('evidence');
+          }, (action, nodeId) => {
             void execute(action, nodeId);
           })
         : [],
     // execute reads the latest committed snapshot and the selected node id from state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [locale, selectedNodeId, snapshot],
+    [locale, selectedNodeId, visualSnapshot],
   );
   const graphEdges: Edge[] = useMemo(() => {
-    const byId = new Map(snapshot?.nodes.map((node) => [node.id, node]));
-    return (snapshot?.edges ?? []).map((edge) => {
+    const byId = new Map(visualSnapshot?.nodes.map((node) => [node.id, node]));
+    return (visualSnapshot?.edges ?? []).map((edge) => {
       // activeNodeId also points to gates/ready steps; only committed statuses indicate work.
       const active = Boolean(
         snapshot?.integrity.valid &&
@@ -827,7 +843,7 @@ export function App() {
         style: { strokeWidth: active ? 2.5 : 1.5 },
       };
     });
-  }, [snapshot]);
+  }, [snapshot, visualSnapshot]);
   const currentGraphNodeId = snapshot ? relevantNodeId(snapshot) : null;
 
   const focusGraphNode = useCallback(
@@ -938,7 +954,7 @@ export function App() {
           : await api.control(operation.runId, operation.action, operation.request);
       const successor =
         operation.kind === 'control' &&
-        ['replan', 'recover'].includes(operation.action) &&
+        ['replan', 'recover', 'revise-plan'].includes(operation.action) &&
         next.supersedesRunId === operation.runId;
       if (operation.kind === 'control' && next.runId !== operation.runId && !successor) {
         throw {
@@ -956,9 +972,7 @@ export function App() {
       if (operation.kind === 'create') setShowCreate(false);
       setPending(null);
       setError(null);
-      setNotice(
-        locale === 'ru' ? 'Состояние сохранено сервером.' : 'The service committed the new state.',
-      );
+      setNotice('');
       await refreshHistory(next.runId).catch(() => undefined);
       await refreshRuns();
     } catch (reason) {
@@ -987,7 +1001,7 @@ export function App() {
     try {
       setEvidence({
         type: 'receipt',
-        value: await api.receipt(snapshot.runId, hash),
+        value: await api.receipt(selectedNode.sourceRunId ?? snapshot.runId, hash),
       });
     } catch (reason) {
       setError(reason as ApiError);
@@ -999,7 +1013,7 @@ export function App() {
     try {
       setEvidence({
         type: 'artifact',
-        value: await api.artifact(snapshot.runId, hash),
+        value: await api.artifact(selectedNode?.sourceRunId ?? snapshot.runId, hash),
       });
     } catch (reason) {
       setError(reason as ApiError);
@@ -1039,29 +1053,50 @@ export function App() {
     });
   }
 
-  async function createRun(prompt: string, options: IntakeOptions) {
+  async function createRun(fields: TaskFields) {
     if (!project?.capabilities.intake.allowed || inFlightRef.current) return;
     const existing = pending?.kind === 'create' ? pending : null;
     const id = operationId('intake');
     const operation: PendingCreateOperation = existing ?? {
       kind: 'create', key: 'create', operationId: id,
-      input: { prompt, operationId: id, contextHash: project.contextHash, ...options },
+      input: { ...fields, operationId: id, contextHash: project.contextHash },
     };
     await sendOperation(operation);
+  }
+
+  function approveWorkflow(approvedGate: GateSnapshot) {
+    if (approvedGate.expiresAt <= Date.now()) {
+      setNotice('Согласование устарело. Обновляем план для повторной проверки.');
+      if (snapshot) void refreshSnapshot(snapshot.runId, true);
+      return;
+    }
+    if (!snapshot?.planHash || snapshot.revision == null || !plan || pending || busy ||
+        !snapshot.integrity.valid || approvedGate.planHash !== snapshot.planHash ||
+        approvedGate.expiresAt <= Date.now() ||
+        !getCapability(snapshot.nodes.find(node => node.id === approvedGate.nodeId)?.capabilities ?? {}, 'approve').allowed) return;
+    const id = operationId('gate');
+    void sendOperation({ kind: 'control', key: `${snapshot.runId}:gate:${approvedGate.nodeId}:approve`,
+      operationId: id, runId: snapshot.runId, action: 'gate', request: {
+        operationId: id, expectedRevision: snapshot.revision, planHash: snapshot.planHash,
+        nodeId: approvedGate.nodeId, decision: 'approve', challenge: approvedGate.challenge,
+        permissions: approvedGate.requiredPermissions,
+      } });
+  }
+
+  function reviseWorkflow(feedback: string) {
+    if (!snapshot?.planHash || snapshot.revision == null || pending || busy ||
+        !getCapability(snapshot.capabilities, 'revisePlan').allowed) return;
+    const id = operationId('revise-plan');
+    void sendOperation({ kind: 'control', key: `${snapshot.runId}:revise-plan`, operationId: id,
+      runId: snapshot.runId, action: 'revise-plan', request: {
+        operationId: id, expectedRevision: snapshot.revision, planHash: snapshot.planHash, feedback,
+      } });
   }
 
   const planningActionLabel = getCapability(snapshot?.capabilities ?? {}, 'requestReplan').label ?? labels.replan;
   const composing = showCreate || (!snapshot && !selectedRunId);
   const composer = <TaskComposer
-    context={project ? {
-      name: project.name,
-      instructions: project.contextPaths,
-      checks: project.checks,
-      scopeCandidates: project.scopeCandidates,
-      bootstrap: project.bootstrap,
-      disclosure: `Планировщик: ${project.ai.provider ?? 'не настроен'}${project.ai.model ? ` · ${project.ai.model}` : ''}. Запрос к AI требует отдельного согласия на данные и возможную стоимость.`,
-      capability: project.capabilities.intake,
-    } : null}
+    capability={project?.capabilities.intake ?? null}
     busy={busy} pending={pending?.kind === 'create'} error={error}
     onSubmit={createRun}
     onRetry={() => {
@@ -1075,7 +1110,7 @@ export function App() {
   if (loading && runs.length === 0) return <LoadingState label={labels.loading} />;
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell${snapshot?.workflow === 'autonomous' ? ' autonomous' : ''}`}>
       <a className="skip-link" href="#graph-canvas">
         {labels.graph}
       </a>
@@ -1092,10 +1127,12 @@ export function App() {
           </div>
         </div>
         <div className="topbar-actions">
+          <button className="button quiet" type="button" aria-expanded={showSetup} onClick={() => setShowSetup(!showSetup)}>Настройки проекта</button>
           {runs.length === 0 && <button type="button" className="button quiet" onClick={() => void load()}>{labels.refresh}</button>}
           <span className={streamConnected ? 'connection live' : 'connection'}>
             {streamConnected ? labels.live : labels.disconnected}
           </span>
+          {!composing && snapshot?.workflow !== 'autonomous' && <>
           <button
             className="button quiet"
             onClick={() => setLocale(locale === 'ru' ? 'en' : 'ru')}
@@ -1103,6 +1140,7 @@ export function App() {
           >
             {labels.language}
           </button>
+          </>}
           <button
             className="button quiet"
             onClick={() => document.documentElement.toggleAttribute('data-dark')}
@@ -1123,7 +1161,7 @@ export function App() {
           <ActionButton
             capability={
               snapshot
-                ? getCapability(snapshot.capabilities, 'run')
+                ? (snapshot.workflow === 'autonomous' ? { allowed: false, reason: null } : getCapability(snapshot.capabilities, 'run'))
                 : { allowed: false, reason: labels.unavailable }
             }
             onClick={() => void execute('run')}
@@ -1163,6 +1201,7 @@ export function App() {
         </div>
       )}
 
+      {showSetup && <SetupPanel onClose={() => setShowSetup(false)} />}
       <section className={`operator-layout${composing ? ' composing' : ''}${runs.length === 0 ? ' no-runs' : ''}`}>
         {runs.length > 0 && <aside className="run-rail" aria-label={labels.runs}>
           <div className="rail-heading">
@@ -1184,12 +1223,12 @@ export function App() {
 
           </div>
           <div className="run-list">
-            {runs.map((run) => (
+            {runs.filter((run, index) => !run.task?.taskNumber || runs.findIndex(item => item.task?.taskNumber === run.task?.taskNumber && item.task?.id === run.task?.id) === index).map((run) => (
               <RunButton
                 key={run.runId}
                 run={run}
                 locale={locale}
-                active={run.runId === selectedRunId}
+                active={run.runId === selectedRunId || Boolean(run.task?.taskNumber && run.task.taskNumber === snapshot?.task?.taskNumber && run.task.id === snapshot?.task?.id)}
                 onClick={() => selectRun(run.runId)}
               />
             ))}
@@ -1199,7 +1238,7 @@ export function App() {
         </aside>}
 
         {composing ? composer : <section className="graph-region" id="graph-canvas" aria-label={labels.graph}>
-          {snapshot?.phase === 'planning' && getCapability(snapshot.capabilities, 'requestReplan').allowed && (
+          {snapshot?.workflow !== 'autonomous' && snapshot?.phase === 'planning' && getCapability(snapshot.capabilities, 'requestReplan').allowed && (
             <div className="next-action"><p>Следующая версия плана будет проверена сервером. Новые права потребуют вашего решения.</p>
               <button className="button primary" type="button" disabled={busy} onClick={requestReplan}>{planningActionLabel}</button></div>
           )}
@@ -1208,7 +1247,7 @@ export function App() {
               <h2>{labels.graph}</h2>
               <details className="graph-goal">
                 <summary><span>{snapshot?.task?.goal ?? (selectedRunId ? labels.loading : labels.noRuns)}</span></summary>
-                <p>{snapshot?.task?.goal ?? (selectedRunId ? labels.loading : labels.noRuns)}</p>
+                <p>{snapshot?.task?.description ?? snapshot?.task?.goal ?? (selectedRunId ? labels.loading : labels.noRuns)}</p>
               </details>
             </div>
             {snapshot && (
@@ -1330,7 +1369,9 @@ export function App() {
             ))}
           </nav>
           <div className="detail-scroll">
-            {tab === 'overview' &&
+            {snapshot?.workflow === 'autonomous' && (tab === 'overview' || tab === 'plan') ? (
+              <WorkflowPanel key={snapshot.runId} snapshot={snapshot} plan={plan} busy={busy || Boolean(pending)} onApprove={approveWorkflow} onRevise={reviseWorkflow} />
+            ) : tab === 'overview' &&
               (selectedNode ? (
                 <NodeDetails
                   node={selectedNode}
@@ -1350,14 +1391,14 @@ export function App() {
             {tab === 'evidence' && (
               <EvidenceList
                 node={selectedNode}
-                planning={snapshot?.planningArtifacts ?? []}
+                planning={selectedNode?.sourceRunId ? [] : snapshot?.planningArtifacts ?? []}
                 locale={locale}
                 onReceipt={openReceipt}
                 onArtifact={openArtifact}
               />
             )}
             {tab === 'history' && <HistoryPanel events={events} locale={locale} />}
-            {tab === 'plan' && (
+            {tab === 'plan' && snapshot?.workflow !== 'autonomous' && (
               <PlanPanel
                 plan={plan}
                 runs={runs.filter((run) => run.runId !== selectedRunId)}
@@ -1471,11 +1512,9 @@ function RunButton({
     >
       <span className={`status-mark status-${run.status}`} aria-hidden="true" />
       <span>
-        <strong>{run.task?.id ?? run.runId}</strong>
+        <strong>{run.task?.taskNumber ?? run.task?.id ?? run.runId}</strong>
         <small>{run.task?.goal ?? run.integrity.reason ?? run.runId}</small>
-        <small title={run.runId}>
-          v{run.planVersion ?? '—'} · {run.runId}
-        </small>
+        <small title={run.runId}>Версия плана {run.planVersion ?? '—'}</small>
       </span>
       <em>{STATUS[locale][run.status] ?? run.status}</em>
     </button>
@@ -1655,6 +1694,7 @@ function EvidenceList({
   return (
     <div className="evidence-list">
       <h2>{node ? nodeTitle(node, locale) : labels.evidence}</h2>
+      {node?.sourceRunId && <p className="field-hint">Сохраненный анализ из предыдущей версии. Отчеты относятся к исходному запуску <code>{node.sourceRunId}</code>, план <code>{node.sourcePlanHash?.slice(0, 12)}</code>.</p>}
       {node?.receiptIds.map((hash, index) => (
         <button key={hash} onClick={() => onReceipt(hash)} type="button">
           <span>

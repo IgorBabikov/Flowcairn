@@ -6,9 +6,11 @@ test('unavailable planner stays fail-closed with a visible reason', async ({ pag
     ...projectContext, capabilities: {intake: {allowed: false, reason: 'Подключите планировщик проекта'}},
   } });
   await page.goto(`/#session=${token}`);
-  await page.getByLabel('Задача', {exact:true}).fill('Добавить проверку');
+  await page.getByLabel('Заголовок задачи', {exact:true}).fill('Исправить поиск');
+  await page.getByLabel('Номер задачи', {exact:true}).fill('TASK-101');
+  await page.getByLabel('Полное описание задачи', {exact:true}).fill('Добавить проверку');
   await expect(page.getByText('Подключите планировщик проекта')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Составить план' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Запустить' })).toBeDisabled();
 });
 
 test('compiles planning successor through backend without a client draft or automatic write', async ({ page }) => {
@@ -35,10 +37,10 @@ test('first-run composer remains readable on desktop, mobile, light and dark', a
     await page.setViewportSize({width, height});
     await page.emulateMedia({reducedMotion:'reduce'});
     await page.goto(`/#session=${token}`);
-    await expect(page.getByLabel('Задача', {exact:true})).toBeVisible();
+    await expect(page.getByLabel('Полное описание задачи', {exact:true})).toBeVisible();
     await page.evaluate(value => document.documentElement.toggleAttribute('data-dark', value), dark);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-    await expect(page.getByRole('button', {name:'Составить план'})).toBeVisible();
+    await expect(page.getByRole('button', {name:'Запустить'})).toBeVisible();
     await page.screenshot({path: testInfo.outputPath(`intake-${name}.png`), fullPage:true});
   }
 });
@@ -48,15 +50,17 @@ test('stale context requires a refresh and new request while preserving the task
   const options = { emptyUntilIntake: true, intakeError: {code:'STALE_CONTEXT', message:'Контекст изменился'} };
   const fixture = await mockApi(page, snapshot(), options);
   await page.goto(`/#session=${token}`);
-  await page.getByLabel('Задача', {exact:true}).fill('Исправить поиск');
-  await page.getByRole('button', {name:'Составить план'}).click();
+  await page.getByLabel('Заголовок задачи', {exact:true}).fill('Исправить поиск');
+  await page.getByLabel('Номер задачи', {exact:true}).fill('TASK-101');
+  await page.getByLabel('Полное описание задачи', {exact:true}).fill('Исправить поиск');
+  await page.getByRole('button', {name:'Запустить'}).click();
   await expect(page.getByRole('alert').filter({hasText:'Контекст изменился'}).last()).toBeVisible();
   await expect(page.getByRole('button', {name:'Повторить тот же запрос'})).toHaveCount(0);
   options.intakeError = null;
   options.projectContext = {...projectContext, contextHash:'b'.repeat(64)};
   await page.getByRole('button', {name:'Обновить контекст'}).click();
-  await expect(page.getByLabel('Задача', {exact:true})).toHaveValue('Исправить поиск');
-  await page.getByRole('button', {name:'Составить план'}).click();
+  await expect(page.getByLabel('Полное описание задачи', {exact:true})).toHaveValue('Исправить поиск');
+  await page.getByRole('button', {name:'Запустить'}).click();
   await expect(page.locator('.react-flow')).toBeVisible();
   const requests = fixture.calls.filter(call => call.action === 'intake').map(call => call.body);
   expect(requests).toHaveLength(2);
@@ -80,52 +84,21 @@ test('approval shows only the skills and checks actually present in the backend 
 });
 
 
-test('large projects can narrow backend candidates without broadening write permissions', async ({page}) => {
-  const context = {...projectContext, scopeCandidates: Array.from({length:40}, (_, i) => `area-${i}`)};
+test('task form has exactly three fields even with a large or dirty project', async ({page}) => {
+  const context = {...projectContext, scopeCandidates: Array.from({length:40}, (_, i) => `area-${i}`), bootstrap:{firstTask:true, required:true, changedPaths:['package.json'], untrackedCandidates:['src/new.ts'],snapshotHash:'c'.repeat(64)}};
   const fixture = await mockApi(page, snapshot(), {emptyUntilIntake:true, projectContext:context});
   await page.goto(`/#session=${token}`);
-  await page.getByLabel('Задача', {exact:true}).fill('Исправить выбранную часть');
-  await expect(page.getByRole('button', {name:'Составить план'})).toBeDisabled();
-  await page.getByText('Области задачи · 0 из 40').click();
-  await page.getByRole('checkbox', {name:'area-2', exact:true}).check();
-  await page.getByRole('button', {name:'Составить план'}).click();
+  const form = page.locator('.task-composer form');
+  await expect(form.locator('input, textarea, select')).toHaveCount(3);
+  await expect(form.getByRole('checkbox')).toHaveCount(0);
+  await form.getByLabel('Заголовок задачи').fill('Новая форма');
+  await form.getByLabel('Полное описание задачи').fill('Сделать валидацию полей');
+  await form.getByLabel('Номер задачи').fill('FORM-12');
+  await form.getByRole('button', {name:'Запустить'}).click();
   await expect(page.locator('.react-flow')).toBeVisible();
   const body = fixture.calls.find(call => call.action === 'intake').body;
-  expect(body.scope).toEqual(['area-2']);
-  expect(body.permissions).toBeUndefined();
+  expect(Object.keys(body).sort()).toEqual(['contextHash','description','operationId','taskNumber','title']);
 });
-
-
-test('dirty first install requires exact snapshot consent and explicit new-file selection', async ({page}) => {
-  const context = {...projectContext, bootstrap: {firstTask:true, required:true, changedPaths:['package.json', 'AGENTS.md'], untrackedCandidates:['src/new.ts'], requiredUntracked:[{path:'.flowcairn.json', hash:'d'.repeat(64)}], snapshotHash:'c'.repeat(64)}};
-  const fixture = await mockApi(page, snapshot(), {emptyUntilIntake:true, projectContext:context});
-  await page.goto(`/#session=${token}`);
-  await page.getByLabel('Задача', {exact:true}).fill('Исправить поиск');
-  await expect(page.getByRole('button', {name:'Составить план'})).toBeDisabled();
-  await expect(page.getByText('Чтобы составить план, подтвердите исходный снимок изменений ниже.')).toBeVisible();
-  await expect(page.getByRole('checkbox', {name:'Включить перечисленные изменения в исходный снимок'})).toBeVisible();
-  await expect(page.getByRole('region', {name:'Исходный снимок'})).toContainText('package.json');
-  const mandatory = page.getByRole('list', {name:'Обязательные файлы'});
-  await expect(mandatory).toBeVisible();
-  await expect(mandatory).toContainText('.flowcairn.json');
-  await expect(mandatory).toContainText('dddddddddddd');
-  await expect(page.getByRole('checkbox', {name:'.flowcairn.json', exact:true})).toHaveCount(0);
-  const file = page.getByRole('checkbox', {name:'src/new.ts', exact:true});
-  await expect(file).not.toBeChecked();
-  const consent = page.getByRole('checkbox', {name:'Включить перечисленные изменения в исходный снимок'});
-  await consent.check();
-  await file.check();
-  await expect(consent).not.toBeChecked();
-  await consent.check();
-  await page.getByRole('button', {name:'Составить план'}).click();
-  await expect(page.locator('.react-flow')).toBeVisible();
-  const body = fixture.calls.find(call => call.action === 'intake').body;
-  expect(body.snapshot).toBe(true);
-  expect(body.snapshotHash).toBe(context.bootstrap.snapshotHash);
-  expect(body.includeUntracked).toEqual(['src/new.ts']);
-  expect(body.permissions).toBeUndefined();
-});
-
 
 test('replan labels and visibility come from backend capabilities', async ({page}) => {
   const current = snapshot();

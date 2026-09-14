@@ -20,7 +20,8 @@ export type CapabilityName =
   | 'stop'
   | 'requestReplan'
   | 'openReceipt'
-  | 'rerunCheck';
+  | 'rerunCheck'
+  | 'revisePlan';
 
 export interface Capability {
   label?: string;
@@ -54,6 +55,8 @@ export interface CheckResult {
 }
 
 export interface GraphNodeSnapshot {
+  sourceRunId?: string;
+  sourcePlanHash?: string;
   id: string;
   title: string;
   outcome: string;
@@ -91,11 +94,28 @@ export interface GateSnapshot {
   expiresAt: number;
 }
 
+export interface WorkflowProgress {
+  nodeId: string;
+  title: string;
+  action: 'ai-analyze' | 'ai-plan';
+  outcome?: string;
+  attempt?: number;
+  durationMs?: number | null;
+  status: RunStatus;
+  sourceRunId: string;
+  planHash: string;
+  receiptIds: string[];
+  artifacts: ArtifactSummary[];
+}
 export interface Snapshot {
+  workflowProgress?: WorkflowProgress[];
   phase?: 'planning' | 'execution';
+  workflow?: 'autonomous' | null;
+  successorRunId?: string | null;
+  completion?: 'ready-for-review' | null;
   schemaVersion: 2;
   runId: string;
-  task?: { id: string; goal: string; scope: string[]; acceptance: string[] };
+  task?: { id: string; goal: string; title?: string; description?: string; taskNumber?: string; scope: string[]; acceptance: string[] };
   planVersion?: number;
   planHash?: string;
   revision?: number;
@@ -234,6 +254,7 @@ export interface ControlRequest {
   challenge?: string;
   draft?: { nodes: unknown[] };
   reason?: string;
+  feedback?: string;
 }
 
 export interface TaskInput {
@@ -296,9 +317,20 @@ export interface ProjectContext {
   ai: { provider: string | null; model: string | null };
   capabilities: { intake: Capability };
 }
-export interface IntakeInput extends IntakeOptions {
-  prompt: string;
+export interface TaskFields {
+  title: string;
+  description: string;
+  taskNumber: string;
+}
+export interface IntakeInput extends TaskFields {
   operationId: string;
   contextHash: string;
-  scope?: string[];
+}
+
+export interface OnboardingStatus {
+  configured: boolean;
+  profileHash: string | null;
+  providers: Array<{id: string; label: string; supported: boolean; reason: string | null}>;
+  values: { provider: string; model: string | null; modelMode: string; reasoningEffort: string | null; testPolicy: string; coverage: boolean; readConsent: boolean };
+  limitations: string[];
 }
