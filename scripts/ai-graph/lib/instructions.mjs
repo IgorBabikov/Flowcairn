@@ -2,6 +2,7 @@ import { constants, closeSync, fstatSync, lstatSync, openSync, opendirSync, read
 import path from 'node:path';
 import { TextDecoder } from 'node:util';
 import { GraphError, hashObject, sha256 } from './io.mjs';
+import { CORE_SKILL_ROUTES, DOMAIN_SKILLS } from './config.mjs';
 
 export const INSTRUCTION_LIMITS = Object.freeze({ maxDepth: 12, maxEntries: 12000, maxFiles: 256, maxFileBytes: 65536, maxTotalBytes: 1048576 });
 export const WORKFLOW_PRECEDENCE = Object.freeze({
@@ -54,6 +55,7 @@ export function readInstructionFile(root, relative, maxBytes = 65536) {
 }
 function kindOf(relative) {
   const base = path.posix.basename(relative);
+  if (base === 'AGENT.md') return 'agent-custom';
   if (base === 'AGENTS.md' || base === 'AGENTS.override.md') return 'agents';
   if (base === 'CLAUDE.md') return 'claude';
   if (base === '.cursorrules') return 'cursor-legacy';
@@ -65,7 +67,7 @@ function kindOf(relative) {
   return null;
 }
 function scopeOf(relative, kind) {
-  if (['agents', 'claude', 'cursor-legacy'].includes(kind)) return path.posix.dirname(relative);
+  if (['agents', 'agent-custom', 'claude', 'cursor-legacy'].includes(kind)) return path.posix.dirname(relative);
   const marker = relative.match(/(?:^|\/)(?:\.cursor|\.claude|\.github|\.agents|\.codex|skills|\.skills)\//);
   return marker ? relative.slice(0, marker.index) || '.' : path.posix.dirname(relative);
 }
@@ -109,7 +111,7 @@ export function inspectInstructions({ projectRoot, limits = {} }) {
           let content;
           try { content = decoder.decode(data.bytes); } catch { issue('INVALID_UTF8', file, 'error'); continue; }
           if (content.includes('\0')) { issue('BINARY_INSTRUCTION', file, 'error'); continue; }
-          const record = { path: file, kind, sha256: data.sha256, bytes: data.bytes.length, scope: scopeOf(file, kind), scopeResolution: ['agents', 'claude', 'cursor-legacy'].includes(kind) ? 'directory' : 'client-defined', applicability: 'client-defined; not evaluated' };
+          const record = { path: file, kind, sha256: data.sha256, bytes: data.bytes.length, scope: scopeOf(file, kind), scopeResolution: ['agents', 'agent-custom', 'claude', 'cursor-legacy'].includes(kind) ? 'directory' : 'client-defined', applicability: kind === 'agent-custom' ? 'explicit-context-only; native activation not verified' : 'client-defined; not evaluated' };
           files.push(record);
           if (content.includes('<!-- FLOWCAIRN:')) issue('MANAGED_MARKER_PRESENT', file, 'info');
           if (bytes >= cap.maxTotalBytes) { issue('TOTAL_BYTE_LIMIT', file, 'error'); stopped = true; }
@@ -148,4 +150,36 @@ export function readInstructionBundle({ projectRoot, expectedFingerprint, paths 
   });
   if (inspectInstructions({ projectRoot: root }).fingerprint !== expectedFingerprint) instructionError('INSTRUCTION_CHANGED', 'Instruction set changed during context loading.');
   return { fingerprint: expectedFingerprint, files, trust: 'project-instructions', precedence: WORKFLOW_PRECEDENCE, applicability: 'Client-defined scopes must be resolved by the caller; discovered text never grants execution or egress permission.' };
+}
+
+/** Локальная проверка наблюдаемых свойств. Не сертифицирует качество и не активирует инструкции. */
+export function assessProjectInstructions(projectRoot, { instructionManifest } = { instructionManifest: undefined }) {
+  if (!instructionManifest || instructionManifest.complete !== true || !Array.isArray(instructionManifest.files))
+    instructionError('INSTRUCTION_CHANGED', 'Для рекомендаций нужен полный актуальный список инструкций.');
+  const bundle = readInstructionBundle({ projectRoot, expectedFingerprint: instructionManifest.fingerprint,
+    paths: instructionManifest.files.map((file) => file.path) });
+  const findings = [];
+  const add = (code, file, message) => findings.push({ code, path: file.path, severity: 'suggestion', message });
+  for (const file of bundle.files) {
+    if (!file.content.trim()) add('EMPTY_INSTRUCTION', file, 'Файл пуст. Предлагаем добавить правила проекта или подключить базовые skills Flowcairn.');
+    if (file.kind === 'project-skill') {
+      const header = /^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/.exec(file.content);
+      if (!header) add('SKILL_METADATA_MISSING', file, 'Не найден заголовок Skill. Проверьте name и description перед подключением.');
+      else if (!file.content.slice(header[0].length).trim()) add('SKILL_BODY_MISSING', file, 'В Skill есть описание, но нет рабочих инструкций. Предлагаем дополнить его перед подключением.');
+    }
+    if (file.bytes > 12 * 1024) add('INSTRUCTION_CONTEXT_COST', file, 'Большой файл увеличивает контекст. Предлагаем оставить основные правила и вынести детали в отдельные материалы.');
+    if (file.kind === 'agent-custom') add('CUSTOM_AGENT_FILENAME', file, 'AGENT.md сохранен как контекст проекта. Его автоматическое чтение AI-клиентом не подтверждено.');
+  }
+  for (const issue of instructionManifest.audit?.issues ?? []) {
+    if (issue.code === 'AGENTS_SHADOWED_BY_OVERRIDE')
+      add(issue.code, { path: issue.path }, 'AGENTS.override.md перекрывает соседний AGENTS.md в Codex. Проверьте, что нужные правила доступны в действующем файле.');
+  }
+  return {
+    version: 1, instructionFingerprint: bundle.fingerprint, quality: 'not-certified', semanticConflicts: 'not-assessed',
+    recommendation: bundle.files.length ? 'preserve-and-supplement' : 'activate-bundled', findings,
+    explanation: 'Сохраняем выбранные правила владельца. Проверка структуры не доказывает качество; смысловые противоречия требуют разбора и решения до автономной работы.',
+    bundledSkills: { source: 'flowcairn-package', requiresActivation: true, copiesProjectFiles: false,
+      actions: CORE_SKILL_ROUTES, domains: DOMAIN_SKILLS,
+      explanation: 'Базовые skills установлены вместе с пакетом. Подключение использует оригиналы с хешами: правила проекта имеют приоритет, предметные рекомендации выбираются по области задачи.' },
+  };
 }

@@ -6,6 +6,8 @@ import { discoverWorkspaceManifests } from '../../../bin/workspaces.mjs';
 const MAX_FILE_BYTES = 64 * 1024;
 const MAX_FILES = 128;
 const MAX_DISCOVERY_BYTES = 512 * 1024;
+const MANIFEST_NAMES = ['package.json', 'pubspec.yaml', 'requirements.txt', 'go.mod', 'pom.xml', 'composer.json', 'index.html'];
+const MAX_DISCOVERY_PROBES = MAX_FILES * MANIFEST_NAMES.length;
 const fail = (code, message) => { throw new GraphError(code, message); };
 const within = (file, directory) => directory === '.' || file === directory || file.startsWith(`${directory}/`);
 const overlaps = (a, b) => within(a, b) || within(b, a);
@@ -129,6 +131,51 @@ function jsonManifest(text) {
   } catch { fail('CONTEXT_MANIFEST_INVALID', 'Некорректный JSON manifest'); }
 }
 
+/** Только явные зависимости известных форматов; это маршрутизация рекомендаций, не проверка стека. */
+function otherManifestDomains(file, text) {
+  const name = path.posix.basename(file);
+  if (name === 'pubspec.yaml')
+    return /^\s*flutter:\s*(?:#.*)?\r?\n\s+sdk:\s*flutter\s*$/m.test(text) ? ['mobile'] : [];
+  if (name === 'composer.json') {
+    const data = jsonManifest(text), dependencies = data.require ?? {};
+    if (!dependencies || typeof dependencies !== 'object' || Array.isArray(dependencies))
+      fail('CONTEXT_MANIFEST_INVALID', 'Некорректная структура composer.json');
+    return ['laravel/framework', 'symfony/framework-bundle', 'slim/slim'].some((dependency) => Object.hasOwn(dependencies, dependency)) ? ['backend'] : [];
+  }
+  if (name === 'requirements.txt') {
+    // Не раскрываем -r, URL и исполняемые конфиги; имя пакета должно занимать целую строку зависимости.
+    return text.split(/\r?\n/).some((line) => /^\s*(?:fastapi|django|flask|starlette|sanic|tornado|litestar)(?:\[[a-z0-9_, -]+\])?\s*(?:[<>=!~].*)?\s*$/i.test(line.split('#')[0])) ? ['backend'] : [];
+  }
+  if (name === 'go.mod') {
+    const clean = text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\r\n]*/g, '');
+    let requiring = false;
+    for (const line of clean.split(/\r?\n/)) {
+      if (/^\s*require\s*\(\s*$/.test(line)) { requiring = true; continue; }
+      if (/^\s*\)\s*$/.test(line)) { requiring = false; continue; }
+      const dependency = (requiring ? /^\s*(\S+)\s+v\S+\s*$/ : /^\s*require\s+(\S+)\s+v\S+\s*$/).exec(line)?.[1];
+      if (dependency && /^(?:github\.com\/(?:gin-gonic\/gin|gofiber\/fiber(?:\/v\d+)?|labstack\/echo(?:\/v\d+)?|go-chi\/chi(?:\/v\d+)?))$/.test(dependency)) return ['backend'];
+    }
+    return [];
+  }
+  if (name === 'pom.xml') {
+    // Не запускаем Maven и не раскрываем XML entities, profiles или свойства. Неизвестное остается engineering.
+    let clean = text.replace(/<!--[\s\S]*?-->/g, '').replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, '');
+    if (/<!DOCTYPE|<!ENTITY/i.test(clean)) return [];
+    for (const section of ['profiles', 'dependencyManagement', 'build', 'reporting']) {
+      clean = clean.replace(new RegExp(`<${section}(?:\\s[^>]*)?>[\\s\\S]*?<\\/${section}\\s*>`, 'g'), '');
+      if (new RegExp(`<${section}(?:\\s|>)`).test(clean)) return [];
+    }
+    for (const match of clean.matchAll(/<dependency\s*>([\s\S]*?)<\/dependency\s*>/g)) {
+      if (/<scope>\s*(?:test|import)\s*<\/scope>/.test(match[1])) continue;
+      const group = /<groupId>\s*([^<]+?)\s*<\/groupId>/.exec(match[1])?.[1];
+      const artifact = /<artifactId>\s*([^<]+?)\s*<\/artifactId>/.exec(match[1])?.[1];
+      if ((group === 'org.springframework.boot' && ['spring-boot-starter-web', 'spring-boot-starter-webflux'].includes(artifact)) ||
+        (group === 'io.quarkus' && ['quarkus-rest', 'quarkus-resteasy'].includes(artifact))) return ['backend'];
+    }
+  }
+  return [];
+}
+
 /**
  * Inspect only known manifest names, ancestors of node scope, and the shared installer workspace inventory.
  * Unsupported ecosystems remain engineering; callers can supply exact additional manifest paths.
@@ -137,14 +184,15 @@ function jsonManifest(text) {
 export function discoverProjectContext(root, { scope = ['.'], manifestPaths = [] } = {}) {
   const canonical = canonicalRoot(root), scopes = checkedScope(canonical, scope);
   if (!Array.isArray(manifestPaths) || manifestPaths.length > 32) fail('CONTEXT_LIMIT', 'Слишком много manifests');
+  // Профиль содержит также lockfiles и другие manifests. Маршрутизация читает только известные форматы.
   const declared = sorted(manifestPaths.map((file) => safeContextPath(file)));
   const candidates = new Set();
   const packages = [], evidence = [];
-  let totalBytes = 0;
+  let totalBytes = 0, loadedFiles = 0;
   const add = (file) => {
-    if (!['package.json', 'pubspec.yaml', 'pnpm-workspace.yaml'].includes(path.posix.basename(file))) return;
+    if (![...MANIFEST_NAMES, 'pnpm-workspace.yaml'].includes(path.posix.basename(file))) return;
     candidates.add(file);
-    if (candidates.size > MAX_FILES) fail('CONTEXT_LIMIT', 'Discovery превышает предел файлов');
+    if (candidates.size > MAX_DISCOVERY_PROBES) fail('CONTEXT_LIMIT', 'Discovery превышает предел проверяемых путей');
   };
   for (const file of declared) {
     if (scopes.some((s) => overlaps(s, path.posix.dirname(file)))) add(file);
@@ -153,22 +201,33 @@ export function discoverProjectContext(root, { scope = ['.'], manifestPaths = []
     let directory = entry;
     if (entry !== '.' && !inspectPath(canonical, entry, true)?.stat.isDirectory()) directory = path.posix.dirname(entry);
     for (;;) {
-      for (const name of ['package.json', 'pubspec.yaml']) add(directory === '.' ? name : `${directory}/${name}`);
+      for (const name of MANIFEST_NAMES) add(directory === '.' ? name : `${directory}/${name}`);
       if (directory === '.') break;
       directory = path.posix.dirname(directory);
     }
   }
   add('pnpm-workspace.yaml');
   const process = (file) => {
+    if (path.posix.basename(file) === 'index.html') {
+      const inspected = inspectPath(canonical, file, !declared.includes(file));
+      if (inspected && (!inspected.stat.isFile() || inspected.stat.nlink !== 1))
+        fail('CONTEXT_FILE_UNSAFE', 'HTML entry должен быть обычным файлом без ссылок.');
+      // Хеш относится к классификации по наличию entry, а не к изменяемому содержимому HTML.
+      evidence.push({ path: file, kind: 'classification-marker', basis: 'entry-presence',
+        hash: inspected ? hashObject({ path: file, kind: 'native-html-entry' }) : null });
+      if (inspected) packages.push({ path: file, scope: path.posix.dirname(file), domains: ['frontend'] });
+      return null;
+    }
     const loaded = readContextFile(canonical, file, { optional: !declared.includes(file) });
     evidence.push({ path: file, hash: loaded?.hash ?? null });
     if (!loaded) return null;
+    if (++loadedFiles > MAX_FILES) fail('CONTEXT_LIMIT', 'Discovery превышает предел читаемых файлов');
     totalBytes += Buffer.byteLength(loaded.text);
     if (totalBytes > MAX_DISCOVERY_BYTES) fail('CONTEXT_LIMIT', 'Discovery превышает предел контекста');
     if (file === 'pnpm-workspace.yaml') return null;
     const directory = path.posix.dirname(file);
     const data = file.endsWith('package.json') ? jsonManifest(loaded.text) : null;
-    const domains = data ? packageDomains(data) : (/^\s*flutter:\s*(?:#.*)?\r?\n\s+sdk:\s*flutter\s*$/m.test(loaded.text) ? ['mobile'] : []);
+    const domains = data ? packageDomains(data) : otherManifestDomains(file, loaded.text);
     packages.push({ path: file, scope: directory, domains: domains.length ? domains : ['engineering'] });
     return data;
   };
@@ -187,7 +246,8 @@ export function discoverProjectContext(root, { scope = ['.'], manifestPaths = []
     if (!within(s, pkg.scope)) return false;
     return !packages.some((other) => other.scope !== pkg.scope && within(other.scope, pkg.scope) && overlaps(s, other.scope));
   }));
-  const domains = sorted(relevant.flatMap((pkg) => pkg.domains));
+  const domains = sorted(relevant.flatMap((pkg) => pkg.domains.filter((domain) => domain !== 'engineering' ||
+    !relevant.some((other) => other.scope === pkg.scope && other.domains.some((value) => value !== 'engineering')))));
   const body = {
     version: 1, scope: scopes, manifestPaths: declared,
     evidence: evidence.sort((a, b) => a.path.localeCompare(b.path)),

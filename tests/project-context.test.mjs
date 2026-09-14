@@ -34,6 +34,80 @@ test('fullstack package selects both domains; react-native does not imply browse
   assert.deepEqual(discoverProjectContext(f.root).domains, ['mobile']);
 });
 
+for (const [file, content] of [
+  ['requirements.txt', '# Backend dependencies\nfastapi[standard]>=0.115\n'],
+  ['go.mod', 'module example.invalid/api\n\ngo 1.23\nrequire (\n github.com/gin-gonic/gin v1.10.0\n)\n'],
+  ['pom.xml', '<project><dependencies><dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-web</artifactId></dependency></dependencies></project>'],
+  ['composer.json', JSON.stringify({ require: { 'laravel/framework': '^12' } })],
+]) {
+  test(`backend evidence supports ${file} without executing configuration`, (t) => {
+    const f = fixture(t); f.write(file, content); f.pkg('package.json', { flowcairn: '*' });
+    const context = discoverProjectContext(f.root);
+    assert.deepEqual(context.domains, ['backend']);
+    assert.ok(context.evidence.find((item) => item.path === file)?.hash);
+    assert.equal(JSON.stringify(context).includes(content), false);
+    f.write(file, content + '\n');
+    assert.throws(() => verifyProjectContext(f.root, context), { code: 'CONTEXT_DRIFT' });
+  });
+}
+
+test('backend classification ignores dependency comments and unrelated manifests', (t) => {
+  const f = fixture(t); f.write('requirements.txt', '# fastapi>=1\nnumpy>=2\n');
+  f.write('go.mod', 'module example.invalid/lib\n// require github.com/gin-gonic/gin v1.10.0\n');
+  f.write('pom.xml', '<project><!-- <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-web</artifactId></dependency> --></project>');
+  assert.deepEqual(discoverProjectContext(f.root).domains, ['engineering']);
+  f.pkg('apps/web/package.json', { vue: '*' }); f.write('apps/web/src/index.js', '');
+  f.write('apps/api/requirements.txt', 'fastapi>=1\n');
+  const context = discoverProjectContext(f.root, { scope: ['apps/web/src'], manifestPaths: ['apps/api/requirements.txt'] });
+  assert.deepEqual(context.domains, ['frontend']);
+  assert.ok(!context.evidence.some((item) => item.path === 'apps/api/requirements.txt'));
+});
+
+test('profile lockfiles and unsupported formats remain outside classification reads', (t) => {
+  const f = fixture(t); f.write('settings.py', 'raise Exception("must not execute")');
+  f.write('package-lock.json', 'x'.repeat(65537));
+  const context = discoverProjectContext(f.root, { manifestPaths: ['settings.py', 'package-lock.json'] });
+  assert.deepEqual(context.domains, ['engineering']);
+  assert.ok(!context.evidence.some((item) => ['settings.py', 'package-lock.json'].includes(item.path)));
+});
+
+test('native HTML entry point selects frontend without framework dependencies and stays scoped', (t) => {
+  const f = fixture(t); f.pkg('package.json', { flowcairn: '*' });
+  f.write('index.html', '<!doctype html><html><body><form></form></body></html>');
+  assert.deepEqual(discoverProjectContext(f.root).domains, ['frontend']);
+  f.write('requirements.txt', 'fastapi>=1');
+  assert.deepEqual(discoverProjectContext(f.root).domains, ['backend', 'frontend']);
+  f.write('api/requirements.txt', 'flask>=3'); f.write('api/app.py', '');
+  assert.deepEqual(discoverProjectContext(f.root, { scope: ['api/app.py'] }).domains, ['backend']);
+  const context = discoverProjectContext(f.root, { scope: ['index.html'] });
+  f.write('index.html', '<!doctype html><html><body>Changed</body></html>');
+  assert.deepEqual(verifyProjectContext(f.root, context), context);
+  assert.equal(context.evidence.find((item) => item.path === 'index.html').basis, 'entry-presence');
+  rmSync(path.join(f.root, 'index.html'));
+  assert.throws(() => verifyProjectContext(f.root, context), { code: 'CONTEXT_DRIFT' });
+});
+
+test('unresolved Maven profiles and managed or test dependencies do not imply backend', (t) => {
+  const f = fixture(t);
+  const dependency = '<dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-web</artifactId></dependency>';
+  for (const section of ['profiles', 'dependencyManagement', 'build']) {
+    f.write('pom.xml', `<project><${section}>${dependency}</${section}></project>`);
+    assert.deepEqual(discoverProjectContext(f.root).domains, ['engineering']);
+  }
+  f.write('pom.xml', `<project><dependencies>${dependency.replace('</dependency>', '<scope>test</scope></dependency>')}</dependencies></project>`);
+  assert.deepEqual(discoverProjectContext(f.root).domains, ['engineering']);
+});
+
+test('bounded absent manifest probes preserve multi-path task applicability', (t) => {
+  const f = fixture(t);
+  const scope = Array.from({ length: 8 }, (_, index) => `module-${index}/src/components/new.js`);
+  const context = discoverProjectContext(f.root, { scope });
+  assert.deepEqual(context.domains, ['engineering']);
+  assert.deepEqual(context.scope, scope);
+  f.write('module-3/requirements.txt', 'fastapi>=1');
+  assert.throws(() => verifyProjectContext(f.root, context), { code: 'CONTEXT_DRIFT' });
+});
+
 test('mixed workspace selects nearest package and does not inherit root or sibling norms', (t) => {
   const f = fixture(t); f.pkg('package.json', { express: '*' }, { workspaces: ['apps/*'] });
   f.pkg('apps/web/package.json', { vue: '*' }); f.write('apps/web/src/index.js', '');

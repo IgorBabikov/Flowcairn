@@ -4,7 +4,7 @@ import { mkdtempSync, realpathSync, mkdirSync, writeFileSync, readFileSync, rmSy
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { inspectInstructions, readInstructionBundle, readInstructionFile } from '../scripts/ai-graph/lib/instructions.mjs';
+import { inspectInstructions, readInstructionBundle, readInstructionFile, assessProjectInstructions } from '../scripts/ai-graph/lib/instructions.mjs';
 import { activateIntegration, inspectIntegration, INTEGRATION_JOURNAL, INTEGRATION_LOCK, replaceIntegrationFile } from '../scripts/ai-graph/lib/integration.mjs';
 import { uninstallIntegration, assertUninstallSafe } from '../scripts/ai-graph/lib/uninstall.mjs';
 function fixture(t) {
@@ -18,6 +18,40 @@ function fixture(t) {
   const uninstall = () => uninstallIntegration(safety);
   return { root, write, read, inspect, activate, uninstall, safety };
 }
+test('AGENT.md is detected as owner context without claiming native client activation', (t) => {
+  const f = fixture(t); f.write('AGENT.md', 'Правила владельца'); f.write('src/AGENT.md', 'Локальные правила');
+  const manifest = f.inspect();
+  assert.equal(manifest.files.length, 2);
+  assert.equal(manifest.files[0].kind, 'agent-custom');
+  assert.equal(manifest.files[1].scope, 'src');
+  assert.equal(manifest.files[0].applicability, 'explicit-context-only; native activation not verified');
+  f.activate(); f.uninstall();
+  assert.equal(f.read('AGENT.md').toString(), 'Правила владельца');
+});
+test('instruction assessment returns advisory metadata and never certifies or replaces owner rules', (t) => {
+  const f = fixture(t); f.write('AGENT.md', '');
+  f.write('skills/custom/SKILL.md', '---\nname: custom\ndescription: Local rules\n---\n');
+  const manifest = f.inspect(), before = f.read('AGENT.md');
+  const report = assessProjectInstructions(f.root, { instructionManifest: manifest });
+  assert.equal(report.quality, 'not-certified');
+  assert.equal(report.recommendation, 'preserve-and-supplement');
+  assert.ok(report.findings.some((finding) => finding.code === 'EMPTY_INSTRUCTION'));
+  assert.ok(report.findings.some((finding) => finding.code === 'SKILL_BODY_MISSING'));
+  assert.equal(report.bundledSkills.source, 'flowcairn-package');
+  assert.equal(report.bundledSkills.requiresActivation, true);
+  assert.equal(report.bundledSkills.copiesProjectFiles, false);
+  assert.deepEqual(f.read('AGENT.md'), before);
+  assert.ok(!JSON.stringify(report).includes('Local rules'));
+  f.write('AGENT.md', 'changed');
+  assert.throws(() => assessProjectInstructions(f.root, { instructionManifest: manifest }), { code: 'INSTRUCTION_CHANGED' });
+});
+test('empty project offers package skills without inventing missing role or quality evidence', (t) => {
+  const f = fixture(t);
+  const report = assessProjectInstructions(f.root, { instructionManifest: f.inspect() });
+  assert.equal(report.recommendation, 'activate-bundled');
+  assert.equal(report.semanticConflicts, 'not-assessed');
+  assert.equal(existsSync(path.join(f.root, 'skills')), false);
+});
 test('discovery covers mixed root/scoped clients and project Skills, never reads secret/config/script files', (t) => {
   const f = fixture(t);
   for (const name of ['AGENTS.md', 'CLAUDE.md', '.cursorrules', 'src/AGENTS.md', '.cursor/rules/typescript.mdc', '.github/copilot-instructions.md', '.github/instructions/code.instructions.md', '.agents/skills/review/SKILL.md', '.claude/rules/code.md']) f.write(name, '# Local project instructions\n');
