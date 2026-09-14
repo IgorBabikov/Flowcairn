@@ -127,3 +127,12 @@ test('Docker-проверки готовятся только после явн�
   assert.equal(accepted.prepared, true);
   assert.equal(prepared, 1);
 });
+
+test('handoff открывает проверенный результат для личного ревью без автоматического принятия', async () => {
+  const { canHandoff } = await import('../bin/flowcairn.mjs');
+  const snapshot = { status: 'passed', integrity: { valid: true }, finalDisposition: null };
+  assert.equal(canHandoff(snapshot, { completion: 'ready-for-review' }), true);
+  assert.equal(canHandoff({ ...snapshot, integrity: { valid: false } }, { completion: 'ready-for-review' }), false);
+  assert.equal(canHandoff({ ...snapshot, status: 'failed' }, { completion: 'ready-for-review' }), false);
+  assert.equal(canHandoff(snapshot, { completion: null }), false);
+});

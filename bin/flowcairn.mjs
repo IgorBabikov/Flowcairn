@@ -591,13 +591,18 @@ export async function doctorProject(input) {
   };
 }
 
+export function canHandoff(snapshot, state) {
+  return snapshot.status === 'passed' && snapshot.integrity?.valid === true &&
+    (snapshot.finalDisposition === 'accepted' || state.completion === 'ready-for-review');
+}
+
 export async function handoff(input, runId) {
   const root = projectRoot(input),
     service = await WorkflowService.open({ root });
   const snapshot = service.snapshot(runId);
-  if (snapshot.finalDisposition !== 'accepted' || snapshot.status !== 'passed')
-    fail('ACCEPT_REQUIRED', 'Сначала проверьте и примите результат Graph.');
   const state = service.store.readRun(runId);
+  if (!canHandoff(snapshot, state))
+    fail('ACCEPT_REQUIRED', 'Нужен проверенный результат, готовый к личному ревью, или явное принятие Graph.');
   return {
     runId,
     status: snapshot.status,
