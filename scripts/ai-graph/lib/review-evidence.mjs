@@ -13,14 +13,14 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
-import { ArtifactSchema, Hash, Id, ReceiptSchema, assertJsonBounds } from './schemas.mjs';
+import { ArtifactSchema, Hash, Id, ReceiptSchema, TaskSpecSchema, GraphPlanSchema, assertJsonBounds } from './schemas.mjs';
 import { GraphError, canonicalJson, hashObject, sha256 } from './io.mjs';
 import { isWithin, pathAllowed } from './registry.mjs';
 
 // Separate from the 32 KiB prior-evidence / 128 KiB prompt budgets; never truncate a diff.
 export const MAX_REVIEW_EVIDENCE_BYTES = 512 * 1024;
 const Artifact = z.strictObject({ hash: Hash, artifact: ArtifactSchema });
-const Evidence = z.strictObject({
+const CurrentEvidence = z.strictObject({
   version: z.literal(1),
   runId: Id,
   taskHash: Hash,
@@ -38,6 +38,8 @@ const Evidence = z.strictObject({
     )
     .max(100),
 });
+const PreviousExecution = z.strictObject({ task: TaskSpecSchema, plan: GraphPlanSchema, evidence: CurrentEvidence });
+const Evidence = CurrentEvidence.extend({ previousExecutions: z.array(PreviousExecution).max(2).optional() });
 function fail(message) {
   throw new GraphError('REVIEW_EVIDENCE_INVALID', message);
 }
@@ -135,6 +137,25 @@ export function validateReviewEvidence(value, { node, task, plan }) {
     )
       fail('Diff не содержит полного проверяемого текста');
   }
+  const previous = evidence.previousExecutions ?? [];
+  for (const entry of previous) {
+    const priorNode = entry.plan.nodes.find((candidate) => candidate.action.id === 'ai-review');
+    if (!priorNode || plan.workflow !== 'autonomous' || entry.plan.workflow !== 'autonomous' ||
+        entry.plan.runtimeHash !== plan.runtimeHash || entry.plan.version >= plan.version ||
+        hashObject(entry.task.scope) !== hashObject(task.scope) || entry.task.id !== task.id ||
+        entry.task.instructions !== task.instructions || hashObject(entry.task.checks) !== hashObject(task.checks))
+      fail('Предыдущая версия не относится к согласованной задаче');
+    validateReviewEvidence(entry.evidence, { node: priorNode, task: entry.task, plan: entry.plan });
+    if (entry.evidence.implementations.some((implementation) => implementation.receipt.changedFiles.some((file) =>
+      !pathAllowed(file, task) || !node.resources.reads.some((scope) => isWithin(file, scope)))))
+      fail('Предыдущие изменения выходят за текущий read scope');
+  }
+  const ordered = [...previous.map((entry) => entry.evidence), evidence];
+  for (let index = 1; index < ordered.length; index++) {
+    const before = ordered[index - 1].implementations.at(-1)?.receipt.afterFingerprint;
+    const after = ordered[index].implementations[0]?.receipt.beforeFingerprint;
+    if (before && after && before !== after) fail('Цепочка fingerprint между версиями неполная');
+  }
   const content = canonicalJson(evidence);
   if (Buffer.byteLength(content) > MAX_REVIEW_EVIDENCE_BYTES)
     throw new GraphError(
@@ -152,6 +173,7 @@ export function buildReviewEvidence({
   fingerprint,
   readReceipt,
   readArtifact,
+  previousExecutions = [],
 }) {
   const implementations = plan.nodes
     .filter((n) => n.action.id === 'ai-implement')
@@ -178,6 +200,7 @@ export function buildReviewEvidence({
       reviewNodeId: node.id,
       workspaceFingerprint: fingerprint.hash,
       implementations,
+      ...(previousExecutions.length ? { previousExecutions } : {}),
     },
     { node, task, plan },
   );

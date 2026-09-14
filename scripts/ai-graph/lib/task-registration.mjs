@@ -221,6 +221,7 @@ export async function createTask(input, taskInput, options = {}) {
     ...(options.operation ? { operationId: options.operation } : {}),
     ...(source ? { sourceOverride: source } : {}),
     ...(options.stage ? { stage: options.stage } : {}),
+    ...(options.workflow ? { workflow: options.workflow } : {}),
     ...(options.naturalIntakeHash ? { naturalIntakeHash: options.naturalIntakeHash } : {}),
     ...(options.actor ? { actor: options.actor } : {}),
   });

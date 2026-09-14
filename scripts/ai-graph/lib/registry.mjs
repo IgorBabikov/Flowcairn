@@ -133,6 +133,14 @@ export function contextPathAllowed(candidate, task) {
 
 /** Instruction files require explicit per-node read declaration, even inside broad source scopes. */
 export function isInstructionPath(candidate) {
-  return /(?:^|\/)(?:AGENTS(?:\.override)?\.md|CLAUDE\.md|\.cursorrules|SKILL\.md)$/.test(candidate) ||
+  return /(?:^|\/)(?:AGENTS?(?:\.override)?\.md|CLAUDE\.md|\.cursorrules|SKILL\.md)$/.test(candidate) ||
     /(?:^|\/)(?:\.cursor\/rules\/.+\.(?:md|mdc)|\.claude\/rules\/.+\.md|\.github\/(?:copilot-instructions\.md|instructions\/.+\.instructions\.md))$/.test(candidate);
+}
+
+/** Машинные зависимости и бинарные материалы сохраняются в source, но не передаются AI как текст. */
+export function isAuxiliaryContextPath(candidate) {
+  const name = candidate.split('/').at(-1).toLowerCase();
+  return ['package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lock', 'bun.lockb',
+    'poetry.lock', 'uv.lock', 'cargo.lock', 'composer.lock', 'gemfile.lock', 'go.sum'].includes(name) ||
+    /\.(?:png|jpe?g|gif|webp|ico|avif|pdf|woff2?|ttf|otf|mp[34]|mov|wav|zip|gz|tgz|wasm|map)$/.test(name);
 }

@@ -9,6 +9,20 @@ const selected = (nodes, skills) => skills.filter((skill) => nodes.some((node) =
 /** The staging graph has no write permission and is never an accepted implementation. */
 export function compilePlanningPlan(task, context) {
   const baseline = compilePlan(task, context).plan;
+  if (context.workflow === 'autonomous') {
+    const analyze = structuredClone(baseline.nodes.find((n) => n.action.id === 'ai-analyze'));
+    analyze.needs = []; analyze.title = 'Анализ задачи и проекта';
+    const planner = structuredClone(analyze), action = resolveAction('ai-plan');
+    Object.assign(planner, { id: 'plan-task', title: 'План реализации', needs: context.analysisArtifact ? [] : [analyze.id],
+      action: { id: action.id, version: action.version, inputs: {} }, skills: [...action.skills] });
+    if (context.resolveSkills) planner.skills = context.resolveSkills(planner, task);
+    if (context.resolveReadPaths) planner.resources.reads = context.resolveReadPaths(planner, task);
+    const terminal = structuredClone(baseline.nodes.find((n) => n.action.id === 'artifact-handoff'));
+    terminal.id = 'plan-ready'; terminal.title = 'План подготовлен'; terminal.needs = [planner.id];
+    const nodes = [...(context.analysisArtifact ? [] : [analyze]), planner, terminal];
+    return validatePlan({ ...baseline, workflow: 'autonomous', autonomy: { maxRepairCycles: 2, maxDurationMs: 1800000 },
+      ...(context.analysisArtifact ? { analysisArtifact: context.analysisArtifact } : {}), stage: 'planning', skills: selected(nodes, context.skills), nodes }, task, context);
+  }
   const approve = structuredClone(baseline.nodes.find((n) => n.action.id === 'human-approve'));
   approve.title = 'Разрешить AI-планирование';
   approve.outcome = 'Подтверждение разрешит выбранному AI прочитать указанный контекст и составить план. Исходники останутся без изменений.';
@@ -75,5 +89,10 @@ export function compileTaskProposal(task, proposalInput, context) {
     if (node.action.id === 'workspace-check') node.needs = [previous];
     nodes.push(node);
   }
-  return validatePlan({ ...baseline, stage: 'execution', nodes, skills: selected(nodes, context.skills) }, task, context);
+  const executable = context.workflow === 'autonomous' ? nodes.filter((n) => n.action.id !== 'human-accept') : nodes;
+  if (context.workflow === 'autonomous') {
+    executable.at(-1).title = 'Готово к личному ревью';
+    executable.at(-1).outcome = 'Реализация, проверки и независимое ревью завершены';
+  }
+  return validatePlan({ ...baseline, stage: 'execution', ...(context.workflow === 'autonomous' ? { workflow: 'autonomous', autonomy: { maxRepairCycles: 2, maxDurationMs: 1800000 } } : {}), nodes: executable, skills: selected(executable, context.skills) }, task, context);
 }

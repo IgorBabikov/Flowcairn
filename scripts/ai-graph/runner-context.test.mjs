@@ -55,7 +55,7 @@ test('AI source and Codex instruction inventory skip verified root/nested depend
   assert.throws(() => RUNNER_TESTING.selectedSourceContext(f.worktree, f.node, f.task, f.profile), (error) => error.code === 'UNSAFE_WORKSPACE_ENTRY');
   const source = RUNNER_TESTING.selectedSourceContext(f.worktree, f.node, f.task, f.profile, f.verified);
   assert.deepEqual(source.map((file) => file.path), ['AGENTS.md', 'src/value.mjs']);
-  assert.deepEqual(RUNNER_TESTING.instructionDenials(f.worktree, f.node, f.profile, f.verified), ['src/AGENTS.md']);
+  assert.deepEqual(RUNNER_TESTING.instructionDenials(f.worktree, f.node, f.profile, f.verified), ['package-lock.json', 'src/AGENTS.md']);
 });
 
 test('source symlinks remain forbidden even when dependency view is verified', (t) => {

@@ -72,24 +72,31 @@ export function validatePlan(
     }
     ancestors.set(id, set);
   }
-  const historicalGates = historical
+  const autonomous = plan.workflow === 'autonomous';
+  const productPlanning = autonomous && plan.stage === 'planning';
+  const historicalGates = historical && !autonomous
     ? plan.nodes.filter((node) => node.success.kind === 'gate')
     : [];
-  const approve = historical
+  const approve = historical && !autonomous
     ? historicalGates.filter((n) => n.needs.length === 0)
     : plan.nodes.filter((n) => n.action.id === 'human-approve');
-  const accept = historical
+  const accept = autonomous
+    ? plan.nodes.filter((node) => node.action.id === 'artifact-handoff')
+    : historical
     ? historicalGates.filter(
         (n) => n.success.kind === 'gate' && ancestors.get(n.id).size === plan.nodes.length - 1,
       )
     : plan.nodes.filter((n) => n.action.id === 'human-accept');
   if (
-    (historical && historicalGates.length !== 2) ||
-    approve.length !== 1 ||
+    (!autonomous && historical && historicalGates.length !== 2) ||
+    approve.length !== (productPlanning ? 0 : 1) ||
     accept.length !== 1 ||
-    approve[0].needs.length
+    (!productPlanning && approve[0].needs.length) ||
+    (autonomous && plan.nodes.some((n) => n.action.id === 'human-accept'))
   )
     reject('INVALID_GATES', 'Нужны один начальный approve-plan и один конечный accept-result');
+  if (autonomous && (!plan.autonomy || plan.autonomy.maxRepairCycles !== 2 || plan.autonomy.maxDurationMs !== 1800000))
+    reject('AUTONOMY_POLICY', 'Нет ограниченной политики автономного выполнения');
   const declaredSkills = new Set(plan.skills.map((s) => s.id));
   const usedSkills = new Set();
   for (const node of plan.nodes) {
@@ -121,7 +128,7 @@ export function validatePlan(
       : Math.min(action.maxAttempts, task.limits.maxAttempts);
     if (node.retry.maxAttempts > maxAttempts)
       reject('UNSAFE_RETRY_POLICY', 'Retry policy превышает безопасный предел');
-    if (node.id !== approve[0].id && !ancestors.get(node.id).has(approve[0].id))
+    if (!productPlanning && node.id !== approve[0].id && !ancestors.get(node.id).has(approve[0].id))
       reject('APPROVAL_BYPASS', 'Node не зависит от approval');
     if (node.id !== accept[0].id && !ancestors.get(accept[0].id).has(node.id))
       reject('ACCEPTANCE_BYPASS', 'Final gate должен ждать все nodes');
@@ -163,7 +170,15 @@ export function validatePlan(
       if (conflict) reject('RESOURCE_CONFLICT', 'Конфликтующие nodes требуют dependency');
     }
   if (!historical && plan.stage === 'planning') {
-    if (plan.nodes.length !== 3 || plan.nodes.filter((n) => n.action.id === 'ai-plan').length !== 1 ||
+    if (autonomous) {
+      const analyze = plan.nodes.filter((n) => n.action.id === 'ai-analyze');
+      const planner = plan.nodes.filter((n) => n.action.id === 'ai-plan');
+      if (planner.length !== 1 || analyze.length !== (plan.analysisArtifact ? 0 : 1) ||
+          (analyze.length && !ancestors.get(planner[0].id).has(analyze[0].id)) ||
+          plan.nodes.some((n) => !['ai-analyze','ai-plan','artifact-handoff'].includes(n.action.id)) ||
+          plan.nodes.some((n) => n.permissions.some((p) => p !== 'ai.read')))
+        reject('INVALID_PLANNING_STAGE', 'Нужны последовательные read-only анализ и план');
+    } else if (plan.nodes.length !== 3 || plan.nodes.filter((n) => n.action.id === 'ai-plan').length !== 1 ||
         plan.nodes.some((n) => !['human-approve', 'ai-plan', 'human-accept'].includes(n.action.id)) ||
         plan.nodes.some((n) => n.permissions.some((permission) => permission !== 'ai.read')))
       reject('INVALID_PLANNING_STAGE', 'Planning допускает только consent, read-only planner и terminal boundary');

@@ -24,12 +24,14 @@ import { GraphError, canonicalJson, sha256 } from './io.mjs';
 import {
   resolveAction,
   contextPathAllowed,
+  isAuxiliaryContextPath,
   isInstructionPath,
   isWithin as isWithinDeclaredPath,
 } from './registry.mjs';
 import {
   AIResultSchema,
   AIPlanningResultSchema,
+  AIAnalysisResultSchema,
   AIReviewResultSchema,
   GraphPlanSchema,
   NodeDefinitionSchema,
@@ -478,7 +480,7 @@ function makeAiCommand({
   try {
     createExclusiveFile(
       schemaFile,
-      `${JSON.stringify(z.toJSONSchema(node.action.id === 'ai-review' ? AIReviewResultSchema : node.action.id === 'ai-plan' ? AIPlanningResultSchema : AIResultSchema))}\n`,
+      `${JSON.stringify(z.toJSONSchema(node.action.id === 'ai-review' ? AIReviewResultSchema : node.action.id === 'ai-plan' ? AIPlanningResultSchema : node.action.id === 'ai-analyze' && plan?.workflow === 'autonomous' ? AIAnalysisResultSchema : AIResultSchema))}\n`,
     );
     createExclusiveFile(resultFile, '');
     reviewFile = reviewBundle ? createReviewEvidenceFile(outputPath, reviewBundle) : null;
@@ -508,13 +510,13 @@ function makeAiCommand({
       '--cd',
       worktree,
       '--model',
-      node.action.id === 'ai-review'
+      node.action.id === 'ai-review' && Reflect.get(profile.ai, 'modelMode') !== 'manual'
         ? (profile.ai.reviewModel ?? profile.ai.model)
         : profile.ai.model,
       '--config',
       'approval_policy="never"',
       '--config',
-      `model_reasoning_effort="${node.action.id === 'ai-review' ? 'high' : 'medium'}"`,
+      `model_reasoning_effort="${Reflect.get(profile.ai, 'modelMode') === 'manual' ? (Reflect.get(profile.ai, 'reasoningEffort') ?? 'medium') : node.action.id === 'ai-review' ? (Reflect.get(profile.ai, 'reviewReasoningEffort') ?? Reflect.get(profile.ai, 'reasoningEffort') ?? 'high') : (Reflect.get(profile.ai, 'reasoningEffort') ?? 'medium')}"`,
       '--config',
       `default_permissions=${tomlString(profileName)}`,
       '--config',
@@ -529,6 +531,7 @@ function makeAiCommand({
     ];
     const prompt = buildPrompt({
       nodeId: node.id,
+      profile,
       task,
       plan,
       skills: renderSkillInstructions(skills),
@@ -556,7 +559,7 @@ function makeAiCommand({
         provider: 'codex',
         cliVersion: CODEX_VERSION,
         model:
-          node.action.id === 'ai-review'
+          node.action.id === 'ai-review' && Reflect.get(profile.ai, 'modelMode') !== 'manual'
             ? (profile.ai.reviewModel ?? profile.ai.model)
             : profile.ai.model,
         sandboxDigest: sha256(
@@ -585,7 +588,7 @@ function sourceFingerprint(worktree, profile, dependencyToolchain = { dependency
 
 function instructionDenials(worktree, node, profile, dependencyToolchain) {
   return sourceFingerprint(worktree, profile, dependencyToolchain).files
-    .filter((file) => isInstructionPath(file.path) && !node.resources.reads.includes(file.path))
+    .filter((file) => isAuxiliaryContextPath(file.path) || (isInstructionPath(file.path) && !node.resources.reads.includes(file.path)))
     .map((file) => file.path);
 }
 
@@ -593,7 +596,7 @@ function selectedSourceContext(worktree, node, task, profile, dependencyToolchai
   const snapshot = sourceFingerprint(worktree, profile, dependencyToolchain);
   const files = snapshot.files.filter(
     (file) =>
-      node.resources.reads.some((scope) => isWithinDeclaredPath(file.path, scope)) &&
+      !isAuxiliaryContextPath(file.path) && node.resources.reads.some((scope) => isWithinDeclaredPath(file.path, scope)) &&
       contextPathAllowed(file.path, task) && (!isInstructionPath(file.path) || node.resources.reads.includes(file.path)),
   );
   if (files.length > 256 || files.reduce((total, file) => total + file.size, 0) > 512 * 1024)
@@ -647,11 +650,11 @@ function makeOpenAiCommand({
     if (reviewFile) verifyReviewEvidenceFile(reviewFile);
     const source = selectedSourceContext(worktree, node, task, profile, dependencyToolchain);
     const model =
-      node.action.id === 'ai-review'
+      node.action.id === 'ai-review' && Reflect.get(profile.ai, 'modelMode') !== 'manual'
         ? (profile.ai.reviewModel ?? profile.ai.model)
         : profile.ai.model;
     const schema = z.toJSONSchema(
-      node.action.id === 'ai-review' ? AIReviewResultSchema : node.action.id === 'ai-plan' ? AIPlanningResultSchema : AIResultSchema,
+      node.action.id === 'ai-review' ? AIReviewResultSchema : node.action.id === 'ai-plan' ? AIPlanningResultSchema : node.action.id === 'ai-analyze' && plan?.workflow === 'autonomous' ? AIAnalysisResultSchema : AIResultSchema,
     );
     // Responses strict mode requires every object property, including nullable/defaulted fields.
     const requireProperties = (value) => {
@@ -668,6 +671,7 @@ function makeOpenAiCommand({
     requireProperties(schema);
     const prompt = buildPrompt({
       nodeId: node.id,
+      profile,
       task,
       plan,
       skills: renderSkillInstructions(skills),

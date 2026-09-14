@@ -1,6 +1,7 @@
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, existsSync } from 'node:fs';
 import path from 'node:path';
+import * as ProjectPolicy from './project.mjs';
 import { RUNTIME_ROOT, loadProjectProfile, projectContextPaths } from './project.mjs';
 import { spawnSync } from 'node:child_process';
 import { GraphError, hashObject, sha256, now } from './io.mjs';
@@ -21,6 +22,7 @@ import {
   ArtifactSchema,
   AIResultSchema,
   AIPlanningResultSchema,
+  AIAnalysisResultSchema,
   NaturalIntakeSchema,
   AIReviewResultSchema,
   assertJsonBounds,
@@ -312,7 +314,7 @@ export class WorkflowService {
     return this.lifecycleRelease ? acquireRuntimeLease({ root: this.root, kind: 'viewer' }) : () => {};
   }
   close() {
-    if (this.pendingMutations || this.active.size || this.intakes.size) return false;
+    if (this.pendingMutations || this.active.size || this.intakes.size || this.drives.size) return false;
     this.lifecycleRelease?.(); this.lifecycleRelease = null; this.closed = true;
     return true;
   }
@@ -328,6 +330,11 @@ export class WorkflowService {
     this.#assertOpen();
     assertJsonBounds(input);
     const body = NaturalIntakeSchema.parse(input);
+    const product = 'title' in body;
+    const legacy = 'prompt' in body ? body : null;
+    const untracked = legacy?.includeUntracked ?? [];
+    const requestedScope = legacy?.scope;
+    const snapshotRequested = legacy?.snapshot;
     const requestHash = hashObject({ body, actor });
     const suffix = hashObject({ operationId: body.operationId, actor }).slice(0, 32);
     const runId = `intake-${suffix}`;
@@ -339,13 +346,15 @@ export class WorkflowService {
     const project = this.project();
     if (body.contextHash !== project.contextHash) fail('STALE_CONTEXT', 'Контекст проекта изменился; обновите описание проекта');
     if (!project.capabilities.intake.allowed) fail('INTAKE_DENIED', project.capabilities.intake.reason);
-    if (body.snapshot && body.snapshotHash !== project.bootstrap?.snapshotHash) fail('STALE_CONTEXT', 'Исходный снимок изменился; подтвердите актуальные файлы');
-    if (body.includeUntracked?.some((file) => !project.bootstrap?.untrackedCandidates.includes(file))) fail('INTAKE_SCOPE', 'Файл не входит в текущий список snapshot candidates');
-    if (!body.scope && project.scopeCandidates.length > 32) fail('INTAKE_SCOPE_LIMIT', 'Выберите не более 32 областей задачи');
-    const inferredScope = unique([...project.scopeCandidates, ...(body.includeUntracked ?? []).filter((file) => file !== '.flowcairn.json').map((file) => file.includes('/') ? file.split('/')[0] : file)]);
-    const task = TaskInputSchema.parse({ id: `TASK-${suffix.toUpperCase()}`, goal: body.prompt.slice(0, 4000),
-      instructions: body.prompt, scope: body.scope ?? inferredScope,
-      contextPaths: project.contextPaths, includeUntracked: body.includeUntracked ?? [], acceptance: [body.prompt.slice(0, 4000)], checks: project.checks });
+    if (product && !this.#hasReadConsent()) fail('ONBOARDING_REQUIRED', 'Завершите настройку и разрешите чтение выбранным AI');
+    if (snapshotRequested && legacy?.snapshotHash !== project.bootstrap?.snapshotHash) fail('STALE_CONTEXT', 'Исходный снимок изменился; подтвердите актуальные файлы');
+    if (untracked.some((file) => !project.bootstrap?.untrackedCandidates.includes(file))) fail('INTAKE_SCOPE', 'Файл не входит в текущий список snapshot candidates');
+    if (!requestedScope && project.scopeCandidates.length > 32) fail('INTAKE_SCOPE_LIMIT', 'Выберите не более 32 областей задачи');
+    const inferredScope = unique([...project.scopeCandidates, ...untracked.filter((file) => file !== '.flowcairn.json').map((file) => file.includes('/') ? file.split('/')[0] : file)]);
+    const task = TaskInputSchema.parse({ id: `TASK-${suffix.toUpperCase()}`, goal: product ? body.title : body.prompt.slice(0, 4000),
+      ...(product ? { taskNumber: body.taskNumber } : {}),
+      instructions: product ? body.description : body.prompt, scope: product ? inferredScope : requestedScope ?? inferredScope,
+      contextPaths: project.contextPaths, includeUntracked: untracked, acceptance: [product ? body.description.slice(0, 4000) : body.prompt.slice(0, 4000)], checks: project.checks });
     if (task.scope.some((file) => !pathAllowed(file, task))) fail('INTAKE_SCOPE', 'Недопустимый scope');
     const pending = this.intakes.get(runId);
     if (pending) {
@@ -374,8 +383,9 @@ export class WorkflowService {
         const { createTask } = await import('./task-registration.mjs');
         const register = this.adapters.registerTask ?? createTask;
         const snapshot = await register(this.root, task, { run: runId, operation: body.operationId, service: this,
-          stage: 'planning', naturalIntakeHash: requestHash, actor, contextHash: body.contextHash, snapshot: body.snapshot, includeUntracked: body.includeUntracked ?? [] });
+          stage: 'planning', ...(product ? { workflow: 'autonomous' } : {}), naturalIntakeHash: requestHash, actor, contextHash: body.contextHash, snapshot: product ? true : snapshotRequested, includeUntracked: untracked });
         this.store.updateRun(reservationId, reservation.revision, (current) => ({ ...current, status: 'finished' }));
+        if (product) this.#schedule(snapshot.runId);
         return snapshot;
       } catch (error) {
         this.store.updateRun(reservationId, reservation.revision, (current) => ({ ...current, status: 'failed' }));
@@ -384,6 +394,213 @@ export class WorkflowService {
     })();
     this.intakes.set(runId, { requestHash, promise });
     return promise;
+  }
+
+  #previousExecutions(state) {
+    if (!state.policyGrant) return [];
+    const previous = [];
+    let runId = state.supersedesRunId;
+    for (let index = 0; index < state.policyGrant.cycle; index++) {
+      if (!runId) fail('POLICY_GRANT', 'Цепочка исправлений неполная');
+      const source = this.#read(runId, { current: false, verifySource: false, verifyBinding: false });
+      if (source.plan.stage !== 'execution' || source.plan.workflow !== 'autonomous') fail('POLICY_GRANT', 'Неверная предыдущая версия');
+      previous.unshift(source);
+      runId = source.state.supersedesRunId;
+    }
+    if (previous[0]?.state.runId !== state.policyGrant.runId) fail('POLICY_GRANT', 'Цепочка исправлений не начинается с согласованного плана');
+    return previous;
+  }
+
+  #reviewHistory(state) {
+    return this.#previousExecutions(state).map((source) => ({ task: source.task, plan: source.plan,
+      evidence: buildReviewEvidence({ state: source.state, task: source.task, plan: source.plan,
+        node: source.plan.nodes.find((node) => node.action.id === 'ai-review'), fingerprint: source.state.workspaceFingerprint,
+        readReceipt: (hash) => ReceiptSchema.parse(this.store.readObject('receipts', hash)), readArtifact: (hash) => this.#artifact(hash),
+      }).evidence }));
+  }
+
+  #executionDeadline(state, plan) {
+    if (plan.workflow !== 'autonomous' || plan.stage !== 'execution' || state.nodes['approve-plan']?.status !== 'passed') return null;
+    const startedAt = state.policyGrant?.startedAt ?? this.store.readObject('receipts', state.nodes['approve-plan'].receipts.at(-1)).finishedAt;
+    return Date.parse(startedAt) + plan.autonomy.maxDurationMs;
+  }
+
+  #workflowProgress(state, plan) {
+    if (plan.workflow !== 'autonomous') return [];
+    const result = new Map();
+    let source = { state, plan };
+    for (let depth = 0; depth < 24; depth++) {
+      if (source.plan.stage === 'planning') {
+        for (const node of source.plan.nodes.filter((n) => ['ai-analyze','ai-plan'].includes(n.action.id))) {
+          if (!result.has(node.action.id)) {
+            const actual = source.state.nodes[node.id];
+            result.set(node.action.id, { nodeId: node.id, title: node.title, outcome: node.outcome, attempt: actual.attempts, durationMs: actual.durationMs, action: node.action.id, status: actual.status,
+              sourceRunId: source.state.runId, planHash: source.state.planHash, receiptIds: actual.receipts,
+              artifacts: actual.artifacts.map((hash) => this.#artifactMetadata(hash)) });
+          }
+        }
+      }
+      if (result.size === 2 || !source.state.supersedesRunId) break;
+      source = this.#read(source.state.supersedesRunId, { current: false, verifySource: false, verifyBinding: false });
+    }
+    return ['ai-analyze','ai-plan'].flatMap((id) => result.has(id) ? [result.get(id)] : []);
+  }
+
+  #hasReadConsent() {
+    return this.adapters.hasReadConsent ? this.adapters.hasReadConsent() === true :
+      typeof Reflect.get(ProjectPolicy, 'hasOnboardingConsent') === 'function' && Reflect.get(ProjectPolicy, 'hasOnboardingConsent')(this.root, this.adapters.project);
+  }
+
+  async onboarding() {
+    const { inspectOnboarding } = await import(new URL('../../../bin/onboarding.mjs', import.meta.url).href);
+    return inspectOnboarding(this.root);
+  }
+
+  #resumeReadyWork() {
+    for (const runId of this.store.listRunIds()) {
+      const raw = this.store.readRun(runId);
+      if (raw.schemaVersion !== 2 || raw.finalDisposition || raw.activeOperation || raw.setupPending || raw.stopRequested ||
+          !['ready','passed'].includes(raw.status)) continue;
+      try {
+        const { state, plan } = this.#read(runId);
+        if (plan.workflow !== 'autonomous' || (plan.stage === 'execution' && state.status === 'passed')) continue;
+        if (plan.stage === 'planning' || state.nodes['approve-plan']?.status === 'passed') this.#schedule(runId);
+      } catch { /* Неисправное или устаревшее выполнение остается доступным только для диагностики. */ }
+    }
+  }
+
+  #schedule(runId) {
+    if (this.drives.has(runId)) return;
+    const promise = new Promise((resolve) => setImmediate(resolve)).then(() => this.#drive(runId)).catch((error) => {
+      const state = this.store.readRun(runId);
+      if (!state.activeOperation) this.#write(state, { failureReason: safeReason(error) });
+    }).finally(() => this.drives.delete(runId));
+    this.drives.set(runId, promise);
+  }
+
+  async #drive(initialRunId) {
+    let runId = initialRunId;
+    // Предел относится ко всему управляющему проходу, даже если адаптер вернул неожиданный state.
+    for (let turn = 0; turn < 12; turn++) {
+      const { state, task, plan } = this.#read(runId);
+      if (state.stopRequested || state.activeOperation || state.finalDisposition || plan.workflow !== 'autonomous') return;
+      const caps = this.#caps(state, plan);
+      const request = { operationId: `auto-${randomUUID()}`, expectedRevision: state.revision, planHash: state.planHash };
+      if (this.#executionDeadline(state, plan) !== null && Date.now() >= this.#executionDeadline(state, plan)) {
+        this.#write(state, { failureReason: 'Истек срок согласованного автономного выполнения; требуется личное ревью' });
+        return;
+      }
+      if (caps.run.run.allowed) {
+        await this.command(runId, 'run', request, { actor: state.actor });
+        continue;
+      }
+      if (plan.stage === 'planning' && state.status === 'passed') {
+        const next = await this.command(runId, 'replan', request, { actor: state.actor });
+        runId = next.runId;
+        continue;
+      }
+      if (plan.stage === 'execution' && state.status === 'failed') {
+        const failed = plan.nodes.filter((node) => state.nodes[node.id].status === 'failed');
+        const repairable = failed.length === 1 && (failed[0].action.id.startsWith('check-') || failed[0].action.id === 'ai-review');
+        const definition = failed[0];
+        const lastId = definition && state.nodes[definition.id].receipts.at(-1);
+        const receipt = lastId && ReceiptSchema.parse(this.store.readObject('receipts', lastId));
+        const semanticReview = definition?.action.id === 'ai-review' && state.nodes[definition.id].artifacts.some((id) => {
+          const artifact = this.#artifact(id);
+          if (artifact.kind !== 'review-findings') return false;
+          const result = AIReviewResultSchema.safeParse(JSON.parse(artifact.content));
+          return result.success && result.data.verdict === 'fail' && result.data.findings.some((finding) => finding.severity === 'blocking');
+        });
+        const knownCheck = definition?.action.id.startsWith('check-') && receipt?.checks.some((check) => check.exitCode !== null && check.exitCode !== 0 && !check.passed);
+        if (!repairable || (!semanticReview && !knownCheck) || receipt?.phase !== 'finished' || !receipt.termination?.stopped || receipt.termination.uncertain) return;
+        const original = state.policyGrant ?? {
+          runId: state.runId, planHash: state.planHash,
+          receiptId: state.nodes['approve-plan'].receipts.at(-1),
+          startedAt: this.store.readObject('receipts', state.nodes['approve-plan'].receipts.at(-1)).finishedAt,
+          cycle: 0,
+        };
+        if (original.cycle >= plan.autonomy.maxRepairCycles || Date.now() - Date.parse(original.startedAt) > plan.autonomy.maxDurationMs) return;
+        const next = await this.#replan({ state, task, plan, request, digest: hashObject({ name: 'policy-repair', request }), actor: state.actor,
+          caps: { ...caps, run: { ...caps.run, requestReplan: { allowed: true, reason: null } } },
+          policyGrant: { ...original, cycle: original.cycle + 1 } });
+        runId = next.runId;
+        this.#activatePolicyGrant(runId);
+        continue;
+      }
+      return;
+    }
+  }
+
+  #verifyAuthorization(state, task, plan) {
+    const grant = state.policyGrant;
+    if (!grant || plan.workflow !== 'autonomous' || plan.stage !== 'execution' || grant.runId === state.runId)
+      fail('POLICY_GRANT', 'Отсутствует ограниченное разрешение исходного плана');
+    if (!state.supersedesRunId || state.supersedesRunId === state.runId) fail('POLICY_GRANT', 'Нет предыдущей версии исправления');
+    const parent = RunStateSchema.parse(this.store.readRun(state.supersedesRunId));
+    if ((parent.policyGrant?.cycle ?? 0) !== grant.cycle - 1 ||
+        (grant.cycle === 1 && parent.runId !== grant.runId) ||
+        (parent.policyGrant && (parent.policyGrant.runId !== grant.runId || parent.policyGrant.receiptId !== grant.receiptId)) ||
+        plan.parentPlanHash !== parent.planHash)
+      fail('POLICY_GRANT', 'Счетчик или источник исправления не соответствует предыдущей версии');
+    const origin = this.#read(grant.runId, { current: false, verifySource: false, verifyBinding: false });
+    const approval = ReceiptSchema.parse(this.store.readObject('receipts', grant.receiptId));
+    const writes = (value) => unique(value.nodes.flatMap((node) => node.resources.writes)).sort();
+    const invariant = (value) => ({ goal: value.goal, instructions: value.instructions, feedback: value.planningFeedback ?? [], scope: value.scope, forbiddenPaths: value.forbiddenPaths, checks: value.checks, contextPaths: value.contextPaths, acceptance: value.acceptance });
+    if (origin.plan.workflow !== 'autonomous' || origin.plan.stage !== 'execution' || origin.state.policyGrant ||
+        origin.state.planHash !== grant.planHash || approval.planHash !== grant.planHash ||
+        !origin.state.nodes['approve-plan']?.receipts.includes(grant.receiptId) || approval.phase !== 'gate' || approval.verdict !== 'pass' ||
+        approval.finishedAt !== grant.startedAt || grant.cycle > origin.plan.autonomy.maxRepairCycles ||
+        hashObject(invariant(task)) !== hashObject(invariant(origin.task)) ||
+        hashObject(writes(plan)) !== hashObject(writes(origin.plan)) ||
+        plan.runtimeHash !== origin.plan.runtimeHash || plan.contextHash !== origin.plan.contextHash ||
+        hashObject(plan.autonomy) !== hashObject(origin.plan.autonomy))
+      fail('POLICY_GRANT', 'Исправление не соответствует явно согласованному плану');
+    const permissions = unique(plan.nodes.flatMap((node) => node.permissions)).sort();
+    if (hashObject(permissions) !== hashObject([...approval.grantedPermissions].sort()))
+      fail('POLICY_GRANT', 'Исправление не может расширять разрешения');
+  }
+
+  #activatePolicyGrant(runId) {
+    const { state, task, plan } = this.#read(runId);
+    this.#verifyAuthorization(state, task, plan);
+    const definition = plan.nodes.find((node) => node.action.id === 'human-approve');
+    if (state.nodes[definition.id].status === 'passed') return;
+    const permissions = unique(plan.nodes.flatMap((node) => node.permissions));
+    const receipt = this.#receipt(state, task, plan, definition, {
+      phase: 'policy', verdict: 'pass', grantedPermissions: permissions,
+      actor: 'approved-repair-policy', operationId: `policy-${randomUUID()}`,
+    });
+    const nodes = structuredClone(state.nodes);
+    Object.assign(nodes[definition.id], { status: 'passed', attempts: 1, receipts: [receipt],
+      startedAt: now(), finishedAt: now(), durationMs: 0, reason: 'Исправление в пределах ранее согласованного плана' });
+    this.#write(state, reconcile({ ...state, nodes, permissions }, plan));
+  }
+
+  async #revise({ state, task, plan, request, digest, actor, caps }) {
+    if (!caps.run.revisePlan?.allowed || !request.feedback || request.draft)
+      fail('PLAN_EDIT_DENIED', 'Уточнение доступно только до согласования плана');
+    if (state.binding) await this.#assertWorkspace(state);
+    const retainedArtifacts = unique([...state.planningArtifacts, ...Object.values(state.nodes).flatMap((node) => node.artifacts)]);
+    const analysisArtifact = retainedArtifacts.find((id) => {
+      const artifact = this.#artifact(id);
+      return artifact.kind === 'analysis' && artifact.mediaType === 'application/json' && Boolean(JSON.parse(artifact.content).analysis);
+    });
+    if (!analysisArtifact) fail('ANALYSIS_REQUIRED', 'Нет сохраненного анализа для уточнения');
+    const { schemaVersion: _, sourceHash: __, ...input } = task;
+    input.planningFeedback = [...(task.planningFeedback ?? []), request.feedback];
+    const newRunId = `run-${randomUUID()}`;
+    const preparationHash = this.store.putObject('operations', {
+      input, actor, sourceBundle: state.sourceBundle, sourceHash: state.sourceHash,
+      version: plan.version + 1, parentPlanHash: state.planHash, supersedesRunId: state.runId,
+      workflow: 'autonomous', stage: 'planning', analysisArtifact, retainedArtifacts,
+      planningTransitions: (state.planningTransitions ?? 0) + 1,
+      draft: null, binding: state.binding, fingerprint: state.workspaceFingerprint,
+    });
+    const prior = { digest, status: 'creating', resultRunId: newRunId, preparationHash };
+    state = this.#write(state, { status: 'stale', finalDisposition: 'superseded', operations: { ...state.operations, [request.operationId]: prior } });
+    const next = await this.#finishReplan(state, request, digest, actor, prior);
+    this.#schedule(next.runId);
+    return next;
   }
 
   capabilities() {
@@ -395,6 +612,7 @@ export class WorkflowService {
     try {
       const service = new WorkflowService(resolved, adapters ?? (await defaultAdapters(resolved)));
       service.lifecycleRelease = release;
+      service.#resumeReadyWork();
       return service;
     } catch (error) { release?.(); throw error; }
   }
@@ -405,6 +623,7 @@ export class WorkflowService {
     this.challengeKey = randomBytes(32);
     this.active = new Map();
     this.intakes = new Map();
+    this.drives = new Map();
     this.lifecycleRelease = null;
     this.closed = false;
     this.pendingMutations = 0;
@@ -431,6 +650,10 @@ export class WorkflowService {
       setupPending = false,
       replanEvidence = null,
       stage = undefined,
+      workflow = undefined,
+      analysisArtifact = undefined,
+      retainedArtifacts = [],
+      policyGrant = undefined,
       planningTransitions = 0,
       naturalIntakeHash = undefined,
     } = {},
@@ -461,6 +684,10 @@ export class WorkflowService {
       draft,
       replanEvidence,
       stage: stage ?? null,
+      workflow: workflow ?? null,
+      analysisArtifact: analysisArtifact ?? null,
+      retainedArtifacts,
+      policyGrant: policyGrant ?? null,
       planningTransitions,
       naturalIntakeHash: naturalIntakeHash ?? null,
       actor,
@@ -483,9 +710,13 @@ export class WorkflowService {
       contextHash: this.adapters.contextHash?.(task),
       version,
       parentPlanHash,
+      workflow,
+      analysisArtifact,
     };
+    if (workflow === 'autonomous' && stage === 'planning' && !this.#hasReadConsent())
+      fail('ONBOARDING_REQUIRED', 'Нет локального согласия на чтение выбранным AI');
     const compiled = (stage === 'planning' ? compilePlanningPlan : compilePlan)(task, context).plan;
-    const staged = stage ? { ...compiled, stage } : compiled;
+    const staged = { ...compiled, ...(stage ? { stage } : {}), ...(workflow === 'autonomous' ? { workflow, autonomy: { maxRepairCycles: 2, maxDurationMs: 1800000 } } : {}) };
     const proposal = draft ? { ...staged, nodes: draft.nodes, skills: context.skills.filter((skill) => draft.nodes.some((node) => node.skills.includes(skill.id))) } : staged;
     const validated = validatePlan(proposal, task, context),
       plan = validated.plan;
@@ -526,15 +757,16 @@ export class WorkflowService {
         status: 'pending',
         finalDisposition: null,
         nodes: initialNodes(plan),
-        permissions: [],
+        permissions: workflow === 'autonomous' && stage === 'planning' ? ['ai.read'] : [],
+        ...(policyGrant ? { policyGrant } : {}),
         binding: null,
         workspaceFingerprint: null,
         initialFingerprint: null,
         activeOperation: null,
         operations: {},
-        planningArtifacts: replanEvidence
+        planningArtifacts: unique([...retainedArtifacts, ...(replanEvidence
           ? [this.#putArtifact('analysis', 'Причины новой версии', replanEvidence)]
-          : [],
+          : [])]),
         actor,
       },
       plan,
@@ -612,6 +844,8 @@ export class WorkflowService {
       fail('STATE_INTEGRITY', 'Supersession требует новую run и stale state');
     if (
       state.permissions.length &&
+      !(plan.workflow === 'autonomous' && plan.stage === 'planning' &&
+        state.permissions.length === 1 && state.permissions[0] === 'ai.read' && (!current || this.#hasReadConsent())) &&
       !plan.nodes.some(
         (n) =>
           n.success.kind === 'gate' &&
@@ -620,6 +854,7 @@ export class WorkflowService {
       )
     )
       fail('STATE_INTEGRITY', 'Permissions не подтверждены gate');
+    if (state.policyGrant) this.#verifyAuthorization(state, task, plan);
     for (const definition of plan.nodes) {
       const node = state.nodes[definition.id];
       if (!node) fail('STATE_INTEGRITY', 'Node state отсутствует');
@@ -690,7 +925,8 @@ export class WorkflowService {
             fail('RECEIPT_INTEGRITY', 'Pass не подтвержден technical/termination evidence');
           lastFinished = receipt;
           lastStart = null;
-        } else if (receipt.phase === 'gate') {
+        } else if (receipt.phase === 'gate' || receipt.phase === 'policy') {
+          if (receipt.phase === 'policy') this.#verifyAuthorization(state, task, plan);
           if (
             definition.success.kind !== 'gate' ||
             attemptNumber !== 0 ||
@@ -808,6 +1044,14 @@ export class WorkflowService {
           for (const name of ['run', 'retry', 'rerunCheck'])
             collection[name] = { allowed: false, reason: readiness.reason };
     }
+    const deadline = this.#executionDeadline(state, plan);
+    if (deadline !== null && Date.now() >= deadline) {
+      for (const collection of [capabilities.run, ...Object.values(capabilities.nodes)])
+        for (const key of ['run','retry','rerunCheck']) collection[key] = { allowed: false, reason: 'Истек срок согласованного автономного выполнения' };
+    }
+    const editable = plan.workflow === 'autonomous' && plan.stage === 'execution' &&
+      state.nodes['approve-plan']?.status === 'waiting-for-human' && !state.activeOperation && !state.finalDisposition && !lock;
+    capabilities.run.revisePlan = { allowed: editable && (this.store.readObject('tasks', state.taskHash).planningFeedback?.length ?? 0) < 10, reason: editable ? null : 'План можно уточнить до согласования' };
     const planner = plan.nodes.find((node) => node.action.id === 'ai-plan');
     const replanCapability = {
       ...capabilities.run.requestReplan,
@@ -968,9 +1212,18 @@ export class WorkflowService {
       task: {
         id: task.id,
         goal: sanitizeText(task.goal),
+        title: sanitizeText(task.goal),
+        description: sanitizeText(task.instructions),
+        taskNumber: sanitizeText(task.taskNumber ?? task.id),
+        planningFeedback: (task.planningFeedback ?? []).map(sanitizeText),
         scope: task.scope,
         acceptance: task.acceptance.map(sanitizeText),
       },
+      workflow: plan.workflow ?? null,
+      workflowProgress: this.#workflowProgress(state, plan),
+      completion: plan.workflow === 'autonomous' && plan.stage === 'execution' && state.status === 'passed' && !driftReason ? 'ready-for-review' : null,
+      successorRunId: Object.values(state.operations).find((operation) => operation.resultRunId && operation.status === 'finished')?.resultRunId ?? null,
+      failureReason: state.failureReason ? sanitizeText(state.failureReason) : null,
       phase: plan.stage ?? 'execution',
       planVersion: state.planVersion,
       planHash: state.planHash,
@@ -1176,7 +1429,7 @@ export class WorkflowService {
     this.#assertOpen();
     assertJsonBounds(input);
     const request = ControlRequestSchema.parse(input);
-    if (!['run', 'retry', 'rerun-check', 'gate', 'recover', 'stop', 'replan'].includes(name))
+    if (!['run', 'retry', 'rerun-check', 'gate', 'recover', 'stop', 'replan', 'revise-plan'].includes(name))
       fail('UNKNOWN_CONTROL', 'Control action не разрешен');
     let { state, task, plan } = this.#read(runId, {
       current: !['replan', 'recover', 'stop'].includes(name),
@@ -1256,6 +1509,7 @@ export class WorkflowService {
         ...next,
         operations: { ...state.operations, [request.operationId]: { digest, status: 'finished' } },
       });
+      if (plan.workflow === 'autonomous' && request.decision === 'approve') this.#schedule(runId);
       return this.snapshot(runId);
     }
     if (name === 'stop') {
@@ -1269,6 +1523,7 @@ export class WorkflowService {
     }
     if (name === 'recover')
       return this.#recover({ state, task, plan, request, digest, actor, caps });
+    if (name === 'revise-plan') return this.#revise({ state, task, plan, request, digest, actor, caps });
     if (name === 'replan') return this.#replan({ state, task, plan, request, digest, actor, caps });
     const retry = name === 'retry' || name === 'rerun-check';
     if (
@@ -1278,6 +1533,8 @@ export class WorkflowService {
       fail('RETRY_UNSAFE', 'Повтор не подтвержден runtime');
     if (!retry && !(definition ? caps.nodes[definition.id].run.allowed : caps.run.run.allowed))
       fail('CONTROL_DENIED', 'Запуск сейчас недоступен');
+    const deadline = this.#executionDeadline(state, plan);
+    if (deadline !== null && Date.now() >= deadline) fail('AUTONOMY_LIMIT', 'Истек срок согласованного автономного выполнения');
     if (state.binding) await this.#assertWorkspace(state);
     const operation = {
       id: request.operationId,
@@ -1295,6 +1552,8 @@ export class WorkflowService {
       operations: { ...state.operations, [request.operationId]: { digest, status: 'running' } },
     });
     const controller = new AbortController();
+    const deadlineTimer = deadline === null ? null : setTimeout(() => controller.abort(), Math.max(1, deadline - Date.now()));
+    deadlineTimer?.unref();
     this.active.set(runId, controller);
     const stopMonitor = setInterval(() => {
       try {
@@ -1335,7 +1594,7 @@ export class WorkflowService {
       }
       while (true) {
         state = this.store.readRun(runId);
-        if (state.stopRequested) break;
+        if (state.stopRequested || controller.signal.aborted) break;
         this.#read(runId);
         const ready = plan.nodes.find(
           (n) => state.nodes[n.id].status === 'ready' && (!definition || n.id === definition.id),
@@ -1379,6 +1638,7 @@ export class WorkflowService {
       });
     } finally {
       clearInterval(stopMonitor);
+      if (deadlineTimer) clearTimeout(deadlineTimer);
       this.active.delete(runId);
     }
     return this.snapshot(runId);
@@ -1413,6 +1673,8 @@ export class WorkflowService {
 
   #applyFencedEdits(executionState, task, plan, definition, before, edits) {
     const loaded = this.#read(executionState.runId);
+    const deadline = this.#executionDeadline(loaded.state, plan);
+    if (deadline !== null && Date.now() >= deadline) fail('AUTONOMY_LIMIT', 'Истек срок согласованного автономного выполнения');
     this.#assertExecutionOwner(loaded.state, executionState, definition);
     const withBindingFence = this.adapters.withBindingFence
       ? this.adapters.withBindingFence.bind(this.adapters)
@@ -1526,8 +1788,9 @@ export class WorkflowService {
             acceptance: task.acceptance,
             planHash: state.planHash,
             receipts: evidence,
-            changedFiles: unique(Object.values(state.nodes).flatMap((n) => n.changedFiles)),
-            integration:
+            previousExecutions: this.#previousExecutions(state).map((source) => ({ runId: source.state.runId, planHash: source.state.planHash, receipts: Object.values(source.state.nodes).flatMap((node) => node.receipts) })),
+            changedFiles: unique([state, ...this.#previousExecutions(state).map((source) => source.state)].flatMap((item) => Object.values(item.nodes).flatMap((n) => n.changedFiles))),
+            integration: plan.workflow === 'autonomous' ? 'Готово к личному ревью. Commit и PR пользователь выполняет самостоятельно.' :
               'Требуется отдельная проверка и интеграция Orchestrator; commit/push/deploy не выполнялись',
           }),
         );
@@ -1548,7 +1811,13 @@ export class WorkflowService {
         });
         if (Buffer.byteLength(JSON.stringify(fixFindings)) > 24 * 1024)
           fail('FIX_EVIDENCE_LIMIT', 'Полные review findings превышают bounded context; требуется более узкая задача');
+        const analysisArtifact = plan.analysisArtifact ?? [...state.planningArtifacts, ...Object.values(state.nodes).flatMap((node) => node.artifacts)].find((id) => {
+          const item = this.#artifact(id);
+          return item.kind === 'analysis' && item.mediaType === 'application/json' && Boolean(JSON.parse(item.content).analysis);
+        });
         const priorEvidence = {
+          ...(analysisArtifact ? { analysis: { artifactId: analysisArtifact, result: AIAnalysisResultSchema.parse(JSON.parse(this.#artifact(analysisArtifact).content)) } } : {}),
+          feedback: task.planningFeedback ?? [],
           reviewFindings: fixFindings,
           instructionMetadata: this.adapters.instructionMetadata?.(definition, task) ?? [],
           receipts: unique(Object.values(state.nodes).flatMap((n) => n.receipts)).slice(-64),
@@ -1575,8 +1844,10 @@ export class WorkflowService {
           else if (priorEvidence.workspaceFiles.length) {
             priorEvidence.workspaceFiles.pop();
             priorEvidence.workspaceFilesTruncated = true;
-          } else break;
+          } else fail('CONTEXT_LIMIT', 'Структурированный анализ превышает допустимый размер');
         }
+        if (plan.workflow === 'autonomous' && definition.action.id === 'ai-plan' && !priorEvidence.analysis)
+          fail('ANALYSIS_REQUIRED', 'План требует сохраненного результата анализа');
         if (definition.action.id === 'ai-review') {
           reviewBundle = buildReviewEvidence({
             state,
@@ -1584,6 +1855,7 @@ export class WorkflowService {
             plan,
             node: definition,
             fingerprint: before,
+            previousExecutions: this.#reviewHistory(state),
             readReceipt: (hash) => ReceiptSchema.parse(this.store.readObject('receipts', hash)),
             readArtifact: (hash) => this.#artifact(hash),
           });
@@ -1623,7 +1895,7 @@ export class WorkflowService {
         !result.uncertain
       ) {
         assertJsonBounds(result.output);
-        aiOutput = (definition.action.id === 'ai-plan' ? AIPlanningResultSchema : reviewBundle ? AIReviewResultSchema : AIResultSchema).parse(result.output);
+        aiOutput = (definition.action.id === 'ai-plan' ? AIPlanningResultSchema : definition.action.id === 'ai-analyze' && plan.workflow === 'autonomous' ? AIAnalysisResultSchema : reviewBundle ? AIReviewResultSchema : AIResultSchema).parse(result.output);
         if (definition.action.id === 'ai-plan' && aiOutput.verdict === 'pass')
           compileTaskProposal(task, aiOutput, { runtimeHash: this.adapters.identity(), skills: this.adapters.skills(task), resolveSkills: this.adapters.resolveSkills, resolveReadPaths: this.adapters.resolveReadPaths, contextHash: this.adapters.contextHash?.(task) });
         if (reviewBundle) {
@@ -1633,11 +1905,17 @@ export class WorkflowService {
             plan,
             node: definition,
             fingerprint: before,
+            previousExecutions: this.#reviewHistory(state),
             readReceipt: (hash) => ReceiptSchema.parse(this.store.readObject('receipts', hash)),
             readArtifact: (hash) => this.#artifact(hash),
           });
           if (verified.hash !== reviewBundle.hash || aiOutput.reviewEvidenceHash !== verified.hash)
             fail('REVIEW_EVIDENCE_MISMATCH', 'Review result не связан с полным evidence');
+        }
+        if (definition.action.id === 'ai-analyze' && plan.workflow === 'autonomous') {
+          if (Buffer.byteLength(JSON.stringify(aiOutput)) > 20 * 1024) fail('ANALYSIS_LIMIT', 'Анализ превышает ограниченный контекст передачи');
+          if (AIAnalysisResultSchema.parse(aiOutput).analysis.projectFacts.some((fact) => !definition.resources.reads.some((scope) => fact.path === scope.replace(/\/$/, '') || fact.path.startsWith(scope.replace(/\/$/, '') + '/'))))
+            fail('ANALYSIS_SCOPE', 'Факты анализа выходят за объявленный контекст');
         }
         verifySkillsUsed(this.adapters.loadSkills(definition.skills), aiOutput.skillsUsed);
         if (
@@ -1669,7 +1947,7 @@ export class WorkflowService {
               aiOutput.edits,
             );
           }
-        } else if (aiOutput.edits.length)
+        } else if (aiOutput.edits.length || aiOutput.changedFiles.length)
           fail('AI_WRITE_VIOLATION', 'Read action не может предлагать запись');
       }
       after = fencedAfter ?? this.adapters.fingerprint(state.binding.worktree, state.toolchain);
@@ -1695,6 +1973,7 @@ export class WorkflowService {
           summary: sanitizeText(output.summary),
           findings: output.findings.map((f) => ({ ...f, message: sanitizeText(f.message) })),
           plan: output.plan.map((p) => ({ ...p, outcome: sanitizeText(p.outcome) })),
+          ...(definition.action.id === 'ai-analyze' && plan.workflow === 'autonomous' ? { analysis: Object.fromEntries(Object.entries(AIAnalysisResultSchema.parse(output).analysis).map(([key, values]) => [key, key === 'projectFacts' ? values.map((value) => ({ path: value.path, fact: sanitizeText(value.fact) })) : values.map(sanitizeText)])) } : {}),
           ...(definition.action.id === 'ai-plan' ? { steps: AIPlanningResultSchema.parse(output).steps.map((step) => ({ ...step, title: sanitizeText(step.title), outcome: sanitizeText(step.outcome) })) } : {}),
         };
         verdict =
@@ -2093,7 +2372,7 @@ export class WorkflowService {
     }
   }
 
-  async #replan({ state, task, plan, request, digest, actor, caps }) {
+  async #replan({ state, task, plan, request, digest, actor, caps, policyGrant = undefined }) {
     if (
       state.activeOperation ||
       Object.values(state.nodes).some((node) => node.status === 'running') ||
@@ -2102,6 +2381,7 @@ export class WorkflowService {
       fail('RECOVERY_REQUIRED', 'Перед replan требуется доказанное recovery');
     if (!caps.run.requestReplan.allowed)
       fail('REPLAN_DENIED', 'Replan недоступен или бюджет исчерпан');
+    if (policyGrant && state.binding) await this.#assertWorkspace(state);
     const context = {
       runtimeHash: this.adapters.identity(),
       skills: this.adapters.skills(task),
@@ -2110,6 +2390,7 @@ export class WorkflowService {
       contextHash: this.adapters.contextHash?.(task),
       version: plan.version + 1,
       parentPlanHash: state.planHash,
+      workflow: plan.workflow,
     };
     let nextDraft = request.draft ?? null;
     let nextStage = plan.stage;
@@ -2119,7 +2400,7 @@ export class WorkflowService {
       if (request.draft) fail('PLANNING_DRAFT_DENIED', 'Planning компилирует только сохраненный AI proposal');
       const planner = plan.nodes.find((node) => node.action.id === 'ai-plan');
       if (state.nodes[planner.id].status === 'passed') {
-        // A stale context cannot promote an old planning receipt into new write authorization.
+        // A stale context cannot promote an old planning receipt into new write policyGrant.
         this.#read(state.runId);
         await this.#assertWorkspace(state);
         const artifactId = state.nodes[planner.id].artifacts.find((id) => this.#artifact(id).kind === 'analysis');
@@ -2128,7 +2409,7 @@ export class WorkflowService {
         const executable = compileTaskProposal(task, output, context).plan;
         nextDraft = { nodes: executable.nodes };
         nextStage = 'execution';
-        planningTransitions = 1;
+        planningTransitions = (state.planningTransitions ?? 0) + 1;
         planningEvidence = { artifactId, receiptIds: state.nodes[planner.id].receipts, steps: output.steps };
       } else if (!['failed', 'uncertain', 'stale'].includes(state.status)) {
         fail('PLANNING_INCOMPLETE', 'Сначала выполните AI-планирование');
@@ -2154,7 +2435,7 @@ export class WorkflowService {
         fail('INVALID_DRAFT', 'Draft может предлагать только nodes');
       assertConfiguredChecks(task, this.adapters.project, nextDraft);
       validatePlan(
-        { ...compilePlan(task, context).plan, nodes: nextDraft.nodes, skills: context.skills.filter((skill) => nextDraft.nodes.some((node) => node.skills.includes(skill.id))) },
+        { ...compilePlan(task, context).plan, ...(plan.workflow === 'autonomous' ? { workflow: 'autonomous', autonomy: plan.autonomy, stage: nextStage } : {}), nodes: nextDraft.nodes, skills: context.skills.filter((skill) => nextDraft.nodes.some((node) => node.skills.includes(skill.id))) },
         task,
         context,
       );
@@ -2166,7 +2447,7 @@ export class WorkflowService {
       fingerprint = this.adapters.fingerprint(state.binding.worktree, state.toolchain);
       const scopeNode = {
         permissions: ['workspace.source.write'],
-        resources: { writes: task.scope },
+        resources: { writes: policyGrant ? unique(plan.nodes.flatMap((node) => node.resources.writes)) : task.scope },
       };
       if (
         !this.adapters.inspectChanges(state.initialFingerprint, fingerprint, scopeNode, task)
@@ -2187,7 +2468,10 @@ export class WorkflowService {
       version: plan.version + 1,
       parentPlanHash: state.planHash,
       supersedesRunId: state.runId,
+      ...(policyGrant ? { policyGrant } : {}),
       stage: nextStage ?? null,
+      workflow: plan.workflow ?? null,
+      retainedArtifacts: unique([...state.planningArtifacts, ...plan.nodes.filter((node) => node.success.kind === 'analysis').flatMap((node) => state.nodes[node.id].artifacts)]),
       planningTransitions,
       feedback: {
         planningEvidence,
@@ -2239,6 +2523,10 @@ export class WorkflowService {
       supersedesRunId: preparation.supersedesRunId,
       draft: preparation.draft,
       stage: preparation.stage ?? undefined,
+      workflow: preparation.workflow ?? undefined,
+      analysisArtifact: preparation.analysisArtifact ?? undefined,
+      retainedArtifacts: preparation.retainedArtifacts ?? [],
+      policyGrant: preparation.policyGrant ?? undefined,
       planningTransitions: preparation.planningTransitions ?? 0,
       sourceOverride: source,
       replanEvidence: preparation.feedback ?? null,

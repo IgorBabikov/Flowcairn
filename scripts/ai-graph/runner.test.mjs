@@ -572,3 +572,59 @@ test('production stopped cleanup removes its own evidence file and closes its pa
   assert.throws(() => fstatSync(ownedFd), { code: 'EBADF' });
   assert.equal(existsSync(file.path), false);
 });
+
+test('ручной выбор сохраняет модель и усиление review, fresh exec не возобновляет историю', async () => {
+  const { RUNNER_TESTING } = await import('./lib/runner.mjs');
+  const contract = runnerContract();
+  const node = { ...contract.node, id: 'review', action: { id: 'ai-review' } };
+  contract.plan.nodes = [node];
+  const content = '{}';
+  const prepared = RUNNER_TESTING.makeAiCommand({ ...contract, node, worktree: '/private/tmp/isolated-worktree', skills: [], priorEvidence: null,
+    reviewBundle: { content, bytes: 2, hash: sha256(content) }, outputPath: realpathSync(fixture()),
+    toolchain: { node: NODE_BINARY, codexEntry: '/trusted/codex.js', digest: 'a'.repeat(64) },
+    profile: { outputPaths: [], ai: { provider: 'codex', model: 'chosen-model', reviewModel: 'other-model', modelMode: 'manual', reasoningEffort: 'low', reviewReasoningEffort: 'high' } },
+    dependencyToolchain: { dependencyPaths: [], hash: 'b'.repeat(64) } });
+  try {
+    const args = prepared.command.args;
+    assert.equal(args[args.indexOf('--model') + 1], 'chosen-model');
+    assert.ok(args.includes('model_reasoning_effort="low"'));
+    assert.ok(args.includes('--ephemeral')); assert.ok(!args.includes('resume'));
+    assert.equal(prepared.execution.model, 'chosen-model');
+  } finally { RUNNER_TESTING.cleanupPrepared(prepared); }
+});
+
+test('большой lock исключается из AI context, его hash остается частью workspace integrity', async () => {
+  const { RUNNER_TESTING } = await import('./lib/runner.mjs');
+  const { fingerprintWorkspace } = await import('./lib/workspace.mjs');
+  const { spawnSync } = await import('node:child_process');
+  const root = realpathSync(fixture());
+  assert.equal(spawnSync('/usr/bin/git',['init','-q',root]).status,0);
+  writeFileSync(path.join(root,'form.mjs'),'export const valid = true;');
+  writeFileSync(path.join(root,'package-lock.json'),JSON.stringify({padding:'x'.repeat(600 * 1024)}));
+  const profile={outputPaths:[]};
+  const node={resources:{reads:['form.mjs','package-lock.json']}};
+  const task={scope:node.resources.reads,contextPaths:[],forbiddenPaths:[]};
+  const before=fingerprintWorkspace(root);
+  const selected=RUNNER_TESTING.selectedSourceContext(root,node,task,profile);
+  assert.deepEqual(selected.map(file=>file.path),['form.mjs']);
+  assert.ok(before.files.some(file=>file.path==='package-lock.json'));
+  assert.ok(RUNNER_TESTING.instructionDenials(root,node,profile).includes('package-lock.json'));
+  writeFileSync(path.join(root,'package-lock.json'),'{}');
+  assert.notEqual(fingerprintWorkspace(root).hash,before.hash);
+});
+
+test('соседний AGENT.md не входит в scoped AI context и запрещен Codex sandbox', async () => {
+ const { RUNNER_TESTING } = await import('./lib/runner.mjs');
+ const { spawnSync } = await import('node:child_process');
+ const { mkdirSync } = await import('node:fs');
+ const root=realpathSync(fixture());assert.equal(spawnSync('/usr/bin/git',['init','-q',root]).status,0);
+ mkdirSync(path.join(root,'apps/api'),{recursive:true});mkdirSync(path.join(root,'apps/web'),{recursive:true});
+ writeFileSync(path.join(root,'apps/api/AGENT.md'),'API rules');writeFileSync(path.join(root,'apps/web/AGENT.md'),'Web rules');
+ writeFileSync(path.join(root,'apps/api/index.mjs'),'export const ok=true;');
+ const task={scope:['apps'],contextPaths:[],forbiddenPaths:[]};
+ const node={resources:{reads:['apps','apps/api/AGENT.md']}};const profile={outputPaths:[]};
+ const selected=RUNNER_TESTING.selectedSourceContext(root,node,task,profile);
+ assert.ok(selected.some(file=>file.path==='apps/api/AGENT.md'));
+ assert.ok(!selected.some(file=>file.path==='apps/web/AGENT.md'));
+ assert.ok(RUNNER_TESTING.instructionDenials(root,node,profile).includes('apps/web/AGENT.md'));
+});
