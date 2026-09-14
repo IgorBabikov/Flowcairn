@@ -742,8 +742,9 @@ test('keeps controls usable on mobile and supports RU/EN and dark mode', async (
   );
 });
 
-test('actual service fixture smoke', async ({ page }) => {
+test('actual service fixture smoke', async ({ page }, testInfo) => {
   test.skip(!process.env.FLOWCAIRN_TEST_URL, 'FLOWCAIRN_TEST_URL is not set');
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto(process.env.FLOWCAIRN_TEST_URL);
   await expect(
     page.getByRole('heading', {
@@ -751,4 +752,5 @@ test('actual service fixture smoke', async ({ page }) => {
     }),
   ).toBeVisible();
   await expect(page.locator('.operator-layout')).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('actual-workflow.png'), fullPage: true });
 });
