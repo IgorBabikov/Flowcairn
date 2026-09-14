@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, realpathSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { initializeProject } from '../bin/flowcairn.mjs';
+import { initializeProject, printInitialization } from '../bin/flowcairn.mjs';
 
 function fixture(t) {
   const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'flowcairn-onboarding-')));
@@ -29,6 +29,24 @@ test('явный onboarding сохраняет разрешение, ручну�
 test('старый init не предоставляет разрешение на чтение автоматически', t => {
   const result = initializeProject(fixture(t), {provider:'openai',model:'test-model'});
   assert.notEqual(result.profile.onboarding?.readConsent, true);
+});
+
+test('итог первого запуска говорит о следующем шаге без технической сводки', () => {
+  let text = '';
+  const original = process.stdout.write;
+  process.stdout.write = (value) => { text += value; return true; };
+  try {
+    printInitialization({
+      dryRun: false,
+      profile: { checks: ['lint', 'tests'] },
+      checkPreparation: { prepared: false, reason: 'DECLINED' },
+    });
+  } finally {
+    process.stdout.write = original;
+  }
+  assert.match(text, /Готово\. Flowcairn подготовлен/);
+  assert.match(text, /Опишите задачу обычным языком/);
+  assert.doesNotMatch(text, /Ветка:|Менеджер:|Docker/);
 });
 
 test('неподдерживаемый провайдер и противоречивый ручной режим не создают профиль', t => {
@@ -65,7 +83,10 @@ test('опрос фиксирует только явное согласие и 
   assert.equal(result.model,'my-model');
   assert.equal(result['reasoning-effort'],'high');
   assert.equal(result.coverage,false);
-  assert.match(text,/Настройки.*не наследуются/);
+  assert.match(text,/тонкие настройки доступны позже через npx flowcairn setup/);
+  assert.match(text,/Шаг 1 из 4/);
+  assert.match(text,/\x1b\[/);
+  assert.doesNotMatch(text,/Codex — macOS/);
   assert.equal(existsSync(path.join(root,'.flowcairn.json')),false);
 });
 

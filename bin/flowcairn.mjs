@@ -616,26 +616,20 @@ export async function handoff(input, runId) {
   };
 }
 
-const HELP = `Flowcairn — контролируемый AI Workflow + ReactFlow\n\n  init [--provider codex|openai] [--model MODEL] [--root PROJECT] [--dry-run] [--json]\n    Первый запуск автоматически предложит короткую настройку. В скрипте --model обязателен.\n    --model-mode manual|auto --reasoning-effort low|medium|high|xhigh\n    --test-policy keep|add --coverage (только по вашему выбору) --read-consent\n  setup    изменить настройки после закрытия UI; текущие планы не переписываются.\n    Локальные Skills: выбор файлов, этапов и области в терминале.\n    В скрипте: --skills name --skill-actions plan,review --skill-scope src.\n    По умолчанию: macOS — codex, Linux — openai; --provider задает явный выбор.\n  doctor [--root PROJECT]\n  checks prepare [--root PROJECT]\n  task --file TASK.json [--run ID] [--root PROJECT]\n  task --id ORCH-001 --goal TEXT --scope src --accept TEXT\n    --snapshot явно включает изменения tracked-файлов в снимок первого графа.\n    --include-untracked path1,path2 явно включает новые файлы в этот снимок.\n  [--root PROJECT] [--port 4329] [--no-open]\n    Без команды открывает локальный UI и браузер.\n  ui [--root PROJECT] [--port 4329] [--no-open]\n  update    проверить npm metadata, без установки и изменения планов\n  instructions inspect\n  instructions activate --fingerprint HASH --consent\n  uninstall [--dry-run]    удалить только unchanged owned integration\n  status|plan|events --run ID\n  approve --run ID --plan-hash HASH --permissions ai.read,workspace.source.write,workspace.output.write\n  run|retry|recover|replan|stop|accept|reject --run ID --plan-hash HASH\n  receipt|artifact --run ID --hash HASH\n  handoff --run ID\n  orchestrator COMMAND ...   расширенное управление очередью и Git-интеграцией\n\nЗапуск AI требует approval конкретного плана. Init/task/ui не запускают AI.\nДокументация: https://github.com/IgorBabikov/flowcairn\n`;
+const HELP = `Flowcairn — от задачи до проверенного результата\n\nБыстрый старт\n  npx flowcairn          начать настройку и открыть Graph\n  npx flowcairn setup    изменить модель и правила после закрытия UI\n  npx flowcairn doctor   проверить подготовку проекта\n\nДополнительно\n  npx flowcairn checks prepare   подготовить изолированные проверки\n  npx flowcairn uninstall        снять интеграцию, не удаляя исходники\n\nДля интеграции\n  init | ui | status | plan | events | receipt | artifact | handoff | orchestrator\n\nКод проекта не изменится, пока вы не согласуете план.\nДокументация: https://github.com/IgorBabikov/flowcairn\n`;
 
-function printInitialization(result) {
-  const profile = result.profile;
+export function printInitialization(result) {
   const summary = [
-    result.dryRun ? 'Предварительная проверка. Файлы не изменены.' : result.message,
-    `Ветка: ${profile.integrationBranch}. Менеджер: ${profile.packageManager}. Проверки: ${profile.checks.join(', ') || 'не найдены'}.`,
-    `AI: ${profile.ai.provider}, модель ${profile.ai.model}. Доступность модели не проверялась.`,
-    `Разрешение на чтение и передачу AI: ${hasOnboardingConsent(result.root, profile) ? 'задано для этой установки' : 'не предоставлено; настройте через npx flowcairn setup'}.`,
-    'Команды проекта выполняются в Docker. Изоляция через произвольный host shell не заменяется.',
+    result.dryRun ? 'Предварительная проверка. Файлы не изменены.' : 'Готово. Flowcairn подготовлен для этого проекта.',
+    result.dryRun
+      ? 'Проверьте список ниже и повторите команду без --dry-run.'
+      : 'Теперь откроется Graph. Опишите задачу обычным языком — сначала увидите план.',
+    'Код проекта не изменится, пока вы не согласуете этот план.',
   ];
-  if (result.dryRun) summary.push(`Планируемые файлы: ${result.changes.join(', ')}.`);
-  else
-    summary.push(
-      'Далее: npx flowcairn — открыть локальный UI и создать задачу.',
-      'Разработка начнется после согласования плана.',
-    );
+  if (result.dryRun) summary.push(`Будут созданы: ${result.changes.join(', ')}.`);
   if (result.checkPreparation && !result.checkPreparation.prepared &&
       ['DECLINED', 'NON_INTERACTIVE'].includes(result.checkPreparation.reason))
-    summary.push('Проверки еще не подготовлены. Перед их запуском: npx flowcairn checks prepare.');
+    summary.push('Проверки можно подготовить позже из интерфейса или командой npx flowcairn checks prepare.');
   process.stdout.write(sanitizeText(summary.join('\n')) + '\n');
 }
 

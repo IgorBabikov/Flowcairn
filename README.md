@@ -45,7 +45,7 @@ React Flow рисует граф. Локальный runtime управляет 
 В терминале **своего проекта**:
 
 ```bash
-npm install flowcairn
+npm install -D flowcairn@latest
 npx flowcairn
 ```
 
@@ -59,9 +59,11 @@ npx flowcairn
 <summary><strong>Установка через pnpm</strong></summary>
 
 ```bash
-pnpm add -D flowcairn
+pnpm add -D flowcairn@latest
 pnpm exec flowcairn
 ```
+
+В pnpm workspace из корня используйте `pnpm add -Dw flowcairn@latest`. Команда `pnpm install flowcairn` устанавливает зависимости проекта, а не добавляет Flowcairn.
 
 </details>
 

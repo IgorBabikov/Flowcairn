@@ -11,61 +11,61 @@
     'Segoe UI',
     sans-serif;
   font-synthesis: none;
-  --page: #f3f8f4;
-  --surface: #fcfefb;
-  --soft: #eaf2ec;
-  --strong: #dcebe1;
-  --text: #173f36;
-  --muted: #536e62;
-  --faint: #60766a;
-  --border: #d5e2d8;
-  --border-strong: #b2c8b9;
-  --plum: #21644e;
-  --plum-strong: #184e3c;
-  --danger: #a23946;
-  --warning: #9b5b16;
-  --info: #356f83;
-  --shadow: 0 14px 34px rgba(27, 61, 44, 0.09);
-  --flow-grid: #cdded2;
-  --status-idle: #6b7d71;
+  --page: #f7f7f6;
+  --surface: #ffffff;
+  --soft: #f2f4f7;
+  --strong: #e8ebff;
+  --text: #1f2937;
+  --muted: #667085;
+  --faint: #7a8494;
+  --border: #e1e4ea;
+  --border-strong: #cdd3de;
+  --plum: #4f5ee8;
+  --plum-strong: #3f4cd0;
+  --danger: #b5475a;
+  --warning: #b26d20;
+  --info: #187eab;
+  --shadow: 0 14px 34px rgba(31, 41, 55, 0.09);
+  --flow-grid: #d7dde7;
+  --status-idle: #7a8494;
   --status-waiting: var(--status-waiting-for-human);
-  --status-pending: #6b7d71;
-  --status-ready: #21644e;
-  --status-running: #287288;
-  --status-waiting-for-human: #a86519;
-  --status-passed: #26775a;
-  --status-failed: #a23946;
-  --status-uncertain: #a86519;
-  --status-stale: #667463;
+  --status-pending: #7a8494;
+  --status-ready: #4f5ee8;
+  --status-running: #187eab;
+  --status-waiting-for-human: #b26d20;
+  --status-passed: #16824a;
+  --status-failed: #b5475a;
+  --status-uncertain: #b26d20;
+  --status-stale: #7a8494;
 }
 
 :root[data-dark] {
   color-scheme: dark;
-  --page: #101f19;
-  --surface: #192c24;
-  --soft: #20392e;
-  --strong: #2a493a;
-  --text: #eef7ee;
-  --muted: #bbcebd;
-  --faint: #a0b9a5;
-  --border: #385844;
-  --border-strong: #587764;
-  --plum: #a1d3b4;
-  --plum-strong: #c0e5ca;
-  --danger: #ed9ba6;
-  --warning: #f0bc73;
-  --info: #8fc9dc;
+  --page: #12151b;
+  --surface: #1a1f29;
+  --soft: #222938;
+  --strong: #2b3447;
+  --text: #f2f4f7;
+  --muted: #b4bfce;
+  --faint: #8f9cad;
+  --border: #313a4a;
+  --border-strong: #46546b;
+  --plum: #9ca7ff;
+  --plum-strong: #c0c7ff;
+  --danger: #f2a0ae;
+  --warning: #f0bd76;
+  --info: #83d9ed;
   --shadow: 0 16px 38px rgba(0, 0, 0, 0.28);
-  --flow-grid: #314c3d;
-  --status-idle: #bbcebd;
-  --status-pending: #bbcebd;
-  --status-ready: #a1d3b4;
-  --status-running: #8fc9dc;
-  --status-waiting-for-human: #f0bc73;
-  --status-passed: #80d4b0;
-  --status-failed: #ed9ba6;
-  --status-uncertain: #f0bc73;
-  --status-stale: #bed0b6;
+  --flow-grid: #2b3445;
+  --status-idle: #b4bfce;
+  --status-pending: #b4bfce;
+  --status-ready: #a9b4ff;
+  --status-running: #83d9ed;
+  --status-waiting-for-human: #f0bd76;
+  --status-passed: #73d79c;
+  --status-failed: #f2a0ae;
+  --status-uncertain: #f0bd76;
+  --status-stale: #b4bfce;
 }
 
 * {
@@ -240,7 +240,7 @@ button {
   color: var(--surface);
 }
 [data-dark] .button.primary {
-  color: #25162a;
+  color: #131722;
 }
 .button.primary:hover:not(:disabled) {
   background: var(--plum);
@@ -496,6 +496,9 @@ pre {
   border: 1px solid var(--border);
   border-radius: 11px;
   box-shadow: var(--shadow);
+}
+.react-flow__controls.top.left {
+  margin: 18px;
 }
 .react-flow__controls-button {
   border-color: var(--border);

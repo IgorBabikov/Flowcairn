@@ -58,6 +58,15 @@ async function positions(page) {
   );
 }
 
+function overlaps(left, right) {
+  return (
+    left.x < right.x + right.width &&
+    left.x + left.width > right.x &&
+    left.y < right.y + right.height &&
+    left.y + left.height > right.y
+  );
+}
+
 function redundantChain() {
   const current = snapshot();
   const ids = [
@@ -143,6 +152,43 @@ test('desktop opens the complete dependency-ordered chain in compact rows and pr
   await page.screenshot({ path: 'output/playwright/compact-layout-light.png', fullPage: true });
   await page.getByRole('button', { name: 'Сменить тему', exact: true }).click();
   await page.screenshot({ path: 'output/playwright/compact-layout-dark.png', fullPage: true });
+});
+
+test('keeps canvas controls in a reserved top-left zone away from graph nodes', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await mockApi(page, chain());
+  await page.goto(`/#session=${token}`);
+  const controls = page.locator('.react-flow__controls');
+  await expect(controls).toHaveClass(/top/);
+  await expect(controls).toHaveClass(/left/);
+  const controlsBox = await controls.boundingBox();
+  const cards = await page.locator('.graph-node').evaluateAll((nodes) =>
+    nodes.map((node) => {
+      const box = node.getBoundingClientRect();
+      return { x: box.x, y: box.y, width: box.width, height: box.height };
+    }),
+  );
+  expect(controlsBox).not.toBeNull();
+  for (const card of cards) expect(overlaps(controlsBox, card)).toBe(false);
+});
+
+test('keeps controls away from the focused node on mobile', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockApi(page, chain());
+  await page.goto(`/#session=${token}`);
+  const controls = page.locator('.react-flow__controls');
+  await expect(controls).toHaveClass(/top/);
+  const controlsBox = await controls.boundingBox();
+  const visibleCards = await page.locator('.graph-node').evaluateAll((nodes) =>
+    nodes
+      .map((node) => {
+        const box = node.getBoundingClientRect();
+        return { x: box.x, y: box.y, width: box.width, height: box.height };
+      })
+      .filter((box) => box.x + box.width > 0 && box.y + box.height > 0),
+  );
+  expect(controlsBox).not.toBeNull();
+  for (const card of visibleCards) expect(overlaps(controlsBox, card)).toBe(false);
 });
 
 test('keeps a serial workflow compact when it retains transitive dependencies', async ({ page }) => {

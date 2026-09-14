@@ -1348,7 +1348,7 @@ export function App() {
                         minZoom: 0.9,
                         padding: 0.32,
                       }
-                    : { minZoom: 0.08, padding: 0.14 }),
+                    : { minZoom: 0.08, padding: 0.2 }),
                   maxZoom: 1,
                 }}
                 maxZoom={1.35}
@@ -1383,7 +1383,7 @@ export function App() {
                     nodeColor={(node) => `var(--status-${String(node.data.status)})`}
                   />
                 )}
-                <Controls showInteractive={false} />
+                <Controls position="top-left" showInteractive={false} />
               </ReactFlow>
             ) : selectedRunId && !snapshot ? (
               <LoadingState label={labels.loading} />

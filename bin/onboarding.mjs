@@ -18,6 +18,14 @@ const SetupSchema = z.strictObject({
 });
 const fail = (code, message) => { throw new GraphError(code, message); };
 
+function paint(output, code, text) {
+  return output.isTTY ? `\x1b[${code}m${text}\x1b[0m` : text;
+}
+
+function step(output, index, title) {
+  output.write(`\n${paint(output, '1;38;5;99', `Шаг ${index} из 4`)} ${paint(output, '1', title)}\n`);
+}
+
 export function inspectOnboarding(root) {
   let profile;
   try { profile = loadProjectProfile(root); }
@@ -61,42 +69,46 @@ export async function collectOnboarding(root, options = {}, terminal = {}) {
     return answer;
   };
   try {
-    output.write('\nFlowcairn · первая настройка\n\n');
-    output.write('Codex — macOS. OpenAI API — macOS/Linux. Claude и Cursor пока недоступны для исполнения.\n');
-    const providerAnswer = options.provider ?? await ask(`AI: 1 — Codex (macOS), 2 — OpenAI API [Enter — ${defaultProvider() === 'codex' ? '1' : '2'}]: `, defaultProvider());
+    output.write(`\n${paint(output, '1;38;5;99', 'Flowcairn')} ${paint(output, '2', '· от задачи до проверенного результата')}\n`);
+    output.write(`${paint(output, '38;5;245', 'Ответьте на четыре коротких вопроса. Код не изменится до согласования плана.')}\n`);
+    step(output, 1, 'Как Flowcairn будет работать с AI');
+    output.write(`${paint(output, '38;5;99', '[1]')} Codex — использовать настроенный Codex\n`);
+    output.write(`${paint(output, '38;5;99', '[2]')} OpenAI API — использовать ваш ключ из окружения\n`);
+    const providerAnswer = options.provider ?? await ask(`Выбор [${defaultProvider() === 'codex' ? '1' : '2'}]: `, defaultProvider());
     const provider = ({'1':'codex','2':'openai'})[providerAnswer] ?? providerAnswer;
     if (!['codex','openai'].includes(provider)) fail('PROVIDER_UNSUPPORTED', 'Выберите Codex или OpenAI API. Claude и Cursor пока не подключены.');
     if (provider === 'codex' && process.platform !== 'darwin') fail('PROVIDER_PLATFORM', 'Исполнение Codex пока доступно только на macOS.');
-    output.write('По умолчанию: одна модель для всех этапов, среднее усиление. Настройки IDE не наследуются. Изменить модель и усиление можно через npx flowcairn setup.\n');
+    step(output, 2, 'Выберите модель');
+    output.write(`${paint(output, '38;5;245', 'Одна модель для всей задачи. Более тонкие настройки доступны позже через npx flowcairn setup.')}\n`);
+    output.write(`${paint(output, '38;5;245', 'Укажите название модели, не API-ключ.')}\n`);
     const advanced = options.advanced === true;
-    const mode = advanced ? await choice('model-mode', 'Модели: manual — одна вручную, auto — заданные вами модели по этапам [Enter — manual]: ', ['manual','auto'], 'manual') : options['model-mode'] ?? 'manual';
-    output.write('Введите ID модели, не API-ключ. Доступность здесь не проверяется.\n');
-    const model = options.model ?? await ask('ID модели: ', '');
+    const mode = advanced ? await choice('model-mode', 'Режим: manual — одна модель, auto — модели по этапам [Enter — manual]: ', ['manual','auto'], 'manual') : options['model-mode'] ?? 'manual';
+    const model = options.model ?? await ask('ID модели, например gpt-5.6-terra: ', '');
     if (!model) fail('MODEL_REQUIRED', 'Нужен ID модели. Файлы не изменены.');
-    const reasoning = advanced ? await choice('reasoning-effort', 'Усиление: low — низкое, medium — среднее, high — высокое, xhigh — максимальное [Enter — medium]: ', ['low','medium','high','xhigh'], 'medium') : options['reasoning-effort'] ?? 'medium';
+    const reasoning = advanced ? await choice('reasoning-effort', 'Усиление: low, medium, high или xhigh [Enter — medium]: ', ['low','medium','high','xhigh'], 'medium') : options['reasoning-effort'] ?? 'medium';
     const review = mode === 'auto' ? {
       'review-model': options['review-model'] ?? await ask('Модель ревью [Enter — та же]: ', model),
       'review-reasoning-effort': await choice('review-reasoning-effort', 'Усиление ревью [low / medium / high / xhigh; Enter — high]: ', ['low','medium','high','xhigh'], 'high'),
     } : {};
-    const testsAnswer = options['test-policy'] ?? await ask('Тесты: 1 — сохранить подход проекта, 2 — добавлять по задаче [Enter — 1]: ', 'keep');
+    step(output, 3, 'Как поступать с тестами');
+    output.write(`${paint(output, '38;5;99', '[1]')} Сохранить текущий подход проекта\n`);
+    output.write(`${paint(output, '38;5;99', '[2]')} Добавлять тесты, когда это оправдано задачей\n`);
+    const testsAnswer = options['test-policy'] ?? await ask('Выбор [1]: ', 'keep');
     const testPolicy = ({'1':'keep','2':'add'})[testsAnswer] ?? testsAnswer;
     if (!['keep','add'].includes(testPolicy)) fail('ONBOARDING_CHOICE', 'Выберите подход к тестам из списка.');
     const yes = async (text) => ['да', 'yes'].includes((await ask(text, 'нет')).toLowerCase());
     const coverage = options.coverage ?? (advanced ? await yes('Нужно измерять покрытие тестами? [да / нет; Enter — нет]: ') : false);
-    output.write(`\nЧтение и передача выбранному AI (${provider}): отслеживаемые Git файлы проекта, описание задач, подключенные инструкции и разрешенные результаты. Известные секретные пути исключаются; не включайте секреты в исходный код. Изменения начнутся только после согласования плана.\n`);
-    const readConsent = options['read-consent'] ?? await yes('Разрешить это чтение и передачу для задач проекта? [да / нет; Enter — нет]: ');
-    output.write('Существующие инструкции сохраняются. Пакетные Skills доступны в установленном Flowcairn; их копии в проект не нужны.\n');
+    step(output, 4, 'Согласуйте границы работы');
+    output.write(`${paint(output, '38;5;245', 'Flowcairn прочитает только разрешенные файлы проекта. Изменения начнутся только после вашего согласования плана.')}\n`);
+    const readConsent = options['read-consent'] ?? await yes('Разрешить чтение проекта для подготовки плана? [да / нет; Enter — нет]: ');
+    output.write(`${paint(output, '38;5;245', 'Ваши правила проекта сохранятся. Flowcairn добавит только слой управления Graph.')}\n`);
     const instructionApi = await import('../scripts/ai-graph/lib/instructions.mjs');
     const assess = Reflect.get(instructionApi, 'assessProjectInstructions');
     if (typeof assess === 'function') {
       const report = assess(root, { instructionManifest: instructionApi.inspectInstructions({projectRoot:root}) });
-      output.write('Проверка инструкций не подтверждает их качество; существующие правила сохраняются.\n');
-      for (const finding of report.findings.slice(0, 3)) {
-        const text = [...String(finding.message)].filter((char) => char.charCodeAt(0) >= 32 && char.charCodeAt(0) !== 127).join('').slice(0, 240);
-        output.write(`  · ${text}\n`);
-      }
+      if (report.findings.length) output.write(`${paint(output, '38;5;245', 'Нашли существующие AI-правила. Они будут сохранены и учтены.')}\n`);
     }
-    const consent = options.consent ?? await yes('Добавить в AGENTS инструкции Graph, сохранив ваши правила? [да / нет; Enter — нет]: ');
+    const consent = options.consent ?? await yes('Подключить Graph к правилам проекта? [да / нет; Enter — нет]: ');
     return { ...options, provider, model, 'model-mode':mode, 'reasoning-effort':reasoning, ...review, 'test-policy':testPolicy, coverage, 'read-consent':readConsent, consent };
   } finally { if (!terminal.prompt) prompt.close(); }
 }
