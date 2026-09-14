@@ -68,7 +68,10 @@ test('product intake требует локальное согласие и не 
 });
 test('анализ передается полностью, план уточняется без повторного анализа, одного согласования достаточно',async(t)=>{
  const f=await fixture(t);const initial=await f.intake();let s=await f.settle(initial);
+ assert.equal(f.service.listRuns().find(run=>run.runId===s.runId).task.taskNumber,'ФОРМА-12');
  assert.equal(s.status,'waiting-for-human');assert.equal(s.phase,'execution');
+ assert.deepEqual(s.gates[0].scope, [...new Set(s.nodes.flatMap(node=>node.resources.writes))].sort());
+ assert.match(s.gates[0].consequences.approve,/автоматически/);
  assert.deepEqual(f.calls.map(c=>c.action),['ai-analyze','ai-plan']);
  assert.deepEqual(f.calls[1].priorEvidence.analysis.result.analysis,analysis);
  const oldHash=s.planHash;

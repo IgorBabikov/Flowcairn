@@ -1181,7 +1181,7 @@ export class WorkflowService {
         nodeId: node.id,
         type: node.action.id === 'human-approve' ? 'approve-plan' : 'accept-result',
         title: node.title,
-        scope: task.scope,
+        scope: plan.workflow === 'autonomous' ? unique(plan.nodes.flatMap(item => item.resources.writes)).sort() : task.scope,
         readPaths: unique(
           plan.nodes
             .filter((n) => ['analysis', 'implementation', 'review'].includes(n.success.kind))
@@ -1191,7 +1191,9 @@ export class WorkflowService {
         requiredPermissions: unique(plan.nodes.flatMap((n) => n.permissions)),
         risks: [
           `AI provider: ${this.adapters.project?.ai.provider ?? 'codex'}; model: ${this.adapters.project?.ai.model ?? 'configured'}. Вызов может расходовать платный лимит.`,
-          'Задание, исходники в readPaths и назначенные инструкции/Skills будут переданы выбранному AI после отдельного Run.',
+          plan.workflow === 'autonomous'
+            ? 'После согласования начнутся изменения, проверки и ревью. Разрешение чтения задано в настройках проекта.'
+            : 'Задание, исходники в readPaths и назначенные инструкции/Skills будут переданы выбранному AI после отдельного Run.',
           'AI может ошибаться. Приемка опирается на diff, checks и review.',
           'Разрешенная запись изменяет только изолированный workspace.',
         ],
@@ -1199,7 +1201,9 @@ export class WorkflowService {
         consequences: {
           approve:
             node.action.id === 'human-approve'
-              ? 'Разрешить исполнение этого immutable плана с указанными правами.'
+              ? plan.workflow === 'autonomous'
+                ? `Выполнить план автоматически в указанных границах, включая до ${plan.autonomy.maxRepairCycles} циклов исправлений. Общий срок — ${Math.floor(plan.autonomy.maxDurationMs / 60000)} минут. Commit и PR остаются за вами.`
+                : 'Разрешить исполнение этого immutable плана с указанными правами.'
               : 'Принять локальный результат и handoff. Интеграция в Git остается отдельным действием.',
           reject: 'Закрыть этот run без запуска следующих действий.',
         },
@@ -1290,6 +1294,7 @@ export class WorkflowService {
           task: task
             ? {
                 id: task.id,
+                taskNumber: sanitizeText(task.taskNumber ?? task.id),
                 goal: sanitizeText(task.goal),
                 scope: task.scope,
                 acceptance: task.acceptance.map(sanitizeText),
