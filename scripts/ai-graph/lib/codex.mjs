@@ -17,6 +17,7 @@ export function buildPrompt({ nodeId, task, plan, skills, priorEvidence, reviewE
     `Контракт текущего узла:\n${JSON.stringify(node)}`,
     `skillsUsed должен содержать точные runtime IDs назначенных инструкций: ${JSON.stringify(node.skills ?? [])}. Подтверди соблюдение всех назначенных правил; не заменяй runtime ID именем из YAML frontmatter и не добавляй свои Skills.`,
     `Разрешенные изменения только для текущего узла: ${node.resources?.writes?.join(', ') || 'нет, узел только читает'}. Не предлагай edits для файлов других этапов, даже если они входят в общую задачу.`,
+    node.action?.id !== 'ai-implement' ? 'Этот этап только читает: edits=[] и changedFiles=[]. Файлы предыдущих изменений описывай в findings; не записывай их как изменения текущего этапа.' : '',
     `Объявленный read context: ${node.resources?.reads?.join(', ') ?? ''}`,
     `Acceptance:\n- ${task.acceptance.join('\n- ')}`,
     'Новые тесты добавляй по риску изменения и правилам проекта. Явный запрет новых тестов соблюдай и укажи ограничение в evidence. Не придумывай обязательный coverage или единый набор проверок: runtime запускает только настроенные checks.',

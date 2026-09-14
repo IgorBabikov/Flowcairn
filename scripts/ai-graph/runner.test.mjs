@@ -469,6 +469,8 @@ test('review file transport grants exactly one trusted read without enlarging pr
     assert.ok(Buffer.byteLength(prepared.input) < 128 * 1024);
     const schema = JSON.parse(readFileSync(prepared.schemaFile, 'utf8'));
     assert.ok(schema.required.includes('reviewEvidenceHash'));
+    assert.equal(schema.properties.edits.maxItems, 0);
+    assert.equal(schema.properties.changedFiles.maxItems, 0);
     assert.deepEqual(schema.properties.skillsUsed.items.enum, node.skills);
     assert.equal(schema.properties.skillsUsed.minItems, node.skills.length);
     assert.equal(schema.properties.skillsUsed.maxItems, node.skills.length);

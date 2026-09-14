@@ -466,6 +466,12 @@ function aiResponseSchema(node, plan) {
   if (schema.properties?.skillsUsed && node.skills?.length) {
     schema.properties.skillsUsed = { type: 'array', items: { type: 'string', enum: [...node.skills] }, minItems: node.skills.length, maxItems: node.skills.length };
   }
+  if (node.action.id !== 'ai-implement') {
+    for (const key of ['edits', 'changedFiles']) {
+      const property = schema.properties?.[key];
+      if (typeof property === 'object' && property !== null) property.maxItems = 0;
+    }
+  }
   const edits = schema.properties?.edits;
   if (node.action.id === 'ai-implement' && node.resources?.writes?.length && typeof edits === 'object' && edits !== null && typeof edits.items === 'object' && !Array.isArray(edits.items) && typeof edits.items.properties?.path === 'object') {
     const scopes = node.resources.writes.map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\/$/, ''));
