@@ -314,3 +314,14 @@ test('ручное повторное планирование продолжа�
  assert.equal(f.calls.some(call=>call.action==='ai-implement'),false);
  s=await f.approve(s);s=await f.settle(s);assert.equal(s.completion,'ready-for-review');
 });
+
+test('готовое read-only планирование восстанавливается новой версией после runtime drift',async(t)=>{
+ const f=await fixture(t,{maxReplans:3});
+ const created=await f.service.create({id:'TASK-DRIFT-READY',goal:'Проверка формы',instructions:'Проверить email',scope:['src'],acceptance:['Email отклонен'],checks:['tests'],limits:{maxReplans:3}},{runId:'drift-ready',workflow:'autonomous',stage:'planning'});
+ const nextRuntime=hashObject('updated-runtime');f.setRuntimeHash(nextRuntime);
+ let s=f.service.snapshot(created.runId);assert.equal(s.integrity.valid,false);assert.equal(s.capabilities.run.allowed,false);
+ assert.equal(s.capabilities.requestReplan.allowed,true);
+ s=await f.service.command(s.runId,'replan',request(s));s=await f.settle(s);
+ assert.equal(s.status,'waiting-for-human');assert.equal(f.service.plan(s.runId).runtimeHash,nextRuntime);
+ assert.equal(f.service.plan(created.runId).runtimeHash,hash);assert.equal(f.calls.some(call=>call.action==='ai-implement'),false);
+});

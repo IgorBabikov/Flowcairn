@@ -1074,7 +1074,7 @@ export class WorkflowService {
       const ready = state.nodes[planner.id].status === 'passed';
       const usable = !state.activeOperation && !state.finalDisposition && !state.setupPending && !lock;
       if (ready && usable) capabilities.run.requestReplan = { allowed: true, reason: null };
-      if (!ready && !['failed', 'uncertain', 'stale'].includes(state.status))
+      if (!ready && !['ready', 'failed', 'uncertain', 'stale'].includes(state.status))
         capabilities.run.requestReplan = { allowed: false, reason: 'Сначала выполните AI-планирование' };
       for (const definition of plan.nodes.filter((node) => node.action.id === 'human-accept')) {
         capabilities.nodes[definition.id].accept = { allowed: false, reason: 'Planning не является результатом реализации' };
@@ -2471,7 +2471,7 @@ export class WorkflowService {
         nextStage = 'execution';
         planningTransitions = (state.planningTransitions ?? 0) + 1;
         planningEvidence = { artifactId, receiptIds: state.nodes[planner.id].receipts, steps: output.steps };
-      } else if (!['failed', 'uncertain', 'stale'].includes(state.status)) {
+      } else if (!['ready', 'failed', 'uncertain', 'stale'].includes(state.status)) {
         fail('PLANNING_INCOMPLETE', 'Сначала выполните AI-планирование');
       }
     } else if (plan.stage === 'execution' && !request.draft) {
