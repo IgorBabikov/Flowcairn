@@ -310,16 +310,32 @@ button {
   flex-direction: column;
 }
 .rail-heading {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
-  justify-content: space-between;
-  padding: 14px;
+  gap: 8px;
+  padding: 10px;
   border-block-end: 1px solid var(--border);
 }
 .rail-heading h2,
 .graph-header h2 {
   margin: 0;
   font-size: 0.88rem;
+}
+.rail-heading h2,
+.rail-heading .button {
+  white-space: nowrap;
+}
+.rail-heading .button.compact {
+  min-height: 32px;
+  padding: 5px 6px;
+  font-size: 0.72rem;
+}
+.rail-heading .icon-button {
+  width: 32px;
+  padding: 0;
+  font-size: 1rem;
+  line-height: 1;
 }
 .run-list {
   flex: 1;

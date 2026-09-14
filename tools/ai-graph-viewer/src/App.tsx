@@ -1242,12 +1242,12 @@ export function App() {
           <div className="rail-heading">
             <h2>{labels.runs}</h2>
             <button
-              className="button compact quiet"
+              aria-label={labels.refresh}
+              className="button compact quiet icon-button"
               onClick={() => void refreshRuns()}
+              title={labels.refresh}
               type="button"
-            >
-              {labels.refresh}
-            </button>
+            >↻</button>
             <button
               id="new-task"
               type="button"

@@ -6,35 +6,54 @@ function chain() {
   const current = snapshot();
   current.gates = [];
   current.status = 'running';
-  current.activeNodeId = 'stage-4';
-  current.task = { ...current.task, id: 'ORCH-001', goal: 'Добавить проверку пустого ввода', scope: ['src/validate.js'] };
+  current.activeNodeId = 'stage-3';
+  // FORM-102 — воспроизводимый presentation-сценарий первой задачи из docs/VERIFICATION.md.
+  current.task = {
+    ...current.task,
+    id: 'FORM-102',
+    taskNumber: 'FORM-102',
+    goal: 'Добавить форму регистрации компании',
+    scope: ['src/registration'],
+    acceptance: [
+      'Email и пароль валидируются',
+      'Для компании показаны название и ИНН',
+      'Повторная отправка заблокирована',
+    ],
+  };
   const actions = [
-    ['human-approve', 'gate'], ['ai-analyze', 'analysis'], ['ai-implement', 'implementation'],
-    ['workspace-check', 'checks'], ['check-lint', 'checks'], ['check-tests', 'checks'],
+    ['ai-analyze', 'analysis'], ['ai-plan', 'planning'], ['human-approve', 'gate'],
+    ['ai-implement', 'implementation'], ['workspace-check', 'checks'], ['check-tests', 'checks'],
     ['ai-review', 'review'], ['artifact-handoff', 'handoff'], ['human-accept', 'gate'],
   ];
   const titles = [
-    'Подтвердить план',
-    'Понять задачу',
-    'Реализовать',
+    'Анализ формы и проекта',
+    'План реализации',
+    'Согласовать план',
+    'Реализовать форму регистрации',
     'Проверить изменения',
-    'Проверить стиль кода',
-    'Проверить тесты',
+    'Проверить форму и тесты',
     'Провести независимое ревью',
     'Подготовить результат',
-    'Принять результат',
+    'Готово к личному ревью',
   ];
   current.nodes = Array.from({ length: 9 }, (_, index) =>
     graphNode({
       id: `stage-${index}`,
       title: titles[index],
       action: { id: actions[index][0], kind: actions[index][1] },
-      outcome: 'Выполнить условия этапа',
+      outcome: index === 3 ? 'Создать форму с email, паролем, названием компании и ИНН' : 'Выполнить условия этапа',
       receiptIds: [],
       skills: [],
-      attempt: index <= 4 ? 1 : 0,
+      ...(index === 3
+        ? {
+            mode: 'write',
+            permissions: ['workspace.source.write'],
+            resources: { reads: ['src/registration'], writes: ['src/registration'] },
+          }
+        : {}),
+      attempt: index <= 3 ? 1 : 0,
       needs: index ? [`stage-${index - 1}`] : [],
-      status: index < 4 ? 'passed' : index === 4 ? 'running' : 'pending',
+      status: index < 3 ? 'passed' : index === 3 ? 'running' : 'pending',
       capabilities: allDenied,
     }),
   );
@@ -137,21 +156,37 @@ test('desktop opens the complete dependency-ordered chain in compact rows and pr
   const transforms = await page
     .locator('.react-flow__node')
     .evaluateAll((nodes) => nodes.map((node) => node.style.transform));
-  fixture.current().nodes.find((node) => node.id === 'stage-4').status = 'passed';
+  fixture.current().nodes.find((node) => node.id === 'stage-3').status = 'passed';
   fixture.current().revision++;
-  await expect(page.locator('[data-id="stage-4"] .node-status')).toHaveText('Завершен');
+  await expect(page.locator('[data-id="stage-3"] .node-status')).toHaveText('Завершен');
   expect(
     await page
       .locator('.react-flow__node')
       .evaluateAll((nodes) => nodes.map((node) => node.style.transform)),
   ).toEqual(transforms);
-  fixture.current().nodes.find((node) => node.id === 'stage-4').status = 'running';
+  fixture.current().nodes.find((node) => node.id === 'stage-3').status = 'running';
   fixture.current().revision++;
-  await expect(page.locator('[data-id="stage-4"] .node-status')).toHaveText('Выполняется');
+  await expect(page.locator('[data-id="stage-3"] .node-status')).toHaveText('Выполняется');
   await mkdir('output/playwright', { recursive: true });
   await page.screenshot({ path: 'output/playwright/compact-layout-light.png', fullPage: true });
   await page.getByRole('button', { name: 'Сменить тему', exact: true }).click();
   await page.screenshot({ path: 'output/playwright/compact-layout-dark.png', fullPage: true });
+});
+
+test('keeps run rail actions on one compact line', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await mockApi(page, chain());
+  await page.goto(`/#session=${token}`);
+  const heading = await page.locator('.rail-heading').boundingBox();
+  const newTask = await page.locator('#new-task').boundingBox();
+  const refresh = await page.getByRole('button', { name: 'Обновить', exact: true }).boundingBox();
+  expect(heading).not.toBeNull();
+  expect(newTask).not.toBeNull();
+  expect(refresh).not.toBeNull();
+  expect(newTask.height).toBeLessThanOrEqual(34);
+  expect(refresh.height).toBeLessThanOrEqual(34);
+  expect(newTask.y).toBeGreaterThanOrEqual(heading.y);
+  expect(newTask.y + newTask.height).toBeLessThanOrEqual(heading.y + heading.height);
 });
 
 test('keeps canvas controls in a reserved top-left zone away from graph nodes', async ({ page }) => {
