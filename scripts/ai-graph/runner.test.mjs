@@ -632,3 +632,23 @@ test('соседний AGENT.md не входит в scoped AI context и зап
  assert.ok(!selected.some(file=>file.path==='apps/web/AGENT.md'));
  assert.ok(RUNNER_TESTING.instructionDenials(root,node,profile).includes('apps/web/AGENT.md'));
 });
+
+
+test('схема edits ограничена буквальными путями текущего узла', async () => {
+  const { RUNNER_TESTING } = await import('./lib/runner.mjs');
+  const outputPath = realpathSync(fixture());
+  const contract = runnerContract();
+  const node = { ...contract.node, action: { id: 'ai-implement', version: 1, inputs: {} }, skills: ['project-context'], resources: { reads: ['src', 'styles.css'], writes: ['src/form.mjs', 'styles.css'], exclusive: [] } };
+  const prepared = RUNNER_TESTING.makeAiCommand({ ...contract, node, plan: { ...contract.plan, nodes: [node] }, worktree: '/private/tmp/isolated-worktree', skills: [], priorEvidence: null, outputPath,
+    profile: { ai: { model: 'fixture-model' }, outputPaths: [] },
+    toolchain: { node: process.execPath, codexEntry: '/trusted/codex.js', digest: 'a'.repeat(64) },
+    dependencyToolchain: { dependencyPaths: [], hash: 'b'.repeat(64) },
+  });
+  try {
+    const schema = JSON.parse(readFileSync(prepared.schemaFile, 'utf8'));
+    const pattern = new RegExp(schema.properties.edits.items.properties.path.pattern);
+    assert.ok(pattern.test('src/form.mjs')); assert.ok(pattern.test('styles.css'));
+    assert.equal(pattern.test('src/formXmjs'), false); assert.equal(pattern.test('index.html'), false);
+    assert.match(prepared.input, /только для текущего узла: src\/form.mjs, styles.css/);
+  } finally { RUNNER_TESTING.cleanupPrepared(prepared); }
+});

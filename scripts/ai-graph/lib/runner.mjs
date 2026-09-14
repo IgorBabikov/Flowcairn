@@ -466,6 +466,11 @@ function aiResponseSchema(node, plan) {
   if (schema.properties?.skillsUsed && node.skills?.length) {
     schema.properties.skillsUsed = { type: 'array', items: { type: 'string', enum: [...node.skills] }, minItems: node.skills.length, maxItems: node.skills.length };
   }
+  const edits = schema.properties?.edits;
+  if (node.action.id === 'ai-implement' && node.resources?.writes?.length && typeof edits === 'object' && edits !== null && typeof edits.items === 'object' && !Array.isArray(edits.items) && typeof edits.items.properties?.path === 'object') {
+    const scopes = node.resources.writes.map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\/$/, ''));
+    edits.items.properties.path = { ...edits.items.properties.path, pattern: `^(?:${scopes.join('|')})(?:/.*)?$` };
+  }
   return schema;
 }
 
