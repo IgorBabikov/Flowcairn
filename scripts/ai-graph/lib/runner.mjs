@@ -472,6 +472,7 @@ function aiResponseSchema(node, plan) {
       if (typeof property === 'object' && property !== null) property.maxItems = 0;
     }
   }
+  if (node.action.id === 'ai-plan' && typeof schema.properties?.plan === 'object') schema.properties.plan.maxItems = 0;
   const edits = schema.properties?.edits;
   if (node.action.id === 'ai-implement' && node.resources?.writes?.length && typeof edits === 'object' && edits !== null && typeof edits.items === 'object' && !Array.isArray(edits.items) && typeof edits.items.properties?.path === 'object') {
     const scopes = node.resources.writes.map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\/$/, ''));
