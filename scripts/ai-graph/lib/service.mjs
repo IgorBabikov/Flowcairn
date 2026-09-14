@@ -1703,7 +1703,13 @@ export class WorkflowService {
             : output.verdict === 'uncertain'
               ? 'uncertain'
               : 'fail';
-        if (verdict !== 'pass') reason = 'Semantic contract не подтвержден';
+        if (verdict !== 'pass') {
+          reason = sanitizeText(output.findings.find((finding) => finding.severity === 'blocking')?.message || output.summary || 'AI не подтвердил результат');
+          if (action.kind === 'implementation')
+            artifacts.push(this.#putArtifact('review-findings', 'Почему реализация остановлена', {
+              summary: safe.summary, verdict, findings: safe.findings,
+            }));
+        }
         if (action.kind === 'analysis')
           artifacts.push(this.#putArtifact('analysis', 'Анализ задачи', safe));
         if (action.kind === 'review')

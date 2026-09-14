@@ -862,7 +862,8 @@ function intendedSecurity(input, contractFile) {
     logOptions: { compress: 'false', 'max-file': '1', 'max-size': '8m' },
     tmpfs: {
       '/tmp': 'rw,noexec,nosuid,nodev,size=67108864,nr_inodes=16384,uid=1000,gid=1000,mode=0700',
-      '/workspace': 'rw,nosuid,nodev,size=1073741824,nr_inodes=131072,uid=1000,gid=1000,mode=0700',
+      // Docker tmpfs defaults to noexec. Approved checks need package bins/native tools here.
+      '/workspace': 'rw,exec,nosuid,nodev,size=1073741824,nr_inodes=131072,uid=1000,gid=1000,mode=0700',
     },
     mounts: [
       { destination: '/contract.json', rw: false, source: contractFile, type: 'bind' },
@@ -944,7 +945,7 @@ function createArguments({ input, image, contractFile, labels, name }) {
     '--mount',
     `type=bind,src=${contractFile},dst=/contract.json,readonly`,
     '--tmpfs',
-    '/workspace:rw,nosuid,nodev,size=1073741824,nr_inodes=131072,uid=1000,gid=1000,mode=0700',
+    '/workspace:rw,exec,nosuid,nodev,size=1073741824,nr_inodes=131072,uid=1000,gid=1000,mode=0700',
     '--workdir',
     '/workspace',
     '--user',

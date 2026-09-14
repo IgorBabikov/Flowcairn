@@ -149,13 +149,18 @@ test('container create argv has fixed containment and no host write mount', () =
   assert.equal(args.includes('type=volume,dst=/workspace'), false);
   assert.ok(
     args.includes(
-      '/workspace:rw,nosuid,nodev,size=1073741824,nr_inodes=131072,uid=1000,gid=1000,mode=0700',
+      '/workspace:rw,exec,nosuid,nodev,size=1073741824,nr_inodes=131072,uid=1000,gid=1000,mode=0700',
     ),
   );
   assert.match(
     DOCKER_CHECKS_TESTING.intendedSecurity(input, '/contract.json').tmpfs['/workspace'],
     /size=1073741824,nr_inodes=131072/,
   );
+  const security = DOCKER_CHECKS_TESTING.intendedSecurity(input, '/contract.json');
+  assert.ok(security.tmpfs['/workspace'].split(',').includes('exec'));
+  assert.ok(security.tmpfs['/tmp'].split(',').includes('noexec'));
+  for (const [mount, options] of Object.entries(security.tmpfs))
+    assert.ok(args.includes(`${mount}:${options}`), 'Expected security and create argv must match');
   const mounts = args.filter((value) => value.startsWith('type='));
   assert.deepEqual(mounts, [
     'type=bind,src=/repo/.ai-orchestrator/worktrees/TASK/attempt-1,dst=/input,readonly',

@@ -23,14 +23,15 @@ for (const [manager, version] of [['npm', null], ['pnpm', '11.8.0'], ['yarn', '4
     const pkg = {
       name: 'flowcairn-check-fixture', version: '1.0.0', private: true,
       ...(version ? { packageManager: `${manager}@${version}` } : {}),
-      workspaces: ['packages/*'], dependencies: { 'fixture-app': manager === 'npm' ? 'file:packages/app' : 'workspace:*' },
-      scripts: { test: 'node check.cjs', postinstall: 'node -e "require(\'fs\').writeFileSync(\'forbidden-hook\',\'ran\')"' },
+      workspaces: ['packages/*'], dependencies: { 'fixture-app': manager === 'npm' ? 'file:packages/app' : 'workspace:*', ...(manager === 'npm' ? { eslint: '5.16.0' } : {}) },
+      ...(manager === 'npm' ? { eslintConfig: { env: { node: true, es6: true } } } : {}),
+      scripts: { test: manager === 'npm' ? 'eslint check.cjs && node check.cjs' : 'node check.cjs', postinstall: 'node -e "require(\'fs\').writeFileSync(\'forbidden-hook\',\'ran\')"' },
     };
     writeFileSync(path.join(root, 'package.json'), JSON.stringify(pkg));
     mkdirSync(path.join(root, 'packages/app'), { recursive: true });
     writeFileSync(path.join(root, 'packages/app/package.json'), '{"name":"fixture-app","version":"1.0.0","main":"index.cjs"}');
     writeFileSync(path.join(root, 'packages/app/index.cjs'), 'module.exports = 42;');
-    writeFileSync(path.join(root, 'check.cjs'), "const a=require('node:assert/strict'); a.equal(require('fixture-app'),42); a.equal(require('node:fs').existsSync('forbidden-hook'),false); console.log('WORKSPACE_SCRIPT_PASSED');");
+    writeFileSync(path.join(root, 'check.cjs'), "const a=require('node:assert/strict'),f=require('node:fs'); a.equal(require('fixture-app'),42); a.equal(f.existsSync('forbidden-hook'),false); f.copyFileSync('/bin/busybox','/workspace/busybox'); require('node:child_process').execFileSync('/workspace/busybox',['true']); console.log('WORKSPACE_SCRIPT_AND_NATIVE_BINARY_PASSED');");
     writeFileSync(path.join(root, '.gitignore'), 'node_modules/\n.ai-orchestrator/\n.yarn/\n');
     if (manager === 'pnpm') writeFileSync(path.join(root, 'pnpm-workspace.yaml'), 'packages:\n  - packages/*\n');
     if (manager === 'yarn') writeFileSync(path.join(root, '.yarnrc.yml'), 'nodeLinker: node-modules\n');
@@ -46,11 +47,18 @@ for (const [manager, version] of [['npm', null], ['pnpm', '11.8.0'], ['yarn', '4
     const sources = ['package.json', 'check.cjs', 'packages/app/package.json', 'packages/app/index.cjs'];
     const contract = { version: 3, actionId: 'check-tests', packageManager: manager, timeoutMs: 10000, files: sources.map((relative) => { const bytes = readFileSync(path.join(root, relative)); return { path: relative, size: bytes.length, hash: sha256(bytes), mode: '100644' }; }) };
     writeFileSync(path.join(root, 'contract.json'), JSON.stringify(contract));
-    const output = docker(['run', '--rm', '--network=none', '--read-only', '--cap-drop=ALL', '--security-opt=no-new-privileges', '--tmpfs', '/tmp:rw,nosuid,nodev,uid=1000,gid=1000,mode=1777,size=64m', '--tmpfs', '/workspace:rw,nosuid,nodev,uid=1000,gid=1000,mode=0700,size=128m', '--mount', `type=bind,src=${root},dst=/input,readonly`, '--mount', `type=bind,src=${path.join(root, 'contract.json')},dst=/contract.json,readonly`, image.imageId, 'check-tests']);
+    // Use the actual production contract, not a separately maintained approximation.
+    const args = DOCKER_CHECKS_TESTING.createArguments({
+      input: { worktree: root, action: { id: 'check-tests' } }, image,
+      contractFile: path.join(root, 'contract.json'), labels: {},
+      name: `flowcairn-install-${manager}-${process.pid}-${Date.now()}`,
+    });
+    args[0] = 'run'; args.splice(1, 0, '--rm');
+    const output = docker(args);
     assert.match(output, /FLOWCAIRN_CHECK_RESULT /);
     const result = JSON.parse(output.trim().split('FLOWCAIRN_CHECK_RESULT ').pop());
     assert.equal(result.exitCode, 0, result.summary ?? output);
-    t.diagnostic(`${manager}${version ? '@' + version : ' bundled'}: real lock + skipped lifecycle + offline workspace resolution passed`);
+    t.diagnostic(`${manager}${version ? '@' + version : ' bundled'}: real lock + skipped lifecycle + offline workspace + native binary${manager === 'npm' ? ' + ESLint 5 binary' : ''} passed with production createArguments`);
   });
 }
 
