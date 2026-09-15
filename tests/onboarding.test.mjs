@@ -67,6 +67,17 @@ test('неподдерживаемый провайдер и противоре�
   assert.equal(existsSync(path.join(root,'.flowcairn.json')),false);
 });
 
+test('Claude и Cursor показываются как disabled execution, а не как доступный выбор', async t => {
+  const { inspectOnboarding } = await import('../bin/onboarding.mjs');
+  const status = inspectOnboarding(fixture(t));
+  for (const id of ['claude', 'cursor']) {
+    const provider = status.providers.find((item) => item.id === id);
+    assert.equal(provider.supported, false);
+    assert.notEqual(provider.state, 'available');
+    assert.match(provider.reason, /execution|адаптер|безопасный|запуск запрещен/i);
+  }
+});
+
 test('согласие привязано к локальной установке и AI-конфигурации', async t => {
   const root = fixture(t);
   const {hasOnboardingConsent,loadProjectProfile} = await import('../scripts/ai-graph/lib/project.mjs');

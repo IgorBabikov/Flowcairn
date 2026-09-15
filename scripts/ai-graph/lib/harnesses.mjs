@@ -1,5 +1,30 @@
 import { lstatSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { z } from 'zod';
+import { hashObject } from './io.mjs';
+
+const Hash = z.string().regex(/^[a-f0-9]{64}$/);
+const ExternalProviderConsentSchema = z.strictObject({
+  version: z.literal(1),
+  provider: z.enum(['claude', 'cursor']),
+  planHash: Hash,
+  scopeHash: Hash,
+  instructionsHash: Hash,
+  skillsHash: Hash,
+  artifactsHash: Hash,
+  transmitted: z.array(z.enum(['approved-scope', 'approved-instructions', 'approved-skills', 'approved-artifacts'])).min(1).max(4),
+  excluded: z.array(z.enum(['secrets', 'environment-files', 'git-history', 'unapproved-files', 'project-host-shell'])).min(5).max(5),
+}).refine((value) => new Set(value.transmitted).size === value.transmitted.length && new Set(value.excluded).size === value.excluded.length);
+
+export const EXTERNAL_PROVIDER_CONSENT = Object.freeze({
+  transmitted: Object.freeze(['approved-scope', 'approved-instructions', 'approved-skills', 'approved-artifacts']),
+  excluded: Object.freeze(['secrets', 'environment-files', 'git-history', 'unapproved-files', 'project-host-shell']),
+});
+
+/** Future external execution must bind this exact disclosure to its immutable plan and receipt. */
+export function externalProviderConsentHash(value) {
+  return hashObject(ExternalProviderConsentSchema.parse(value));
+}
 
 export const HARNESS_DESCRIPTORS = Object.freeze({
   codex: Object.freeze({
@@ -15,13 +40,23 @@ export const HARNESS_DESCRIPTORS = Object.freeze({
     pluginManifest: '.claude-plugin/plugin.json',
     instructions: Object.freeze(['CLAUDE.md', '.claude/rules/']),
     skills: Object.freeze(['.claude/skills/']),
+    runtime: Object.freeze({
+      status: 'consent-required',
+      execution: 'disabled',
+      reason: 'Официальный tool-free и JSON Schema путь найден, но Flowcairn еще не проверил закрепленную версию и полный receipt-цикл. До этого запуск запрещен.',
+    }),
   }),
   cursor: Object.freeze({
     label: 'Cursor',
-    executables: Object.freeze(['cursor-agent']),
+    executables: Object.freeze(['agent', 'cursor-agent']),
     pluginManifest: '.cursor-plugin/plugin.json',
     instructions: Object.freeze(['.cursor/rules/', '.cursorrules']),
     skills: Object.freeze(['.cursor/skills/', '.agents/skills/']),
+    runtime: Object.freeze({
+      status: 'official-adapter-unavailable',
+      execution: 'disabled',
+      reason: 'Официальный CLI возвращает JSON-обертку, но не доказывает строгую JSON Schema без встроенных write/shell tools. Безопасный adapter не реализован.',
+    }),
   }),
 });
 
@@ -53,7 +88,9 @@ export function inspectHarnesses({ env = process.env } = {}) {
       pluginManifest: descriptor.pluginManifest,
       instructions: descriptor.instructions,
       skills: descriptor.skills,
-      execution: id === 'codex' ? 'runtime-adapter' : 'integration-only',
+      runtime: id === 'codex'
+        ? { status: 'available', execution: 'runtime-adapter', reason: null }
+        : ('runtime' in descriptor ? descriptor.runtime : { status: 'official-adapter-unavailable', execution: 'disabled', reason: 'Execution adapter не подтвержден.' }),
     };
   });
 }

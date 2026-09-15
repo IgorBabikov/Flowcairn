@@ -33,14 +33,30 @@ export function inspectOnboarding(root) {
   try { profile = loadProjectProfile(root); }
   catch (error) { if (error.code !== 'PROJECT_PROFILE_MISSING') throw error; }
   const harnesses = new Map(inspectHarnesses().map((item) => [item.id, item]));
+  const externalProvider = (id) => {
+    const harness = harnesses.get(id);
+    const runtime = harness?.runtime;
+    const detected = harness?.detected === true;
+    return {
+      id,
+      label: harness?.label ?? id,
+      supported: false,
+      state: detected
+        ? runtime?.status ?? 'not-detected'
+        : 'not-detected',
+      reason: detected
+        ? runtime?.reason ?? 'Execution adapter не подтвержден.'
+        : `${harness?.label ?? id} не найден; execution adapter не включен.`,
+    };
+  };
   return {
     configured: Boolean(profile && hasOnboardingConsent(root, profile)),
     profileHash: profile ? projectProfileHash(root) : null,
     providers: [
-      { id: 'codex', label: 'Codex', supported: process.platform === 'darwin', reason: process.platform === 'darwin' ? null : 'Изолированный исполнитель Codex проверен только на macOS.' },
-      { id: 'openai', label: 'OpenAI API', supported: true, reason: null },
-      { id: 'claude', label: 'Claude Code', supported: false, reason: harnesses.get('claude')?.detected ? 'Claude Code обнаружен. Нативный Skill доступен, execution adapter еще не включен.' : 'Claude Code не найден; native manifest включен в пакет, execution adapter еще не включен.' },
-      { id: 'cursor', label: 'Cursor', supported: false, reason: harnesses.get('cursor')?.detected ? 'Cursor обнаружен. Нативный Skill доступен, execution adapter еще не включен.' : 'Cursor не найден; native manifest включен в пакет, execution adapter еще не включен.' },
+      { id: 'codex', label: 'Codex', supported: process.platform === 'darwin', state: process.platform === 'darwin' ? 'available' : 'unsupported-platform', reason: process.platform === 'darwin' ? null : 'Изолированный исполнитель Codex проверен только на macOS.' },
+      { id: 'openai', label: 'OpenAI API', supported: true, state: 'available', reason: null },
+      externalProvider('claude'),
+      externalProvider('cursor'),
     ],
     values: {
       provider: profile?.ai.provider ?? defaultProvider(), model: profile?.ai.model ?? '',
@@ -76,10 +92,13 @@ export async function collectOnboarding(root, options = {}, terminal = {}) {
     output.write(`\n${paint(output, '1;38;5;99', 'Flowcairn')} ${paint(output, '2', '· от задачи до проверенного результата')}\n`);
     output.write(`${paint(output, '38;5;245', 'Ответьте на пять коротких вопросов. Код не изменится до согласования плана.')}\n`);
     step(output, 1, 'Как Flowcairn будет работать с AI');
-    const detected = inspectHarnesses().filter((item) => item.detected).map((item) => item.label);
+    const harnesses = inspectHarnesses();
+    const detected = harnesses.filter((item) => item.detected).map((item) => item.label);
     if (detected.length) output.write(`${paint(output, '38;5;245', `Обнаружены AI-клиенты: ${detected.join(', ')}.`)}\n`);
     output.write(`${paint(output, '38;5;99', '[1]')} Codex — использовать настроенный Codex\n`);
     output.write(`${paint(output, '38;5;99', '[2]')} OpenAI API — использовать ваш ключ из окружения\n`);
+    for (const item of harnesses.filter((value) => ['claude', 'cursor'].includes(value.id) && value.detected))
+      output.write(`${paint(output, '38;5;245', `${item.label}: execution Graph пока выключен — ${item.runtime.reason}`)}\n`);
     const providerAnswer = options.provider ?? await ask(`Выбор [${defaultProvider() === 'codex' ? '1' : '2'}]: `, defaultProvider());
     const provider = ({'1':'codex','2':'openai'})[providerAnswer] ?? providerAnswer;
     if (!['codex','openai'].includes(provider)) fail('PROVIDER_UNSUPPORTED', 'Выберите Codex или OpenAI API. Claude и Cursor пока не подключены.');

@@ -37,6 +37,17 @@ Manifests ссылаются на один каталог Skills пакета. �
 
 Claude Code и Cursor не подключены к executor, пока не будут выполнены все условия: явное разрешение владельца на передачу утвержденного контекста соответствующему провайдеру, tool-free или надежно изолированный adapter, проверяемый структурированный output, receipt и негативные тесты. Это ограничение намеренное.
 
+## Проверенная матрица CLI (15 сентября 2026)
+
+| Assistant | Официальный non-interactive путь | Ограничения FS/network | Structured output | Что может уйти наружу | Graph Runtime |
+| --- | --- | --- | --- | --- | --- |
+| Claude Code | `claude -p` | Можно отключить built-in tools через `--tools ""`; это не тестировалось Flowcairn на закрепленной версии | `--json-schema` заявлен официально | Только заранее утвержденные scope, instructions, Skills и artifacts после отдельного consent | Disabled до version-pinned adapter и E2E receipt |
+| Cursor | `agent -p` | Sandbox описан для command execution; print mode имеет write/shell tools | JSON/NDJSON — это оболочка с text `result`; JSON Schema не задокументирована | Ничего: Flowcairn не вызывает CLI | Disabled: нет доказуемого tool-free schema adapter |
+
+Официальные источники: [Claude Code CLI](https://code.claude.com/docs/en/cli-reference), [Claude structured output](https://code.claude.com/docs/en/agent-sdk/structured-outputs), [Cursor CLI parameters](https://cursor.com/docs/cli/reference/parameters), [Cursor output format](https://cursor.com/docs/cli/reference/output-format).
+
+Для будущего внешнего запуска Flowcairn уже определяет строгий consent contract. Он привязан hash-ами к plan, scope, instructions, Skills и artifacts; раскрывает, что передается, и явно исключает secrets, `.env`, Git history, неутвержденные файлы и shell project host. Его hash должен попасть и в immutable plan, и в receipt. Пока provider execution disabled, consent не запрашивается и ничего не передается.
+
 ## Модель и усиление
 
 В обычной настройке Codex Flowcairn использует модель и reasoning effort, выбранные в самом Codex. Он не передает `--model` и не переопределяет `model_reasoning_effort`.

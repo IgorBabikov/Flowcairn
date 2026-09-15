@@ -27,6 +27,12 @@ export function SetupPanel({ onClose }: { onClose: () => void }) {
         <dt>Покрытие</dt><dd>{values.coverage ? 'Включено' : 'Не навязывается'}</dd>
         <dt>Контекст для AI</dt><dd>{values.readConsent ? 'Разрешен при настройке' : 'Требуется согласие'}</dd>
       </dl>
+      <h3>Другие AI-инструменты</h3>
+      <ul>
+        {setup.providers.filter(item => item.id === 'claude' || item.id === 'cursor').map(item => <li key={item.id}>
+          <strong>{item.label}:</strong> {item.reason ?? (item.supported ? 'Поддержан.' : 'Недоступен.')}
+        </li>)}
+      </ul>
       {setup.limitations.length > 0 && <ul>{setup.limitations.map(item => <li key={item}>{item}</li>)}</ul>}
     </>}
     <p>Для настройки закройте интерфейс, остановите Flowcairn в терминале и выполните:</p>

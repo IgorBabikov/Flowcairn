@@ -332,7 +332,7 @@ export interface IntakeInput extends TaskFields {
 export interface OnboardingStatus {
   configured: boolean;
   profileHash: string | null;
-  providers: Array<{id: string; label: string; supported: boolean; reason: string | null}>;
+  providers: Array<{id: string; label: string; supported: boolean; state: string; reason: string | null}>;
   values: { provider: string; model: string | null; modelMode: string; reasoningEffort: string | null; testPolicy: string; coverage: boolean; readConsent: boolean };
   limitations: string[];
 }
