@@ -117,7 +117,7 @@ export const ProjectProfileSchema = z.strictObject({
     provider: z.enum(['codex', 'openai']),
     model,
     reviewModel: model.optional(),
-    modelMode: z.enum(['manual', 'auto']).optional(),
+    modelMode: z.enum(['provider', 'manual', 'auto']).optional(),
     reasoningEffort: z.enum(['low', 'medium', 'high', 'xhigh']).optional(),
     reviewReasoningEffort: z.enum(['low', 'medium', 'high', 'xhigh']).optional(),
     codexPath: z

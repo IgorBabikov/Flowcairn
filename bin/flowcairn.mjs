@@ -304,6 +304,9 @@ export function initializeProject(input, options = {}) {
   const existingProfile = existsNoFollow(path.join(root, PROFILE))
     ? loadProjectProfile(root)
     : null;
+  const selectedProvider = options.provider ?? defaultProvider();
+  if (!existingProfile && !options.model && selectedProvider === 'codex')
+    options = { ...options, model: 'provider-default', 'model-mode': 'provider' };
   if (existingProfile && options.skills !== undefined &&
       JSON.stringify([...new Set(csv(options.skills))].sort()) !== JSON.stringify((existingProfile.skillManifest ?? []).map((entry) => entry.id.slice('project-'.length)).sort()))
     fail('SKILL_PROFILE_EXISTS', 'Профиль уже настроен. Позднее изменение выбранных Skills пока не поддерживается; текущий профиль сохранен.');
@@ -343,7 +346,7 @@ export function initializeProject(input, options = {}) {
       /^(?:sk-|sess-|Bearer\s)/i.test(value ?? ''),
     ) ||
       !ProjectProfileSchema.shape.ai.safeParse({
-        provider: options.provider ?? defaultProvider(),
+        provider: selectedProvider,
         model: options.model,
       }).success)
   )
@@ -401,7 +404,7 @@ export function initializeProject(input, options = {}) {
         ...(options['model-mode'] ? { modelMode: options['model-mode'] } : {}),
         ...(options['reasoning-effort'] ? { reasoningEffort: options['reasoning-effort'] } : {}),
         ...(options['review-reasoning-effort'] ? { reviewReasoningEffort: options['review-reasoning-effort'] } : {}),
-        provider: options.provider ?? defaultProvider(),
+        provider: selectedProvider,
         model: options.model,
         ...(options['review-model'] ? { reviewModel: options['review-model'] } : {}),
         ...(options['codex-path'] ? { codexPath: path.resolve(options['codex-path']) } : {}),

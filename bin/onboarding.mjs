@@ -12,7 +12,7 @@ const effort = z.enum(['low', 'medium', 'high', 'xhigh']);
 const SetupSchema = z.strictObject({
   profileHash: z.string().regex(/^[a-f0-9]{64}$/).nullable(),
   provider: z.enum(['codex', 'openai']), model: ProjectProfileSchema.shape.ai.shape.model,
-  modelMode: z.enum(['manual', 'auto']), reasoningEffort: effort,
+  modelMode: z.enum(['provider', 'manual', 'auto']), reasoningEffort: effort,
   reviewModel: ProjectProfileSchema.shape.ai.shape.model.optional(), reviewReasoningEffort: effort.optional(),
   testPolicy: z.enum(['keep', 'add']), coverage: z.boolean(), readConsent: z.boolean(),
 });
@@ -78,14 +78,22 @@ export async function collectOnboarding(root, options = {}, terminal = {}) {
     const provider = ({'1':'codex','2':'openai'})[providerAnswer] ?? providerAnswer;
     if (!['codex','openai'].includes(provider)) fail('PROVIDER_UNSUPPORTED', 'Выберите Codex или OpenAI API. Claude и Cursor пока не подключены.');
     if (provider === 'codex' && process.platform !== 'darwin') fail('PROVIDER_PLATFORM', 'Исполнение Codex пока доступно только на macOS.');
-    step(output, 2, 'Выберите модель');
-    output.write(`${paint(output, '38;5;245', 'Одна модель для всей задачи. Более тонкие настройки доступны позже через npx flowcairn setup.')}\n`);
-    output.write(`${paint(output, '38;5;245', 'Укажите название модели, не API-ключ.')}\n`);
     const advanced = options.advanced === true;
-    const mode = advanced ? await choice('model-mode', 'Режим: manual — одна модель, auto — модели по этапам [Enter — manual]: ', ['manual','auto'], 'manual') : options['model-mode'] ?? 'manual';
-    const model = options.model ?? await ask('ID модели, например gpt-5.6-terra: ', '');
+    step(output, 2, 'Как выбирать модель');
+    const providerManaged = provider === 'codex' && !advanced && options['model-mode'] === undefined;
+    if (providerManaged)
+      output.write(`${paint(output, '38;5;245', 'Flowcairn использует модель и усиление, выбранные в вашем Codex. ID модели вводить не нужно.')}\n`);
+    else if (provider === 'codex')
+      output.write(`${paint(output, '38;5;245', 'Укажите модель и усиление, только если хотите переопределить настройки Codex для Flowcairn.')}\n`);
+    else
+      output.write(`${paint(output, '38;5;245', 'OpenAI API требует явный ID модели: он не наследует выбор из интерфейса AI.')}\n`);
+    const mode = providerManaged ? 'provider' : advanced
+      ? await choice('model-mode', 'Режим: provider — настройки Codex, manual — одна модель, auto — отдельные настройки ревью [Enter — manual]: ', ['provider','manual','auto'], 'manual')
+      : options['model-mode'] ?? 'manual';
+    if (mode === 'provider' && provider !== 'codex') fail('ONBOARDING_CHOICE', 'Этот провайдер требует явный ID модели.');
+    const model = mode === 'provider' ? 'provider-default' : options.model ?? await ask('ID модели, например gpt-5.6-terra: ', '');
     if (!model) fail('MODEL_REQUIRED', 'Нужен ID модели. Файлы не изменены.');
-    const reasoning = advanced ? await choice('reasoning-effort', 'Усиление: low, medium, high или xhigh [Enter — medium]: ', ['low','medium','high','xhigh'], 'medium') : options['reasoning-effort'] ?? 'medium';
+    const reasoning = mode === 'provider' ? undefined : advanced ? await choice('reasoning-effort', 'Усиление: low, medium, high или xhigh [Enter — medium]: ', ['low','medium','high','xhigh'], 'medium') : options['reasoning-effort'] ?? 'medium';
     const review = mode === 'auto' ? {
       'review-model': options['review-model'] ?? await ask('Модель ревью [Enter — та же]: ', model),
       'review-reasoning-effort': await choice('review-reasoning-effort', 'Усиление ревью [low / medium / high / xhigh; Enter — high]: ', ['low','medium','high','xhigh'], 'high'),
@@ -109,7 +117,7 @@ export async function collectOnboarding(root, options = {}, terminal = {}) {
       if (report.findings.length) output.write(`${paint(output, '38;5;245', 'Нашли существующие AI-правила. Они будут сохранены и учтены.')}\n`);
     }
     const consent = options.consent ?? await yes('Подключить Graph к правилам проекта? [да / нет; Enter — нет]: ');
-    return { ...options, provider, model, 'model-mode':mode, 'reasoning-effort':reasoning, ...review, 'test-policy':testPolicy, coverage, 'read-consent':readConsent, consent };
+    return { ...options, provider, model, 'model-mode':mode, ...(reasoning ? {'reasoning-effort':reasoning} : {}), ...review, 'test-policy':testPolicy, coverage, 'read-consent':readConsent, consent };
   } finally { if (!terminal.prompt) prompt.close(); }
 }
 

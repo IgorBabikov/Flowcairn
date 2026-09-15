@@ -599,6 +599,22 @@ test('ручной выбор сохраняет модель и усилени�
   } finally { RUNNER_TESTING.cleanupPrepared(prepared); }
 });
 
+test('режим provider не переопределяет модель и усиление, выбранные в Codex', async () => {
+  const { RUNNER_TESTING } = await import('./lib/runner.mjs');
+  const contract = runnerContract();
+  const outputPath = realpathSync(fixture());
+  const prepared = RUNNER_TESTING.makeAiCommand({ ...contract, worktree: '/private/tmp/isolated-worktree', skills: [], priorEvidence: null, outputPath,
+    profile: { outputPaths: [], ai: { provider: 'codex', model: 'provider-default', modelMode: 'provider' } },
+    toolchain: { node: NODE_BINARY, codexEntry: '/trusted/codex.js', digest: 'a'.repeat(64) },
+    dependencyToolchain: { dependencyPaths: [], hash: 'b'.repeat(64) },
+  });
+  try {
+    assert.equal(prepared.command.args.includes('--model'), false);
+    assert.equal(prepared.command.args.some((value) => value.startsWith('model_reasoning_effort=')), false);
+    assert.equal(prepared.execution.model, 'provider-default');
+  } finally { RUNNER_TESTING.cleanupPrepared(prepared); }
+});
+
 test('большой lock исключается из AI context, его hash остается частью workspace integrity', async () => {
   const { RUNNER_TESTING } = await import('./lib/runner.mjs');
   const { fingerprintWorkspace } = await import('./lib/workspace.mjs');

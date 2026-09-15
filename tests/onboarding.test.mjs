@@ -31,6 +31,12 @@ test('старый init не предоставляет разрешение н�
   assert.notEqual(result.profile.onboarding?.readConsent, true);
 });
 
+test('Codex init без ID модели сохраняет выбор из самого Codex', t => {
+  const result = initializeProject(fixture(t), {provider:'codex'});
+  assert.equal(result.profile.ai.model, 'provider-default');
+  assert.equal(result.profile.ai.modelMode, 'provider');
+});
+
 test('итог первого запуска говорит о следующем шаге без технической сводки', () => {
   let text = '';
   const original = process.stdout.write;
@@ -72,7 +78,7 @@ test('согласие привязано к локальной установк
   assert.equal(hasOnboardingConsent(clone),false);
 });
 
-test('опрос фиксирует только явное согласие и не наследует модель из IDE', async t => {
+test('опрос OpenAI фиксирует только явное согласие и запрашивает модель API', async t => {
   const root = fixture(t);
   const api = await import('../bin/onboarding.mjs').catch(() => ({}));
   assert.equal(typeof api.collectOnboarding,'function');
@@ -83,7 +89,7 @@ test('опрос фиксирует только явное согласие и 
   assert.equal(result.model,'my-model');
   assert.equal(result['reasoning-effort'],'high');
   assert.equal(result.coverage,false);
-  assert.match(text,/тонкие настройки доступны позже через npx flowcairn setup/);
+  assert.match(text,/OpenAI API требует явный ID модели/);
   assert.match(text,/Шаг 1 из 4/);
   assert.match(text,/\x1b\[/);
   assert.doesNotMatch(text,/Codex — macOS/);

@@ -516,6 +516,10 @@ function makeAiCommand({
         ...dependencyToolchain.dependencyPaths,
       ],
     });
+    const selectedModel = node.action.id === 'ai-review' && Reflect.get(profile.ai, 'modelMode') !== 'manual'
+      ? (profile.ai.reviewModel ?? profile.ai.model)
+      : profile.ai.model;
+    const providerManaged = Reflect.get(profile.ai, 'modelMode') === 'provider' || selectedModel === 'provider-default';
     const args = [
       'exec',
       '--ignore-user-config',
@@ -530,14 +534,8 @@ function makeAiCommand({
       resultFile,
       '--cd',
       worktree,
-      '--model',
-      node.action.id === 'ai-review' && Reflect.get(profile.ai, 'modelMode') !== 'manual'
-        ? (profile.ai.reviewModel ?? profile.ai.model)
-        : profile.ai.model,
       '--config',
       'approval_policy="never"',
-      '--config',
-      `model_reasoning_effort="${Reflect.get(profile.ai, 'modelMode') === 'manual' ? (Reflect.get(profile.ai, 'reasoningEffort') ?? 'medium') : node.action.id === 'ai-review' ? (Reflect.get(profile.ai, 'reviewReasoningEffort') ?? Reflect.get(profile.ai, 'reasoningEffort') ?? 'high') : (Reflect.get(profile.ai, 'reasoningEffort') ?? 'medium')}"`,
       '--config',
       `default_permissions=${tomlString(profileName)}`,
       '--config',
@@ -550,6 +548,16 @@ function makeAiCommand({
       `shell_environment_policy.set={PATH=${tomlString(TRUSTED_PATH)},NO_COLOR="1",OPENSSL_CONF="/dev/null"}`,
       '-',
     ];
+    if (!providerManaged) {
+      const firstConfig = args.indexOf('--config');
+      args.splice(firstConfig, 0, '--model', selectedModel);
+      const effort = Reflect.get(profile.ai, 'modelMode') === 'manual'
+        ? (Reflect.get(profile.ai, 'reasoningEffort') ?? 'medium')
+        : node.action.id === 'ai-review'
+          ? (Reflect.get(profile.ai, 'reviewReasoningEffort') ?? Reflect.get(profile.ai, 'reasoningEffort') ?? 'high')
+          : (Reflect.get(profile.ai, 'reasoningEffort') ?? 'medium');
+      args.splice(firstConfig + 4, 0, '--config', `model_reasoning_effort="${effort}"`);
+    }
     const prompt = buildPrompt({
       nodeId: node.id,
       profile,
@@ -579,10 +587,7 @@ function makeAiCommand({
       execution: Object.freeze({
         provider: 'codex',
         cliVersion: CODEX_VERSION,
-        model:
-          node.action.id === 'ai-review' && Reflect.get(profile.ai, 'modelMode') !== 'manual'
-            ? (profile.ai.reviewModel ?? profile.ai.model)
-            : profile.ai.model,
+        model: providerManaged ? 'provider-default' : selectedModel,
         sandboxDigest: sha256(
           canonicalJson({
             profileName,
