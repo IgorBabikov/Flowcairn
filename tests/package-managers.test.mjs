@@ -39,13 +39,14 @@ test('Yarn4 init discovers lock and workspaces, keeps config out of Docker, pins
   assert.deepEqual(registeredContainerCheck('check-tests', { packageManager: 'yarn', checkScript: 'test' }).args, ['/opt/flowcairn/package-manager.cjs', 'run', 'test']);
 });
 
-test('init maps a project compile script to the trusted typecheck action', (t) => {
+test('hardened init maps a project compile script to the trusted typecheck action', (t) => {
   const root = fixture(t, 'npm');
   const pkg = JSON.parse(readFileSync(path.join(root, 'package.json')));
   pkg.scripts = { test: 'node --test', compile: 'tsc --noEmit', lint: 'eslint src', build: 'webpack' };
   writeFileSync(path.join(root, 'package.json'), JSON.stringify(pkg));
-  const initialized = initializeProject(root, options);
+  const initialized = initializeProject(root, { ...options, 'check-mode': 'hardened', checks: 'typecheck,lint,tests,build' });
   assert.deepEqual(initialized.profile.checks, ['typecheck', 'lint', 'tests', 'build']);
+  assert.equal(initialized.profile.checkMode, 'hardened');
   assert.deepEqual(initialized.profile.checkScripts, { typecheck: 'compile', lint: 'lint', tests: 'test', build: 'build' });
   assert.equal(resolveProjectCheckScript(root, 'check-typecheck', initialized.profile), 'compile');
 });
