@@ -149,6 +149,14 @@ test('bounded discovery fails closed on oversize, entries and depth without expo
   assert.equal(inspectInstructions({ projectRoot: f.root, limits: { maxDepth: 1 } }).complete, false);
   assert.equal(inspectInstructions({ projectRoot: f.root, limits: { maxEntries: 1 } }).complete, false);
 });
+test('default discovery supports deep but bounded enterprise source trees', (t) => {
+  const f = fixture(t);
+  const nested = Array.from({ length: 16 }, (_, index) => `layer-${index}`).join('/');
+  f.write(`${nested}/AGENTS.md`, 'scoped rule');
+  const discovered = f.inspect();
+  assert.equal(discovered.complete, true);
+  assert.ok(discovered.files.some((file) => file.path === `${nested}/AGENTS.md`));
+});
 test('concurrent edits and live locks refuse; original user bytes survive', (t) => {
   const f = fixture(t); f.write('AGENTS.md', 'old'); const prior = readInstructionFile(f.root, 'AGENTS.md'); f.write('AGENTS.md', 'new');
   assert.throws(() => replaceIntegrationFile(f.root, 'AGENTS.md', Buffer.from('overwrite'), prior), { code: 'INTEGRATION_CONCURRENT_EDIT' });

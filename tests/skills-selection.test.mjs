@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { selectProjectSkills } from '../bin/skills-selection.mjs';
+import { recommendProjectSkills, selectProjectSkills } from '../bin/skills-selection.mjs';
 import { initializeCommand } from '../bin/flowcairn.mjs';
 import { sha256 } from '../scripts/ai-graph/lib/io.mjs';
 
@@ -22,34 +22,47 @@ const candidates = [
   { name: 'invalid', path: '.agents/skills/invalid/SKILL.md', eligible: false },
 ];
 
-test('headless init never imports Skills automatically; explicit unique names bind displayed candidate fingerprint', async () => {
-  let called = false;
-  assert.equal(await selectProjectSkills('/fixture', {}, {}, async () => { called = true; throw Error(); }), undefined);
-  assert.equal(called, false);
+test('headless init recommends only conventional local Skill roles; explicit names still bind displayed candidate fingerprint', async () => {
   const selected = [];
+  assert.deepEqual(await selectProjectSkills('/fixture', {}, {}, api(candidates, selected)), [
+    { path: candidates[0].path, actions: ['ai-implement', 'ai-review'], scope: ['.'] },
+    { path: candidates[1].path, actions: ['ai-review'], scope: ['src'] },
+  ]);
+  assert.equal(selected[0].expectedFingerprint, 'candidate-set');
   assert.deepEqual(await selectProjectSkills('/fixture', { skills: 'review,testing', 'skill-actions': 'review', 'skill-scope': 'src' }, {}, api(candidates, selected)), [
     { path: candidates[1].path, actions: ['ai-review'], scope: ['src'] },
     { path: candidates[0].path, actions: ['ai-review'], scope: ['src'] },
   ]);
   await assert.rejects(selectProjectSkills('/fixture', { skills: 'testing' }, {}, api(candidates)), { code: 'SKILL_APPLICABILITY' });
-  assert.equal(selected[0].expectedFingerprint, 'candidate-set');
   await assert.rejects(selectProjectSkills('/fixture', { skills: 'invalid' }, {}, api(candidates)), { code: 'SKILL_SELECTION' });
   await assert.rejects(selectProjectSkills('/fixture', { skills: 'testing' }, {}, api([...candidates, { ...candidates[0], path: '.agents/skills/other/SKILL.md' }])), { code: 'SKILL_SELECTION' });
   await assert.rejects(selectProjectSkills('/fixture', { skills: 'testing,testing' }, {}, api(candidates)), { code: 'SKILL_SELECTION' });
 });
 
-test('TTY selection uses numbered choices and empty input keeps project skills disabled', async () => {
-  const input = new PassThrough(), output = new PassThrough();
-  input.isTTY = true; output.isTTY = true;
+test('recommendation recognizes context, delivery, testing and review but leaves unknown rules inert', () => {
+  assert.deepEqual(recommendProjectSkills([
+    { name: 'tmg-context', description: 'Контекст проекта', path: '.agents/skills/context/SKILL.md', scope: '.', eligible: true },
+    { name: 'task-delivery-pipeline', description: 'План и реализация', path: '.agents/skills/delivery/SKILL.md', scope: '.', eligible: true },
+    { name: 'testing-frontend', description: 'Проверки frontend', path: '.agents/skills/testing/SKILL.md', scope: 'src', eligible: true },
+    { name: 'pr-review', description: 'Ревью изменений', path: '.agents/skills/review/SKILL.md', scope: '.', eligible: true },
+    { name: 'product-pressure-test', description: 'Текст не участвует в подборе', path: '.agents/skills/product-pressure-test/SKILL.md', scope: '.', eligible: true },
+    { name: 'custom-product-voice', description: 'Неизвестное правило', path: '.agents/skills/custom/SKILL.md', scope: '.', eligible: true },
+  ]), [
+    { path: '.agents/skills/context/SKILL.md', actions: ['ai-plan', 'ai-analyze', 'ai-implement', 'ai-review'], scope: ['.'] },
+    { path: '.agents/skills/delivery/SKILL.md', actions: ['ai-plan', 'ai-analyze', 'ai-implement'], scope: ['.'] },
+    { path: '.agents/skills/testing/SKILL.md', actions: ['ai-implement', 'ai-review'], scope: ['src'] },
+    { path: '.agents/skills/review/SKILL.md', actions: ['ai-review'], scope: ['.'] },
+  ]);
+});
+
+test('TTY init reports automatic recommendation and --skills none disables it', async () => {
+  const input = new PassThrough(), output = new PassThrough(); input.isTTY = true; output.isTTY = true;
   let display = '';
   output.on('data', (chunk) => { display += chunk; });
-  const answers = ['2', '4', ''];
-  const terminal = { input, output, prompt: { question: async () => answers.shift() } };
-  assert.deepEqual(await selectProjectSkills('/fixture', {}, terminal, api(candidates)), [{ path: candidates[1].path, actions: ['ai-review'], scope: ['src'] }]);
-  assert.match(display, /1\. testing/);
-  assert.equal(display.includes('invalid'), false);
-  terminal.prompt.question = async () => '';
-  assert.equal(await selectProjectSkills('/fixture', {}, terminal, api(candidates)), undefined);
+  const terminal = { input, output };
+  await selectProjectSkills('/fixture', {}, terminal, api(candidates));
+  assert.match(display, /Подключены подходящие правила проекта/);
+  assert.deepEqual(await selectProjectSkills('/fixture', { skills: 'none' }, terminal, api(candidates)), []);
   input.destroy(); output.destroy();
 });
 

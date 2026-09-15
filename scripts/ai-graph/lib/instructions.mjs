@@ -4,7 +4,7 @@ import { TextDecoder } from 'node:util';
 import { GraphError, hashObject, sha256 } from './io.mjs';
 import { CORE_SKILL_ROUTES, DOMAIN_SKILLS } from './config.mjs';
 
-export const INSTRUCTION_LIMITS = Object.freeze({ maxDepth: 12, maxEntries: 12000, maxFiles: 256, maxFileBytes: 65536, maxTotalBytes: 1048576 });
+export const INSTRUCTION_LIMITS = Object.freeze({ maxDepth: 32, maxEntries: 12000, maxFiles: 256, maxFileBytes: 65536, maxTotalBytes: 1048576 });
 export const WORKFLOW_PRECEDENCE = Object.freeze({
   version: 1,
   scope: 'Flowcairn orchestration only',
