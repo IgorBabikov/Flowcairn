@@ -222,6 +222,7 @@ npx flowcairn uninstall
 | [Установка и провайдеры](docs/INSTALLATION.md) | [Архитектура](docs/ARCHITECTURE.md) |
 | [Первая задача](docs/FIRST-TASK.md) | [Стандарт Graph + React Flow](docs/GRAPH-REACTFLOW-STANDARD.md) |
 | [Как работает Flowcairn](docs/HOW-FLOWCAIRN-WORKS.md) | [Проверки и их границы](docs/VERIFICATION.md) |
+| [Workflow Contract](docs/FLOWCAIRN-WORKFLOW.md) | [Ограничения](docs/LIMITATIONS.md) |
 | [Качество работы](docs/SKILLS.md) | [Безопасность](SECURITY.md) |
 | [Настройки](docs/CONFIGURATION.md) | [Ограничения](docs/LIMITATIONS.md) |
 

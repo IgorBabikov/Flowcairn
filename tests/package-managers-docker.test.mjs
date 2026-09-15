@@ -45,7 +45,7 @@ for (const [manager, version] of [['npm', null], ['pnpm', '11.8.0'], ['yarn', '4
     initializeProject(root, { provider: 'openai', model: 'fixture-model' });
     const image = prepareCheckImage({ root });
     const sources = ['package.json', 'check.cjs', 'packages/app/package.json', 'packages/app/index.cjs'];
-    const contract = { version: 3, actionId: 'check-tests', packageManager: manager, timeoutMs: 10000, files: sources.map((relative) => { const bytes = readFileSync(path.join(root, relative)); return { path: relative, size: bytes.length, hash: sha256(bytes), mode: '100644' }; }) };
+    const contract = { version: 4, actionId: 'check-tests', checkScript: 'test', packageManager: manager, timeoutMs: 10000, files: sources.map((relative) => { const bytes = readFileSync(path.join(root, relative)); return { path: relative, size: bytes.length, hash: sha256(bytes), mode: '100644' }; }) };
     writeFileSync(path.join(root, 'contract.json'), JSON.stringify(contract));
     // Use the actual production contract, not a separately maintained approximation.
     const args = DOCKER_CHECKS_TESTING.createArguments({

@@ -359,18 +359,26 @@ test('container rejects source hash drift and symlinks', (t) => {
   assert.throws(() => copyFingerprintSource({ input, workspace, files: drifted }));
 });
 
-test('container check registry maps only fixed pnpm scripts', () => {
-  assert.deepEqual(registeredContainerCheck('check-typecheck', { packageManager: 'pnpm' }), {
+test('container check registry maps only validated project scripts', () => {
+  assert.deepEqual(registeredContainerCheck('check-typecheck', { packageManager: 'pnpm', checkScript: 'typecheck' }), {
     executable: '/usr/local/bin/node',
     args: ['/opt/flowcairn/package-manager.cjs', 'run', 'typecheck'],
   });
-  assert.deepEqual(registeredContainerCheck('check-build', { packageManager: 'pnpm' }), {
+  assert.deepEqual(registeredContainerCheck('check-typecheck', { packageManager: 'pnpm', checkScript: 'compile' }), {
+    executable: '/usr/local/bin/node',
+    args: ['/opt/flowcairn/package-manager.cjs', 'run', 'compile'],
+  });
+  assert.deepEqual(registeredContainerCheck('check-build', { packageManager: 'pnpm', checkScript: 'build' }), {
     executable: '/usr/local/bin/node',
     args: ['/opt/flowcairn/package-manager.cjs', 'run', 'build'],
   });
   assert.throws(
-    () => registeredContainerCheck('ai-implement', { packageManager: 'pnpm' }),
+    () => registeredContainerCheck('ai-implement', { packageManager: 'pnpm', checkScript: 'build' }),
     /UNSUPPORTED_CHECK/,
+  );
+  assert.throws(
+    () => registeredContainerCheck('check-tests', { packageManager: 'pnpm', checkScript: 'test; curl example.invalid' }),
+    /INVALID_CONTRACT/,
   );
 });
 
@@ -822,17 +830,17 @@ test('container registry dispatches only explicit npm and pnpm script IDs', () =
       ['check-lint', 'lint'],
       ['check-build', 'build'],
     ]) {
-      const commands = registeredContainerCommands(action, { packageManager });
+      const commands = registeredContainerCommands(action, { packageManager, checkScript: script });
       assert.equal(commands.length, 1);
       assert.deepEqual(commands[0].args.slice(1), ['run', script]);
     }
   }
   assert.throws(
-    () => registeredContainerCommands('arbitrary-shell', { packageManager: 'npm' }),
+    () => registeredContainerCommands('arbitrary-shell', { packageManager: 'npm', checkScript: 'test' }),
     /UNSUPPORTED_CHECK/,
   );
   assert.throws(
-    () => registeredContainerCommands('check-tests', { packageManager: 'sh' }),
+    () => registeredContainerCommands('check-tests', { packageManager: 'sh', checkScript: 'test' }),
     /INVALID_CONTRACT/,
   );
 });

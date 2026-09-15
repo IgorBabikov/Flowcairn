@@ -48,6 +48,26 @@ const model = z
   .min(1)
   .max(200)
   .regex(/^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$/);
+const checkId = z.enum(['typecheck', 'lint', 'tests', 'build']);
+const checkScript = z
+  .string()
+  .min(1)
+  .max(120)
+  .regex(/^[a-zA-Z0-9][a-zA-Z0-9:._-]*$/);
+
+export const PROJECT_CHECK_IDS = Object.freeze(['typecheck', 'lint', 'tests', 'build']);
+export const DEFAULT_CHECK_SCRIPTS = Object.freeze({
+  typecheck: 'typecheck',
+  lint: 'lint',
+  tests: 'test',
+  build: 'build',
+});
+const CHECK_SCRIPT_CANDIDATES = Object.freeze({
+  typecheck: Object.freeze(['typecheck', 'compile']),
+  lint: Object.freeze(['lint']),
+  tests: Object.freeze(['test']),
+  build: Object.freeze(['build']),
+});
 
 /** Trusted local configuration: fixed action names, never executable code or credentials. */
 export const ProjectProfileSchema = z.strictObject({
@@ -56,9 +76,18 @@ export const ProjectProfileSchema = z.strictObject({
   packageManager: z.enum(['npm', 'pnpm', 'yarn']),
   contextPaths: paths,
   checks: z
-    .array(z.enum(['typecheck', 'lint', 'tests', 'build']))
+    .array(checkId)
     .max(4)
     .refine((values) => new Set(values).size === values.length),
+  checkScripts: z
+    .object({
+      typecheck: checkScript.optional(),
+      lint: checkScript.optional(),
+      tests: checkScript.optional(),
+      build: checkScript.optional(),
+    })
+    .strict()
+    .optional(),
   outputPaths: paths.refine((values) =>
     values.every(
       (value) =>
@@ -114,6 +143,57 @@ export function packageManagerLock(manager) {
   if (!Object.hasOwn(PACKAGE_MANAGER_LOCKS, manager))
     throw new GraphError('PACKAGE_MANAGER', 'Доступны npm, pnpm и Yarn 4 с node_modules. Bun пока не поддерживается.');
   return PACKAGE_MANAGER_LOCKS[manager];
+}
+
+/**
+ * Maps stable Flowcairn checks to existing project scripts. The mapping is derived
+ * only from package.json and is later revalidated before a Docker check starts.
+ */
+export function discoverProjectChecks(pkg) {
+  if (!pkg || typeof pkg !== 'object' || Array.isArray(pkg))
+    throw new GraphError('PACKAGE_JSON', 'В package.json нужен объект проекта.');
+  const scripts = pkg.scripts;
+  if (scripts !== undefined && (!scripts || typeof scripts !== 'object' || Array.isArray(scripts)))
+    throw new GraphError('PACKAGE_SCRIPTS', 'package.json scripts должен быть объектом.');
+  const checks = [];
+  const checkScripts = {};
+  for (const id of PROJECT_CHECK_IDS) {
+    const script = CHECK_SCRIPT_CANDIDATES[id].find((candidate) =>
+      typeof scripts?.[candidate] === 'string' && scripts[candidate].trim().length > 0,
+    );
+    if (!script) continue;
+    checks.push(id);
+    checkScripts[id] = script;
+  }
+  return { checks, checkScripts };
+}
+
+function checkIdFromAction(actionId) {
+  const match = /^check-(typecheck|lint|tests|build)$/.exec(actionId ?? '');
+  if (!match) throw new GraphError('CHECK_ACTION_UNSUPPORTED', 'Action не является зарегистрированной проверкой.');
+  return checkId.parse(match[1]);
+}
+
+/**
+ * A task never supplies a command. The project profile selects a script name
+ * during init, and the current package manifest must still contain that script.
+ */
+export function resolveProjectCheckScript(root, actionId, profile = loadProjectProfile(root)) {
+  const id = checkIdFromAction(actionId);
+  if (!profile.checks.includes(id))
+    throw new GraphError('CHECK_UNSUPPORTED', `Проверка ${id} не включена в профиль проекта.`);
+  const script = profile.checkScripts?.[id] ?? DEFAULT_CHECK_SCRIPTS[id];
+  const parsed = checkScript.safeParse(script);
+  if (!parsed.success) throw new GraphError('CHECK_SCRIPT_INVALID', 'Имя script проверки недопустимо.');
+  let pkg;
+  try {
+    pkg = JSON.parse(managerFile(realpathSync(root), 'package.json'));
+  } catch {
+    throw new GraphError('PACKAGE_JSON', 'Невозможно прочитать package.json для проверки script.');
+  }
+  if (typeof pkg?.scripts?.[parsed.data] !== 'string' || !pkg.scripts[parsed.data].trim())
+    throw new GraphError('CHECK_SCRIPT_MISSING', `В package.json отсутствует script ${parsed.data}.`);
+  return parsed.data;
 }
 
 /** Only exact registry versions, never URL/range/tag package manager payloads. */

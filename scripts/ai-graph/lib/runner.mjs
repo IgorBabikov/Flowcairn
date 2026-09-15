@@ -467,7 +467,7 @@ function aiResponseSchema(node, plan) {
     schema.properties.skillsUsed = { type: 'array', items: { type: 'string', enum: [...node.skills] }, minItems: node.skills.length, maxItems: node.skills.length };
   }
   if (node.action.id !== 'ai-implement') {
-    for (const key of ['edits', 'changedFiles']) {
+    for (const key of ['edits', 'moves', 'changedFiles']) {
       const property = schema.properties?.[key];
       if (typeof property === 'object' && property !== null) property.maxItems = 0;
     }

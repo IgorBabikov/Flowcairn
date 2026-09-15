@@ -140,7 +140,7 @@ function validateFiles(files) {
   });
 }
 
-export function registeredContainerCheck(actionId, { packageManager }) {
+export function registeredContainerCheck(actionId, { packageManager, checkScript }) {
   const scripts = {
     'check-typecheck': 'typecheck',
     'check-lint': 'lint',
@@ -148,11 +148,12 @@ export function registeredContainerCheck(actionId, { packageManager }) {
     'check-build': 'build',
   };
   if (!['npm', 'pnpm', 'yarn'].includes(packageManager)) fail('INVALID_CONTRACT');
-  const script = Object.hasOwn(scripts, actionId) ? scripts[actionId] : null;
-  if (!script) fail('UNSUPPORTED_CHECK');
+  if (!Object.hasOwn(scripts, actionId)) fail('UNSUPPORTED_CHECK');
+  if (typeof checkScript !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9:._-]{0,119}$/.test(checkScript))
+    fail('INVALID_CONTRACT');
   return Object.freeze({
     executable: NODE,
-    args: Object.freeze([PACKAGE_MANAGER, 'run', script]),
+    args: Object.freeze([PACKAGE_MANAGER, 'run', checkScript]),
   });
 }
 
@@ -276,8 +277,8 @@ function readContract(file) {
     !contract ||
     typeof contract !== 'object' ||
     Array.isArray(contract) ||
-    Object.keys(contract).sort().join(',') !== 'actionId,files,packageManager,timeoutMs,version' ||
-    contract.version !== 3 ||
+    Object.keys(contract).sort().join(',') !== 'actionId,checkScript,files,packageManager,timeoutMs,version' ||
+    contract.version !== 4 ||
     !Number.isInteger(contract.timeoutMs) ||
     contract.timeoutMs < 1_000 ||
     contract.timeoutMs > 1_800_000

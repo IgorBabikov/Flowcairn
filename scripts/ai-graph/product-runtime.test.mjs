@@ -35,7 +35,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 const request=(s,extra={})=>({operationId:`op-${randomUUID()}`,expectedRevision:s.revision,planHash:s.planHash,...extra});
 const analysis={requirements:['Валидация email'],constraints:['Сохранить интерфейс'],projectFacts:[{path:'src/form.mjs',fact:'Форма уже существует'}],acceptance:['Неверный email отклонен'],risks:[]};
-async function fixture(t,{consent=true,reviewFails=0,checkFails=0,uncertain=false,steps=output.steps,maxReplans=2}={}) {
+async function fixture(t,{consent=true,reviewFails=0,checkFails=0,uncertain=false,steps=output.steps,maxReplans=2,scopeCandidates=['src']}={}) {
  const root=mkdtempSync(path.join(os.tmpdir(),'flowcairn-product-'));
  t.after(()=>rmSync(root,{recursive:true,force:true}));
  const worktree=path.join(root,'.ai-orchestrator','worktrees','fixture-1');
@@ -49,7 +49,7 @@ async function fixture(t,{consent=true,reviewFails=0,checkFails=0,uncertain=fals
  verifyBinding:()=>true,replaceBinding:({binding,newRunId})=>({...binding,runId:newRunId}),fingerprint,
  inspectChanges:()=>({allowed:true,changedFiles:[]}),applyEdits:()=>{},diff:()=>({content:'',complete:true}),
  runner:{ai:{available:true},checks:{available:true}},loadSkills:ids=>ids.map(name=>({name,text:'fixture',hash,path:`skills/${name}/SKILL.md`})),
- projectSummary:()=>({schemaVersion:2,name:'fixture',contextHash:hash,contextPaths:[],scopeCandidates:['src'],checks:['tests'],ai:{provider:'codex',model:'fixture'},capabilities:{intake:{allowed:true}}}),
+ projectSummary:()=>({schemaVersion:2,name:'fixture',contextHash:hash,contextPaths:[],scopeCandidates,checks:['tests'],ai:{provider:'codex',model:'fixture'},capabilities:{intake:{allowed:true}}}),
  registerTask:async(_root,input,options)=>options.service.create({...input,limits:{...input.limits,maxReplans}},{runId:options.run,operationId:options.operation,stage:options.stage,workflow:options.workflow,naturalIntakeHash:options.naturalIntakeHash}),
  execute:async({node,onStart,priorEvidence,reviewEvidence,task,plan})=>{
   calls.push({nodeId:node.id,action:node.action.id,priorEvidence,reviewEvidence,task,planVersion:plan.version});await onStart({ticket:'fixture',pid:process.pid});
@@ -69,6 +69,60 @@ async function fixture(t,{consent=true,reviewFails=0,checkFails=0,uncertain=fals
 test('product intake требует локальное согласие и не принимает browser scope',async(t)=>{
  const f=await fixture(t,{consent:false});await assert.rejects(f.intake(),e=>e.code==='ONBOARDING_REQUIRED');assert.equal(f.calls.length,0);
  await assert.rejects(f.service.intake({title:'Форма',description:'Добавить email',taskNumber:'1',operationId:'intake-bad',contextHash:hash,scope:['private']}));
+});
+
+test('product intake accepts up to 64 safe project roots before planning', async(t)=>{
+ const scopeCandidates=Array.from({length:33},(_,index)=>`area-${index}`);
+ const f=await fixture(t,{scopeCandidates});
+ const result=await f.service.intake({title:'Миграция проекта',description:'Разделить большую миграцию на проверяемые этапы',taskNumber:'BIG-1',operationId:'intake-many-roots',contextHash:hash});
+ assert.deepEqual(result.task.scope,scopeCandidates);
+ assert.equal(result.status,'ready');
+ await f.settle(result);
+ assert.equal(f.service.close(),true);
+});
+
+test('product intake requires an explicit scope when a project exposes more than 64 roots', async(t)=>{
+ const f=await fixture(t,{scopeCandidates:Array.from({length:65},(_,index)=>`area-${index}`)});
+ await assert.rejects(
+  f.service.intake({title:'Большая миграция',description:'Проверить большую миграцию по частям',taskNumber:'BIG-2',operationId:'intake-too-many-roots',contextHash:hash}),
+  error=>error.code==='INTAKE_SCOPE_LIMIT',
+ );
+});
+
+test('implementation receipt accepts a hash-bound large-file move as two declared changes', async(t)=>{
+ const steps=[{id:'move-dictionary',title:'Перенести словарь',outcome:'Словарь находится в новом каталоге',needs:[],paths:['src/localization']}];
+ const f=await fixture(t,{steps});
+ const files=new Map([['src/dictionaries/tmg.ru.json','x'.repeat(256*1024)]]);
+ const fingerprint=()=>{
+  const entries=[...files].sort(([left],[right])=>left.localeCompare(right)).map(([path,content])=>({path,hash:hashObject(content),mode:'100644',size:content.length}));
+  return {hash:hashObject(entries),files:entries,git:{head:'a'.repeat(40),indexHash:hash}};
+ };
+ const adapters=f.service.adapters;
+ adapters.fingerprint=fingerprint;
+ adapters.capture=()=>({manifest:{sourceHash:fingerprint().hash},bundlePath:'fixture-source'});
+ adapters.inspectChanges=(before,after)=>({allowed:true,changedFiles:[...new Set([...before.files,...after.files].map(file=>file.path))].filter(path=>before.files.find(file=>file.path===path)?.hash!==after.files.find(file=>file.path===path)?.hash)});
+ adapters.applyEdits=(_root,_before,_node,_task,_edits,moves)=>{
+  for(const move of moves){const content=files.get(move.from);files.delete(move.from);files.set(move.to,content);}
+ };
+ adapters.diff=(_root,before,after)=>({complete:true,content:before.hash===after.hash?'':'rename dictionary'});
+ const execute=adapters.execute;
+ adapters.execute=async(args)=>{
+  const result=await execute(args);
+  if(args.node.action.id==='ai-implement'){
+   const source=fingerprint().files[0];
+   result.output.changedFiles=['src/dictionaries/tmg.ru.json','src/localization/tmg.ru.json'];
+   result.output.edits=[];
+   result.output.moves=[{from:'src/dictionaries/tmg.ru.json',to:'src/localization/tmg.ru.json',previousHash:source.hash}];
+  }
+  return result;
+ };
+ let snapshot=await f.settle(await f.intake());
+ snapshot=await f.settle(await f.approve(snapshot));
+ assert.equal(snapshot.status,'passed');
+ const implementation=snapshot.nodes.find(node=>node.action.id==='ai-implement');
+ assert.deepEqual(implementation.changedFiles,['src/dictionaries/tmg.ru.json','src/localization/tmg.ru.json']);
+ assert.equal(files.has('src/dictionaries/tmg.ru.json'),false);
+ assert.equal(files.get('src/localization/tmg.ru.json').length,256*1024);
 });
 test('анализ передается полностью, план уточняется без повторного анализа, одного согласования достаточно',async(t)=>{
  const f=await fixture(t);const initial=await f.intake();let s=await f.settle(initial);

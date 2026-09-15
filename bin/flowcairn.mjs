@@ -28,6 +28,8 @@ import {
   RUNTIME_ROOT,
   PACKAGE_MANAGER_LOCKS,
   packageManagerLock,
+  discoverProjectChecks,
+  PROJECT_CHECK_IDS,
   validatePackageManagerProject,
 } from '../scripts/ai-graph/lib/project.mjs';
 import { TaskInputSchema } from '../scripts/ai-graph/lib/schemas.mjs';
@@ -50,7 +52,6 @@ export { createTask };
 const OWNER_FILE = '.ai-orchestrator/flowcairn-install.json';
 const PROFILE = '.flowcairn.json';
 const IGNORE_BLOCK = '# Flowcairn: локальное состояние, не исходники\n.ai-orchestrator/\n';
-const CHECKS = ['typecheck', 'lint', 'tests', 'build'];
 const VALUE_OPTIONS = new Set([
   'root',
   'provider',
@@ -373,12 +374,13 @@ export function initializeProject(input, options = {}) {
       'Git находится в detached HEAD. Переключитесь на рабочую ветку или укажите --branch.',
     );
   validatePackageManagerProject(root, manager, pkg);
-  const checks =
-    options.checks === undefined
-      ? CHECKS.filter(
-          (check) => typeof pkg.scripts?.[check === 'tests' ? 'test' : check] === 'string',
-        )
-      : csv(options.checks);
+  const discoveredChecks = discoverProjectChecks(pkg);
+  const checks = options.checks === undefined ? discoveredChecks.checks : csv(options.checks);
+  for (const check of checks) {
+    if (!PROJECT_CHECK_IDS.includes(check) || !discoveredChecks.checkScripts[check])
+      fail('CHECK_SCRIPT_MISSING', `Для проверки ${check} нужен существующий script package.json.`);
+  }
+  const checkScripts = Object.fromEntries(checks.map((check) => [check, discoveredChecks.checkScripts[check]]));
   const profile =
     existingProfile ??
     ProjectProfileSchema.parse({
@@ -387,6 +389,7 @@ export function initializeProject(input, options = {}) {
       packageManager: manager,
       contextPaths: csv(options.context),
       checks,
+      ...(checks.length ? { checkScripts } : {}),
       outputPaths: csv(options.outputs),
       manifests: discoverManifests(root, pkg, manager, options.manifests),
       ...(options._skillManifest?.length ? { skillManifest: options._skillManifest } : {}),

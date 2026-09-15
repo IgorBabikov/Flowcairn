@@ -9,6 +9,7 @@
 | `packageManager` | `npm`, `pnpm` или поддерживаемый `yarn`; должен соответствовать lockfile проекта |
 | `contextPaths` | Дополнительные разрешенные пути чтения, относительно проекта |
 | `checks` | Обязательные `typecheck`, `lint`, `tests`, `build` |
+| `checkScripts` | Проверенный script проекта для каждой включенной проверки |
 | `outputPaths` | Каталоги/файлы generated outputs; не исходный код |
 | `manifests` | Манифесты и lockfiles для установки зависимостей проверок |
 | `skillManifest` | Выбранные project Skills: путь, исходный хеш, этапы и область применения; создается настройкой |
@@ -58,12 +59,12 @@ packages:
 
 | Проверка в профиле | Script проекта |
 | --- | --- |
-| `typecheck` | `typecheck` |
+| `typecheck` | `typecheck`, либо `compile`, если он есть в проекте |
 | `lint` | `lint` |
 | `tests` | `test` |
 | `build` | `build` |
 
-Имена действий зарегистрированы в runtime. Task JSON и браузер не могут передать свой executable или argv. Однако scripts проекта — исполняемый код: прежде чем запускать чужой репозиторий, изучите его происхождение и команды.
+При `init` Flowcairn выбирает существующий script и сохраняет соответствие в `checkScripts`. Перед Docker-проверкой он повторно проверяет, что этот script все еще есть в `package.json`. Task JSON и браузер не могут передать свой executable или argv. Однако scripts проекта — исполняемый код: прежде чем запускать чужой репозиторий, изучите его происхождение и команды.
 
 ## Scope, context и outputs
 

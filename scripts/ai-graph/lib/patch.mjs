@@ -18,6 +18,7 @@ import { GraphError, sha256 } from './io.mjs';
 import { isWithin, pathAllowed } from './registry.mjs';
 
 const MAX_EDITS = 100;
+const MAX_MOVES = 100;
 const MAX_EDIT_BYTES = 128 * 1024;
 const MAX_TOTAL_BYTES = 1024 * 1024;
 const HASH_PATTERN = /^[a-f0-9]{64}$/;
@@ -203,7 +204,17 @@ function validateEdit(edit) {
   return { ...edit, path: editPath, size };
 }
 
-function preflight(root, before, node, task, edits) {
+function validateMove(move) {
+  if (!move || typeof move !== 'object' || Array.isArray(move)) deny('Move должен быть объектом');
+  if (Object.keys(move).sort().join(',') !== 'from,previousHash,to') deny('Move содержит недопустимые поля');
+  const from = safeEditPath(move.from);
+  const to = safeEditPath(move.to);
+  if (from === to) deny('Move не может указывать один и тот же путь');
+  if (!HASH_PATTERN.test(move.previousHash)) deny('Move previousHash недопустим');
+  return { from, to, previousHash: move.previousHash };
+}
+
+function preflight(root, before, node, task, edits, moves) {
   if (!Array.isArray(node?.permissions) || !node.permissions.includes('workspace.source.write')) {
     deny('Нет разрешения source.write');
   }
@@ -242,11 +253,19 @@ function preflight(root, before, node, task, edits) {
   if (new Set(normalized.map((edit) => edit.path)).size !== normalized.length) {
     deny('Один файл указан несколько раз');
   }
+  if (!Array.isArray(moves) || moves.length > MAX_MOVES) deny('Moves должны быть bounded массивом');
+  const normalizedMoves = moves.map(validateMove);
+  const claimedPaths = [
+    ...normalized.map((edit) => edit.path),
+    ...normalizedMoves.flatMap((move) => [move.from, move.to]),
+  ];
+  if (new Set(claimedPaths).size !== claimedPaths.length)
+    deny('Edits и moves не могут использовать один путь дважды');
   if (normalized.reduce((total, edit) => total + edit.size, 0) > MAX_TOTAL_BYTES) {
     deny('Patch превышает 1 MiB; разделите задачу');
   }
 
-  return normalized.map((edit) => {
+  const preparedEdits = normalized.map((edit) => {
     if (!pathAllowed(edit.path, task) || !writeScopes.some((scope) => isWithin(edit.path, scope))) {
       deny('Patch выходит за approved scope');
     }
@@ -265,6 +284,22 @@ function preflight(root, before, node, task, edits) {
     }
     return { edit, expected, target };
   });
+  const preparedMoves = normalizedMoves.map((move) => {
+    if (!pathAllowed(move.from, task) || !pathAllowed(move.to, task) ||
+        !writeScopes.some((scope) => isWithin(move.from, scope)) ||
+        !writeScopes.some((scope) => isWithin(move.to, scope)))
+      deny('Move выходит за approved scope');
+    inspectParents(root, move.from);
+    inspectParents(root, move.to);
+    const source = targetPath(root, move.from);
+    const target = targetPath(root, move.to);
+    const expected = files.get(move.from) ?? null;
+    if (!expected || expected.hash !== move.previousHash) deny('Move previousHash не совпадает с началом попытки');
+    if (!inspectTarget(source) || inspectTarget(target)) deny('Move source или target изменился');
+    verifyExisting(source, expected);
+    return { move, expected, source, target };
+  });
+  return { edits: preparedEdits, moves: preparedMoves };
 }
 
 function recheck(root, item) {
@@ -317,15 +352,28 @@ function applyWrite(root, item) {
   }
 }
 
+function applyMove(root, item) {
+  inspectParents(root, item.move.from);
+  inspectParents(root, item.move.to);
+  const identity = verifyExisting(item.source, item.expected);
+  if (inspectTarget(item.target)) deny('Move target появился перед применением');
+  ensureParents(root, item.move.to);
+  verifyIdentity(item.source, identity);
+  renameSync(item.source, item.target);
+  fsyncDirectory(path.dirname(item.source));
+  if (path.dirname(item.target) !== path.dirname(item.source)) fsyncDirectory(path.dirname(item.target));
+}
+
 /** AI has no write access. Only this trusted handler applies schema-validated, hash-bound edits. */
-export function applyProposedEdits(worktree, before, node, task, edits) {
+export function applyProposedEdits(worktree, before, node, task, edits, moves = []) {
   const requested = lstatSync(worktree);
   if (!requested.isDirectory() || requested.isSymbolicLink())
     deny('Worktree должен быть директорией');
   const root = realpathSync(worktree);
-  const batch = preflight(root, before, node, task, edits);
+  const batch = preflight(root, before, node, task, edits, moves);
   // Every edit is preflighted before the first write. A later I/O/race failure remains uncertain.
-  for (const item of batch) {
+  for (const item of batch.moves) applyMove(root, item);
+  for (const item of batch.edits) {
     if (item.edit.content === null) applyDelete(root, item);
     else applyWrite(root, item);
   }

@@ -349,7 +349,7 @@ export class WorkflowService {
     if (product && !this.#hasReadConsent()) fail('ONBOARDING_REQUIRED', 'Завершите настройку и разрешите чтение выбранным AI');
     if (snapshotRequested && legacy?.snapshotHash !== project.bootstrap?.snapshotHash) fail('STALE_CONTEXT', 'Исходный снимок изменился; подтвердите актуальные файлы');
     if (untracked.some((file) => !project.bootstrap?.untrackedCandidates.includes(file))) fail('INTAKE_SCOPE', 'Файл не входит в текущий список snapshot candidates');
-    if (!requestedScope && project.scopeCandidates.length > 32) fail('INTAKE_SCOPE_LIMIT', 'Выберите не более 32 областей задачи');
+    if (!requestedScope && project.scopeCandidates.length > 64) fail('INTAKE_SCOPE_LIMIT', 'Выберите не более 64 областей задачи');
     const inferredScope = unique([...project.scopeCandidates, ...untracked.filter((file) => file !== '.flowcairn.json').map((file) => file.includes('/') ? file.split('/')[0] : file)]);
     const task = TaskInputSchema.parse({ id: `TASK-${suffix.toUpperCase()}`, goal: product ? body.title : body.prompt.slice(0, 4000),
       ...(product ? { taskNumber: body.taskNumber } : {}),
@@ -1729,7 +1729,7 @@ export class WorkflowService {
       fail('EXECUTION_FENCED', 'Операция больше не владеет run');
   }
 
-  #applyFencedEdits(executionState, task, plan, definition, before, edits) {
+  #applyFencedEdits(executionState, task, plan, definition, before, edits, moves = []) {
     const loaded = this.#read(executionState.runId);
     const deadline = this.#executionDeadline(loaded.state, plan);
     if (deadline !== null && Date.now() >= deadline) fail('AUTONOMY_LIMIT', 'Истек срок согласованного автономного выполнения');
@@ -1757,7 +1757,7 @@ export class WorkflowService {
         const unchanged = this.adapters.fingerprint(current.binding.worktree, current.toolchain);
         if (current.workspaceFingerprint?.hash !== before.hash || unchanged.hash !== before.hash)
           fail('WORKSPACE_DRIFT', 'Workspace изменился до применения patch');
-        this.adapters.applyEdits(current.binding.worktree, before, definition, task, edits);
+        this.adapters.applyEdits(current.binding.worktree, before, definition, task, edits, moves);
         return this.adapters.fingerprint(current.binding.worktree, current.toolchain);
       }),
     );
@@ -1985,8 +1985,12 @@ export class WorkflowService {
         if (unchanged.hash !== before.hash)
           fail('AI_WRITE_VIOLATION', 'AI subprocess изменил source в read-only режиме');
         if (action.kind === 'implementation') {
+          const declaredChanges = [
+            ...aiOutput.edits.map((edit) => edit.path),
+            ...aiOutput.moves.flatMap((move) => [move.from, move.to]),
+          ];
           if (
-            hashObject(aiOutput.edits.map((edit) => edit.path).sort()) !==
+            hashObject(declaredChanges.sort()) !==
             hashObject([...aiOutput.changedFiles].sort())
           )
             fail('PATCH_FILES_MISMATCH', 'edits и changedFiles не совпадают');
@@ -2003,9 +2007,10 @@ export class WorkflowService {
               definition,
               before,
               aiOutput.edits,
+              aiOutput.moves,
             );
           }
-        } else if (aiOutput.edits.length || aiOutput.changedFiles.length)
+        } else if (aiOutput.edits.length || aiOutput.moves.length || aiOutput.changedFiles.length)
           fail('AI_WRITE_VIOLATION', 'Read action не может предлагать запись');
       }
       after = fencedAfter ?? this.adapters.fingerprint(state.binding.worktree, state.toolchain);

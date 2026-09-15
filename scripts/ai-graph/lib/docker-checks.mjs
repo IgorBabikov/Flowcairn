@@ -21,7 +21,7 @@ import {
 import path from 'node:path';
 import { homedir } from 'node:os';
 import { GraphError, canonicalJson, hashObject, sha256 } from './io.mjs';
-import { loadProjectProfile, RUNTIME_ROOT, packageManagerLock, validatePackageManagerProject } from './project.mjs';
+import { loadProjectProfile, RUNTIME_ROOT, packageManagerLock, resolveProjectCheckScript, validatePackageManagerProject } from './project.mjs';
 import { resolveAction } from './registry.mjs';
 import { GraphPlanSchema, NodeDefinitionSchema, TaskSpecSchema } from './schemas.mjs';
 
@@ -823,10 +823,12 @@ function validatedRunInput({
 }
 
 function writeContract(input) {
+  const profile = loadProjectProfile(input.root);
   const contract = {
-    version: 3,
+    version: 4,
     actionId: input.action.id,
-    packageManager: loadProjectProfile(input.root).packageManager,
+    packageManager: profile.packageManager,
+    checkScript: resolveProjectCheckScript(input.root, input.action.id, profile),
     timeoutMs: input.task.limits.timeoutMs,
     files: input.files,
   };

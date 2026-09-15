@@ -85,7 +85,7 @@ export const TaskInputSchema = z.strictObject({
   taskNumber: z.string().trim().min(1).max(80).optional(),
   planningFeedback: z.array(z.string().trim().min(1).max(4000)).max(10).optional(),
   instructions: z.string().min(1).max(16000),
-  scope: z.array(RelativePath).min(1).max(32),
+  scope: z.array(RelativePath).min(1).max(64),
   contextPaths: z.array(RelativePath).max(32).default([]),
   forbiddenPaths: z.array(RelativePath).max(32).default([]),
   includeUntracked: z.array(RelativePath).max(64).default([]),
@@ -188,6 +188,16 @@ export const AIResultSchema = z.strictObject({
           .max(128 * 1024)
           .nullable(),
         executable: z.boolean(),
+      }),
+    )
+    .max(100)
+    .default([]),
+  moves: z
+    .array(
+      z.strictObject({
+        from: RelativePath,
+        to: RelativePath,
+        previousHash: Hash,
       }),
     )
     .max(100)
@@ -404,7 +414,7 @@ export const LegacyIntakeSchema = z.strictObject({
   prompt: z.string().trim().min(3).max(16000),
   operationId: Id,
   contextHash: Hash,
-  scope: z.array(RelativePath).min(1).max(32).optional(),
+  scope: z.array(RelativePath).min(1).max(64).optional(),
   snapshot: z.literal(true).optional(),
   snapshotHash: Hash.optional(),
   includeUntracked: z.array(RelativePath).max(64).optional(),

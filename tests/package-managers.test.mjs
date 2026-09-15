@@ -5,7 +5,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, realpathSync, rmSy
 import os from 'node:os';
 import path from 'node:path';
 import { initializeProject } from '../bin/flowcairn.mjs';
-import { packageManagerVersion, packageManagerLock, ProjectProfileSchema } from '../scripts/ai-graph/lib/project.mjs';
+import { packageManagerVersion, packageManagerLock, ProjectProfileSchema, resolveProjectCheckScript } from '../scripts/ai-graph/lib/project.mjs';
 import { DOCKER_CHECKS_TESTING } from '../scripts/ai-graph/lib/docker-checks.mjs';
 import { registeredContainerCheck } from '../scripts/ai-graph/container-check.mjs';
 import { prepareToolchain, verifyToolchain } from '../scripts/ai-graph/lib/toolchain.mjs';
@@ -36,7 +36,18 @@ test('Yarn4 init discovers lock and workspaces, keeps config out of Docker, pins
   pkg.packageManager = 'yarn@4.9.1';
   writeFileSync(path.join(root, 'package.json'), JSON.stringify(pkg));
   assert.notEqual(DOCKER_CHECKS_TESTING.contextDescription(root, 'sha256:' + 'a'.repeat(64)).hash, context.hash);
-  assert.deepEqual(registeredContainerCheck('check-tests', { packageManager: 'yarn' }).args, ['/opt/flowcairn/package-manager.cjs', 'run', 'test']);
+  assert.deepEqual(registeredContainerCheck('check-tests', { packageManager: 'yarn', checkScript: 'test' }).args, ['/opt/flowcairn/package-manager.cjs', 'run', 'test']);
+});
+
+test('init maps a project compile script to the trusted typecheck action', (t) => {
+  const root = fixture(t, 'npm');
+  const pkg = JSON.parse(readFileSync(path.join(root, 'package.json')));
+  pkg.scripts = { test: 'node --test', compile: 'tsc --noEmit', lint: 'eslint src', build: 'webpack' };
+  writeFileSync(path.join(root, 'package.json'), JSON.stringify(pkg));
+  const initialized = initializeProject(root, options);
+  assert.deepEqual(initialized.profile.checks, ['typecheck', 'lint', 'tests', 'build']);
+  assert.deepEqual(initialized.profile.checkScripts, { typecheck: 'compile', lint: 'lint', tests: 'test', build: 'build' });
+  assert.equal(resolveProjectCheckScript(root, 'check-typecheck', initialized.profile), 'compile');
 });
 
 test('manager pins reject remote executable URLs, ranges, tags, legacy Yarn and contradictions', () => {

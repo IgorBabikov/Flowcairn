@@ -60,6 +60,10 @@ function edit(pathValue, previousHash, content, executable = false) {
   return { path: pathValue, previousHash, content, executable };
 }
 
+function move(from, to, previousHash) {
+  return { from, to, previousHash };
+}
+
 function temporaryFiles(root) {
   const found = [];
   function walk(directory) {
@@ -94,6 +98,41 @@ test('atomically creates, updates, deletes, and applies executable mode', (t) =>
   assert.equal(lstatSync(path.join(root, 'src/nested/new.txt')).mode & 0o777, 0o644);
   assert.equal(existsSync(path.join(root, 'src/delete.txt')), false);
   assert.deepEqual(temporaryFiles(root), []);
+});
+
+test('moves a large hash-bound source file without returning its content through the AI result', (t) => {
+  const { root, before, node, task } = fixture(t);
+  const source = path.join(root, 'src', 'large.json');
+  const content = 'x'.repeat(256 * 1024);
+  writeFileSync(source, content);
+  const largeBefore = { files: [...before.files, record(root, 'src/large.json')] };
+  const descriptor = largeBefore.files.find((file) => file.path === 'src/large.json');
+
+  applyProposedEdits(root, largeBefore, node, task, [], [
+    move('src/large.json', 'src/localization/large.json', descriptor.hash),
+  ]);
+
+  assert.equal(existsSync(source), false);
+  assert.equal(readFileSync(path.join(root, 'src/localization/large.json'), 'utf8'), content);
+});
+
+test('rejects a move outside scope, with a changed source, or into an existing target', (t) => {
+  const { root, before, node, task } = fixture(t);
+  const source = before.files.find((file) => file.path === 'src/update.txt');
+  assert.throws(
+    () => applyProposedEdits(root, before, node, task, [], [move('src/update.txt', 'outside.txt', source.hash)]),
+    (error) => error.code === 'PATCH_DENIED',
+  );
+  writeFileSync(path.join(root, 'src/target.txt'), 'existing\n');
+  assert.throws(
+    () => applyProposedEdits(root, before, node, task, [], [move('src/update.txt', 'src/target.txt', source.hash)]),
+    (error) => error.code === 'PATCH_DENIED',
+  );
+  writeFileSync(path.join(root, 'src/update.txt'), 'changed concurrently\n');
+  assert.throws(
+    () => applyProposedEdits(root, before, node, task, [], [move('src/update.txt', 'src/moved.txt', source.hash)]),
+    (error) => error.code === 'PATCH_DENIED',
+  );
 });
 
 test('rejects scope, protected, traversal, absolute, and empty-segment paths', (t) => {
