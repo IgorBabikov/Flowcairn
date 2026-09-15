@@ -43,6 +43,7 @@ test('preview is inert; full unchanged init uninstall preserves original rules a
   assert.equal(existsSync(path.join(root, '.flowcairn.json')), false);
   assert.equal(existsSync(path.join(root, '.ai-orchestrator')), false);
   assert.equal(readFileSync(path.join(root, '.gitignore'), 'utf8'), 'node_modules/\n');
+  assert.doesNotMatch(readFileSync(path.join(root, '.git/info/exclude'), 'utf8'), /\.ai-orchestrator\//);
   assert.equal(readFileSync(path.join(root, 'AGENTS.md'), 'utf8'), '# Existing rules\n');
   assert.equal((await uninstallCommand(root, {}, loader)).changed, false);
   assert.equal(released, 3);
@@ -58,7 +59,7 @@ test('active lifecycle and changed owned files refuse all deletion', async (t) =
   assert.deepEqual(readFileSync(path.join(root, '.flowcairn.json')), profile);
 });
 
-test('unrelated ignore edits, user results and dependencies remain and status is partial', async (t) => {
+test('unrelated project ignore edits, user results and dependencies remain and status is partial', async (t) => {
   const root = fixture(t);
   writeFileSync(path.join(root, '.gitignore'), readFileSync(path.join(root, '.gitignore'), 'utf8') + 'user-output/\n');
   mkdirSync(path.join(root, '.ai-orchestrator/results'));
@@ -66,8 +67,8 @@ test('unrelated ignore edits, user results and dependencies remain and status is
   writeFileSync(path.join(root, 'package.json'), '{"name":"fixture","devDependencies":{"flowcairn":"0.1.2"}}');
   const result = await uninstallCommand(root, {}, fakeLifecycle());
   assert.equal(result.status, 'partial');
-  assert.match(readFileSync(path.join(root, '.gitignore'), 'utf8'), /\.ai-orchestrator\//);
   assert.ok(readFileSync(path.join(root, '.gitignore'), 'utf8').endsWith('user-output/\n'));
+  assert.match(readFileSync(path.join(root, '.git/info/exclude'), 'utf8'), /\.ai-orchestrator\//);
   assert.equal(existsSync(path.join(root, '.ai-orchestrator/flowcairn-install.json')), true);
   assert.equal(execFileSync('/usr/bin/git', ['check-ignore', '.ai-orchestrator/results/user-result.txt'], { cwd: root, encoding: 'utf8' }).trim(), '.ai-orchestrator/results/user-result.txt');
   assert.equal(readFileSync(path.join(root, '.ai-orchestrator/results/user-result.txt'), 'utf8'), 'keep');
@@ -122,4 +123,5 @@ test('real runtime fence refuses a live viewer and reverses fresh config plus ma
   assert.equal(existsSync(path.join(root, '.ai-orchestrator')), false);
   assert.deepEqual(readFileSync(path.join(root, 'AGENTS.md')), before);
   assert.equal(readFileSync(path.join(root, '.gitignore'), 'utf8'), 'node_modules/\n');
+  assert.doesNotMatch(readFileSync(path.join(root, '.git/info/exclude'), 'utf8'), /\.ai-orchestrator\//);
 });

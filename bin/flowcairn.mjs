@@ -35,7 +35,7 @@ import {
 import { TaskInputSchema } from '../scripts/ai-graph/lib/schemas.mjs';
 import { WorkflowService, sanitizeText } from '../scripts/ai-graph/lib/service.mjs';
 import { runCli } from '../scripts/ai-graph/cli.mjs';
-import { probeRunner } from '../scripts/ai-graph/lib/runner.mjs';
+import { probeRunner, probeLocalChecks } from '../scripts/ai-graph/lib/runner.mjs';
 import { probeChecks, prepareCheckImage } from '../scripts/ai-graph/lib/docker-checks.mjs';
 import { startViewer } from '../tools/ai-graph-viewer/server.mjs';
 import { discoverWorkspaceManifests } from './workspaces.mjs';
@@ -53,6 +53,7 @@ export { createTask };
 const OWNER_FILE = '.ai-orchestrator/flowcairn-install.json';
 const PROFILE = '.flowcairn.json';
 const IGNORE_BLOCK = '# Flowcairn: локальное состояние, не исходники\n.ai-orchestrator/\n';
+const LOCAL_EXCLUDE = '.git/info/exclude';
 const VALUE_OPTIONS = new Set([
   'root',
   'provider',
@@ -179,6 +180,16 @@ function writeNew(file, content, mode = 0o600) {
     closeSync(fd);
   }
 }
+function localExcludeFile(root) {
+  const gitDirectory = path.join(root, '.git');
+  const gitInfo = path.join(gitDirectory, 'info');
+  for (const directory of [gitDirectory, gitInfo]) {
+    const stat = lstatSync(directory);
+    if (!stat.isDirectory() || stat.isSymbolicLink())
+      fail('INSTALL_CONFLICT', 'Git local exclude недоступен в этом checkout.');
+  }
+  return path.join(gitInfo, 'exclude');
+}
 
 export function parseOptions(tokens) {
   const options = {};
@@ -241,13 +252,14 @@ export async function initializeCommand(input, options = {}, terminal = {}) {
   return { ...result, checkPreparation };
 }
 
-/** Docker image preparation is opt-in because it can download an image and dependencies. */
+/** Hardened Docker checks are opt-in; normal onboarding uses local worktree checks. */
 export async function maybePrepareChecks(root, profile, options = {}, terminal = {}, checks = {
   probe: probeChecks,
   prepare: prepareCheckImage,
 }) {
   if (options['dry-run'] || options.json || !profile.checks.length)
     return { prepared: false, reason: 'NOT_NEEDED' };
+  if (profile.checkMode !== 'hardened') return { prepared: false, reason: 'LOCAL_DEFAULT' };
   const status = checks.probe({ root });
   if (status.available || status.reason !== 'CHECK_IMAGE_MISSING')
     return { prepared: false, reason: status.available ? 'READY' : status.reason };
@@ -412,19 +424,18 @@ export function initializeProject(input, options = {}) {
       },
     });
   for (const file of profile.manifests) readProjectFile(root, file, 16 * 1024 * 1024);
-  const ignoreFile = path.join(root, '.gitignore');
-  const oldIgnore = existsNoFollow(ignoreFile) ? readRegular(ignoreFile).toString('utf8') : null;
-  // A tracked profile survives clone; its local owner state intentionally does not.
-  const alreadyIgnored =
-    oldIgnore !== null &&
-    spawnSync(
-      '/usr/bin/git',
-      ['-C', root, 'check-ignore', '-q', '--', '.ai-orchestrator/flowcairn-install.json'],
-      { stdio: 'ignore' },
-    ).status === 0;
-  const ignore = alreadyIgnored
-    ? oldIgnore
-    : (oldIgnore ?? '') + (oldIgnore && !oldIgnore.endsWith('\n') ? '\n' : '') + IGNORE_BLOCK;
+  // Project .gitignore belongs to the team. Flowcairn keeps only its own local
+  // state invisible through Git's per-checkout exclude file.
+  const excludeFile = localExcludeFile(root);
+  const oldExclude = existsNoFollow(excludeFile) ? readRegular(excludeFile).toString('utf8') : '';
+  const alreadyIgnored = spawnSync(
+    '/usr/bin/git',
+    ['-C', root, 'check-ignore', '-q', '--', '.ai-orchestrator/flowcairn-install.json'],
+    { stdio: 'ignore' },
+  ).status === 0;
+  const exclude = alreadyIgnored
+    ? oldExclude
+    : oldExclude + (oldExclude && !oldExclude.endsWith('\n') ? '\n' : '') + IGNORE_BLOCK;
   const profileText = existingProfile
     ? readRegular(path.join(root, PROFILE)).toString('utf8')
     : JSON.stringify(profile, null, 2) + '\n';
@@ -436,12 +447,12 @@ export function initializeProject(input, options = {}) {
       profile,
       changes: [
         ...(existingProfile ? [] : [PROFILE]),
-        ...(ignore === oldIgnore ? [] : ['.gitignore']),
+        ...(exclude === oldExclude ? [] : [`${LOCAL_EXCLUDE} (локально)`]),
         OWNER_FILE,
         '.ai-orchestrator/task.example.json',
       ],
     };
-  const tmp = path.join(root, `.flowcairn-ignore-${randomUUID()}.tmp`);
+  const tmp = path.join(path.dirname(excludeFile), `.flowcairn-exclude-${randomUUID()}.tmp`);
   const exampleText = JSON.stringify({
     id: 'ORCH-001', goal: 'Один проверяемый результат',
     instructions: 'Опишите нужное поведение и ограничения', scope: ['README.md'],
@@ -469,9 +480,9 @@ export function initializeProject(input, options = {}) {
           profileHash: sha256(profileText),
           ...(!existingProfile && options['read-consent'] === true ? { readConsentHash: onboardingConsentHash(root, profile) } : {}),
           profileOwned: !existingProfile,
-          ignoreBefore: oldIgnore,
-          ignoreAfterHash: sha256(ignore),
-          ignoreBlockOwned: ignore !== oldIgnore,
+          localExcludeBefore: oldExclude,
+          localExcludeAfterHash: sha256(exclude),
+          localExcludeBlockOwned: exclude !== oldExclude,
           exampleHash: sha256(exampleText),
         },
         null,
@@ -482,16 +493,16 @@ export function initializeProject(input, options = {}) {
       path.join(stateDirectory, 'task.example.json'),
       exampleText,
     );
-    if (ignore !== oldIgnore) {
-      const ignoreMode = oldIgnore === null ? 0o644 : lstatSync(ignoreFile).mode & 0o777;
-      createOwned(tmp, ignore, ignoreMode);
-      const current = existsNoFollow(ignoreFile) ? readRegular(ignoreFile).toString('utf8') : null;
-      if (current !== oldIgnore)
+    if (exclude !== oldExclude) {
+      const excludeMode = existsNoFollow(excludeFile) ? lstatSync(excludeFile).mode & 0o777 : 0o600;
+      createOwned(tmp, exclude, excludeMode);
+      const current = existsNoFollow(excludeFile) ? readRegular(excludeFile).toString('utf8') : '';
+      if (current !== oldExclude)
         fail(
           'INSTALL_CONFLICT',
-          '.gitignore изменился во время установки. Он сохранен; повторите проверку.',
+          'Локальный Git exclude изменился во время установки. Он сохранен; повторите проверку.',
         );
-      renameSync(tmp, ignoreFile);
+      renameSync(tmp, excludeFile);
       ignoreWritten = true;
     }
   } catch (error) {
@@ -525,7 +536,7 @@ export function initializeProject(input, options = {}) {
     root,
     profile,
     message:
-      existingProfile && ignore === oldIgnore
+      existingProfile && exclude === oldExclude
         ? 'Локальное состояние создано по существующему профилю. Исходники не изменены; можно создать задачу.'
         : hasOnboardingConsent(root, profile)
           ? 'Проект настроен. Введите задачу: Flowcairn проведет анализ и подготовит план. Разработка начнется после вашего согласования плана.'
@@ -567,7 +578,9 @@ export async function doctorProject(input) {
     };
   }
   const ai = await probeRunner({ root });
-  const checks = probeChecks({ root });
+  const checks = profile.checkMode === 'hardened'
+    ? probeChecks({ root })
+    : probeLocalChecks({ root });
   let manager;
   try {
     manager = {
@@ -595,7 +608,9 @@ export async function doctorProject(input) {
     assistants: inspectHarnesses(),
     ai: ai.ai,
     checks,
-    note: 'Это проверка окружения, не AI-вызов и не доказательство качества модели.',
+    note: profile.checkMode === 'local'
+      ? 'Проверки выполняются локально в отдельном worktree. Docker не нужен; это не изолированная песочница.'
+      : 'Проверки используют подготовленный изолированный Docker-образ.',
   };
 }
 

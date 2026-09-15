@@ -79,6 +79,9 @@ export const ProjectProfileSchema = z.strictObject({
     .array(checkId)
     .max(4)
     .refine((values) => new Set(values).size === values.length),
+  // Local worktree checks are the default. Hardened checks remain an explicit
+  // optional backend because they need Docker/Podman or a remote sandbox.
+  checkMode: z.enum(['local', 'hardened']).default('local'),
   checkScripts: z
     .object({
       typecheck: checkScript.optional(),

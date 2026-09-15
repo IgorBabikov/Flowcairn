@@ -24,7 +24,7 @@ export function ownedBootstrapFiles(root) {
   catch (error) { if (error.code === 'ENOENT') return []; throw error; }
   if (installation.tool !== 'flowcairn') throw new GraphError('INSTALL_CONFLICT', 'Bootstrap receipt принадлежит другому инструменту');
   const result = [];
-  for (const [file, expected] of [['.flowcairn.json', installation.profileHash], ['.gitignore', installation.ignoreAfterHash]]) {
+  for (const [file, expected] of [['.flowcairn.json', installation.profileHash]]) {
     if (typeof expected !== 'string' || !/^[a-f0-9]{64}$/.test(expected)) continue;
     let bytes;
     try { bytes = readRegular(root, file); } catch (error) { if (error.code === 'ENOENT') continue; throw error; }

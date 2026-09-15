@@ -5,6 +5,7 @@ import { GraphError, sha256 } from '../scripts/ai-graph/lib/io.mjs';
 
 const OWNER = '.ai-orchestrator/flowcairn-install.json';
 const IGNORE_BLOCK = '# Flowcairn: локальное состояние, не исходники\n.ai-orchestrator/\n';
+const LOCAL_EXCLUDE = '.git/info/exclude';
 
 function inspectFile(root, relative) {
   const file = path.join(root, relative);
@@ -63,6 +64,21 @@ function ownedPlan(root) {
       throw new GraphError('UNINSTALL_MODIFIED_FILE', `${relative} изменен после установки; автоматическое удаление остановлено.`);
     changes.push({ current, desired: null });
   }
+  const localExclude = inspectFile(root, LOCAL_EXCLUDE);
+  if (localExclude && owner.localExcludeBlockOwned === true) {
+    const text = localExclude.bytes.toString('utf8');
+    const count = text.split(IGNORE_BLOCK).length - 1;
+    const alreadyRestored = count === 0 && text === owner.localExcludeBefore;
+    if (count !== 1 && !alreadyRestored)
+      throw new GraphError('UNINSTALL_MODIFIED_FILE', 'Управляемое локальное Git-исключение изменено или продублировано; файлы сохранены.');
+    const desired = localExclude.hash === owner.localExcludeAfterHash
+      ? owner.localExcludeBefore
+      : text.replace(IGNORE_BLOCK, '');
+    if (typeof desired !== 'string')
+      throw new GraphError('UNINSTALL_OWNER', 'Исходное состояние локального Git-исключения не подтверждено.');
+    if (!alreadyRestored) changes.push({ current: localExclude, desired });
+  }
+  // Receipts from Flowcairn <= 0.2.5 may still own a project .gitignore block.
   const ignore = inspectFile(root, '.gitignore');
   if (ignore && owner.ignoreBlockOwned === true) {
     const text = ignore.bytes.toString('utf8');
@@ -109,10 +125,12 @@ function preserveStateIgnore(root, plan, guard, integration) {
   try { names = readdirSync(path.join(root, '.ai-orchestrator')); }
   catch (error) { if (error.code === 'ENOENT') return; throw error; }
   if (!names.some((name) => !removable.has(`.ai-orchestrator/${name}`))) return;
-  const ownsIgnore = plan.changes.some((item) => item.current.relative === '.gitignore');
+  const ownsIgnore = plan.changes.some((item) =>
+    ['.gitignore', LOCAL_EXCLUDE].includes(item.current.relative),
+  );
   if (!ownsIgnore) return;
-  plan.changes = plan.changes.filter((item) => !['.gitignore', OWNER].includes(item.current.relative));
-  plan.remaining.push('.gitignore (сохранено правило для приватного состояния)', OWNER);
+  plan.changes = plan.changes.filter((item) => !['.gitignore', LOCAL_EXCLUDE, OWNER].includes(item.current.relative));
+  plan.remaining.push('локальное Git-исключение (сохранено правило для приватного состояния)', OWNER);
 }
 
 const defaultLoader = async () => ({
@@ -155,7 +173,7 @@ export async function uninstallCommand(projectRoot, options = {}, loader = defau
     try {
       deactivated = api.uninstallIntegration(contract);
       for (const change of [...plan.changes]) {
-        if (['.gitignore', OWNER].includes(change.current.relative)) {
+        if (['.gitignore', LOCAL_EXCLUDE, OWNER].includes(change.current.relative)) {
           preserveStateIgnore(root, plan, guard, api.inspectIntegration({ projectRoot: root }));
           if (!plan.changes.includes(change)) continue;
         }

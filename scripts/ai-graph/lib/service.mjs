@@ -181,6 +181,9 @@ async function defaultAdapters(root) {
   ]);
   pinnedRuntimeIdentity(root);
   const profile = loadProjectProfile(root);
+  const checks = profile.checkMode === 'hardened'
+    ? dockerChecks.probeChecks({ root })
+    : runner.probeLocalChecks({ root });
   // These modules are bundled trusted runtime code, never a user-supplied import path.
   const rulesFile = new URL('./instructions.mjs', import.meta.url);
   const rules = existsSync(rulesFile) ? await import(rulesFile.href) : null;
@@ -280,10 +283,10 @@ async function defaultAdapters(root) {
     captureBefore: captureBeforeContents,
     applyEdits: applyProposedEdits,
     diff: buildAttemptDiff,
-    runner: { ...(await runner.probeRunner({ root })), checks: dockerChecks.probeChecks({ root }) },
+    runner: { ...(await runner.probeRunner({ root })), checks },
     execute: (options) =>
       options.node.action.id.startsWith('check-')
-        ? dockerChecks.runCheck(options)
+        ? profile.checkMode === 'hardened' ? dockerChecks.runCheck(options) : runner.runRegisteredAction(options)
         : runner.runRegisteredAction(options),
     inspectProcess: (process) =>
       process.kind === 'docker-check'

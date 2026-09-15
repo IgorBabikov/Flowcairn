@@ -47,7 +47,7 @@ import {
   disposeReviewEvidenceFile,
 } from './review-evidence.mjs';
 import { verifyToolchain } from './toolchain.mjs';
-import { loadProjectProfile } from './project.mjs';
+import { loadProjectProfile, resolveProjectCheckScript } from './project.mjs';
 import { fingerprintWorkspace } from './workspace.mjs';
 
 const NODE_BINARY = realpathSync(process.execPath);
@@ -387,6 +387,65 @@ function runnerToolchain(profile) {
     digest: sha256(canonicalJson(identity)),
     identity: Object.freeze(identity),
   });
+}
+
+function localCheckToolchain(profile) {
+  if (!/^v22\./.test(process.version) || !regularExecutable(NODE_BINARY))
+    fail('LOCAL_CHECK_TOOLCHAIN', 'Локальные проверки требуют доверенный Node 22');
+  const candidate = path.join(NODE_BIN, profile.packageManager);
+  let entry;
+  try { entry = realpathSync(candidate); } catch { fail('LOCAL_CHECK_TOOLCHAIN', `Не найден ${profile.packageManager} из Node 22`); }
+  if (!regularReadable(entry))
+    fail('LOCAL_CHECK_TOOLCHAIN', `Недоступен безопасный ${profile.packageManager} из Node 22`);
+  const identity = {
+    kind: 'local-worktree',
+    nodeVersion: process.version,
+    nodeDigest: fileDigest(NODE_BINARY),
+    packageManager: profile.packageManager,
+    packageManagerDigest: fileDigest(entry),
+  };
+  return Object.freeze({ node: NODE_BINARY, entry, digest: sha256(canonicalJson(identity)), identity });
+}
+
+function makeLocalCheckCommand({ root, worktree, node, profile, toolchain, dependencyToolchain }) {
+  const script = resolveProjectCheckScript(root, node.action.id, profile);
+  return {
+    command: {
+      executable: toolchain.node,
+      args: [toolchain.entry, 'run', script],
+      cwd: worktree,
+      env: safeEnvironment({
+        HOME: worktree,
+        NPM_CONFIG_USERCONFIG: '/dev/null',
+        NPM_CONFIG_UPDATE_NOTIFIER: 'false',
+        NPM_CONFIG_FUND: 'false',
+        NPM_CONFIG_AUDIT: 'false',
+      }),
+    },
+    input: '',
+    maxOutputBytes: MAX_AI_PROCESS_OUTPUT,
+    execution: Object.freeze({
+      kind: 'local-check',
+      isolation: 'worktree-only',
+      actionId: node.action.id,
+      packageManager: profile.packageManager,
+      script,
+      toolchainDigest: toolchain.digest,
+      dependencyToolchain: dependencyToolchain.hash,
+    }),
+  };
+}
+
+/** Checks never receive a task command: only profile-bound package scripts can run. */
+export function probeLocalChecks({ root }) {
+  try {
+    const profile = loadProjectProfile(root);
+    localCheckToolchain(profile);
+    for (const id of profile.checks) resolveProjectCheckScript(root, `check-${id}`, profile);
+    return { available: true, reason: null, mode: 'local' };
+  } catch (error) {
+    return { available: false, reason: errorReason(error, 'LOCAL_CHECK_UNAVAILABLE'), mode: 'local' };
+  }
 }
 
 function tomlString(value) {
@@ -967,22 +1026,20 @@ export async function runRegisteredAction({
   if (typeof onStart !== 'function') fail('RUNNER_START_CALLBACK_REQUIRED', 'onStart обязателен');
   const input = parseInputs({ node, task, plan, skills, priorEvidence, reviewEvidence });
   const profile = loadProjectProfile(root);
-  const allocation = validateAllocation(root, worktree, outputDirectory, profile.ai.provider);
-  if (action.id.startsWith('check-')) {
-    fail(
-      'RUNNER_CHECK_CONTAINMENT_UNAVAILABLE',
-      'Registered checks отключены до подтверждения descendant containment',
-    );
-  }
-  const toolchain = runnerToolchain(profile);
+  const localCheck = action.id.startsWith('check-');
+  const allocation = validateAllocation(root, worktree, outputDirectory, localCheck ? 'local' : profile.ai.provider);
+  const toolchain = localCheck ? localCheckToolchain(profile) : runnerToolchain(profile);
   const dependencyToolchain = verifyToolchain({
     root: allocation.rootPath,
     worktree: allocation.worktreePath,
     manifest: toolchainManifest,
   });
-  const prepare = profile.ai.provider === 'openai' ? makeOpenAiCommand : makeAiCommand;
+  const prepare = localCheck
+    ? makeLocalCheckCommand
+    : profile.ai.provider === 'openai' ? makeOpenAiCommand : makeAiCommand;
   const prepared = prepare({
     ...input,
+    root: allocation.rootPath,
     profile,
     instructionDenials: profile.ai.provider === 'codex'
       ? instructionDenials(allocation.worktreePath, input.node, profile, dependencyToolchain)

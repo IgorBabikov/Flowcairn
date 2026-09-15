@@ -87,19 +87,20 @@ test('init dry run has no effects; setup is repeatable and preserves owner instr
   assert.equal(readFileSync(hook, 'utf8'), '#!/bin/sh\nexit 0\n');
   const ignore = readFileSync(path.join(root, '.gitignore'), 'utf8');
   assert.ok(ignore.startsWith('node_modules/\n'));
+  assert.match(readFileSync(path.join(root, '.git/info/exclude'), 'utf8'), /\.ai-orchestrator\//);
   assert.equal(initializeProject(root, options).created, false);
   assert.equal(readFileSync(path.join(root, '.gitignore'), 'utf8'), ignore);
   assert.equal(existsSync(path.join(root, '.ai-orchestrator/state.json')), false);
 });
 
-test('conflicting state and linked gitignore are refused before creating profile', (t) => {
+test('conflicting state and linked local Git exclude are refused before creating profile', (t) => {
   const a = fixture(t);
   symlinkSync(path.join(a.root, 'missing-state'), path.join(a.root, '.ai-orchestrator'));
   assert.throws(() => initializeProject(a.root, options), { code: 'INSTALL_CONFLICT' });
   assert.equal(existsSync(path.join(a.root, '.flowcairn.json')), false);
   const b = fixture(t);
-  rmSync(path.join(b.root, '.gitignore'));
-  symlinkSync(path.join(b.root, 'AGENTS.md'), path.join(b.root, '.gitignore'));
+  rmSync(path.join(b.root, '.git/info/exclude'));
+  symlinkSync(path.join(b.root, 'AGENTS.md'), path.join(b.root, '.git/info/exclude'));
   assert.throws(() => initializeProject(b.root, options));
   assert.equal(existsSync(path.join(b.root, '.flowcairn.json')), false);
 });
@@ -166,6 +167,7 @@ test('fresh clone adopts tracked profile without changing tracked files and can 
   ]);
   assert.equal(existsSync(path.join(clone.root, '.ai-orchestrator')), false);
   assert.deepEqual(initializeProject(clone.root, { 'dry-run': true }).changes, [
+    '.git/info/exclude (локально)',
     '.ai-orchestrator/flowcairn-install.json',
     '.ai-orchestrator/task.example.json',
   ]);
@@ -248,7 +250,7 @@ test('relative npm bin symlink runs version and init with observable effects', (
   const profile = JSON.parse(readFileSync(path.join(root, '.flowcairn.json'), 'utf8'));
   assert.equal(profile.ai.model, options.model);
   assert.equal(existsSync(path.join(root, '.ai-orchestrator/flowcairn-install.json')), true);
-  assert.match(readFileSync(path.join(root, '.gitignore'), 'utf8'), /\.ai-orchestrator\//);
+  assert.match(readFileSync(path.join(root, '.git/info/exclude'), 'utf8'), /\.ai-orchestrator\//);
   assert.equal(git('rev-parse', 'HEAD'), head);
   assert.deepEqual(readFileSync(path.join(root, 'AGENTS.md')), instructions);
 });
@@ -342,7 +344,7 @@ test('TTY init asks for a model; non-TTY, JSON and dry-run never prompt or write
   const pending = initializeCommand(root, { provider: 'openai' }, { input, output });
   const installed = await pending;
   assert.equal(installed.profile.ai.model, options.model);
-  assert.match(transcript, /не API-ключ/);
+  assert.match(transcript, /OpenAI API требует явный ID модели/);
   const before = transcript;
   assert.equal((await initializeCommand(root, {}, { input, output })).created, false);
   assert.equal(transcript, before);
