@@ -398,7 +398,7 @@ function localCheckToolchain(profile) {
   if (!/^v22\./.test(process.version) || !runningNode?.isFile() ||
       (runningNode.mode & 0o111) === 0 || (runningNode.mode & 0o002) !== 0 ||
       (process.getuid?.() !== undefined && runningNode.uid !== 0 && runningNode.uid !== process.getuid?.()))
-    fail('LOCAL_CHECK_TOOLCHAIN', 'Локальные проверки требуют доверенный Node 22');
+    fail('LOCAL_CHECK_NODE_UNSAFE', 'Локальные проверки требуют доверенный Node 22');
   const candidate = path.join(NODE_BIN, profile.packageManager);
   let entry;
   try { entry = realpathSync(candidate); } catch { fail('LOCAL_CHECK_TOOLCHAIN', `Не найден ${profile.packageManager} из Node 22`); }
@@ -406,7 +406,7 @@ function localCheckToolchain(profile) {
   let stat;
   try { stat = statSync(entry); } catch { fail('LOCAL_CHECK_TOOLCHAIN', `Недоступен безопасный ${profile.packageManager} из Node 22`); }
   if (!isWithin(entry, nodeRoot) || !stat.isFile() || (stat.mode & 0o002) !== 0)
-    fail('LOCAL_CHECK_TOOLCHAIN', `Недоступен безопасный ${profile.packageManager} из Node 22`);
+    fail('LOCAL_CHECK_MANAGER_UNSAFE', `Недоступен безопасный ${profile.packageManager} из Node 22`);
   const identity = {
     kind: 'local-worktree',
     nodeVersion: process.version,
