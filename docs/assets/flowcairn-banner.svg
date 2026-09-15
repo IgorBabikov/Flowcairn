@@ -1,23 +1,45 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="480" viewBox="0 0 1280 480" role="img" aria-labelledby="title desc">
-<title id="title">Flowcairn — от задачи до проверенного результата</title>
-<desc id="desc">Опишите задачу. Проверьте план. Управляйте AI-разработкой через живой граф.</desc>
-<defs><linearGradient id="bg" x2="1" y2="1"><stop stop-color="#e4f3e8"/><stop offset="1" stop-color="#f5f7df"/></linearGradient><pattern id="dots" width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1" fill="#356946" opacity=".16"/></pattern></defs>
-<rect width="1280" height="480" rx="28" fill="url(#bg)"/><rect width="1280" height="480" rx="28" fill="url(#dots)"/>
-<g font-family="Arial,Helvetica,sans-serif">
-<rect x="58" y="52" width="52" height="52" rx="16" fill="#305b40"/>
-<g fill="#d9f5be"><rect x="69" y="72" width="7" height="14" rx="3.5"/><rect x="81" y="64" width="7" height="30" rx="3.5"/><rect x="93" y="69" width="7" height="20" rx="3.5"/></g>
-<text x="126" y="90" fill="#173d2a" font-size="40" font-weight="700" letter-spacing="-1">Flowcairn</text>
-<text x="60" y="167" fill="#173d2a" font-size="43" font-weight="700" letter-spacing="-1">AI пишет код.</text>
-<text x="60" y="221" fill="#487b39" font-size="43" font-weight="700" letter-spacing="-1">Задача — под контролем.</text>
-<text x="61" y="267" fill="#4d6757" font-size="20">План до изменений. Проверки до результата.</text>
-<text x="61" y="297" fill="#4d6757" font-size="20">Весь ход работы — в одном Graph.</text>
-<g transform="translate(690 60)">
-<path d="M140 72V113H350V153M140 72V153M350 224V266H140V312" fill="none" stroke="#79638c" stroke-width="3" stroke-linejoin="round"/>
-<path d="M140 113V153" fill="none" stroke="#58c7be" stroke-width="3" stroke-dasharray="6 5"/>
-<rect width="340" height="73" rx="14" fill="#253938" stroke="#73c5a7"/><text x="20" y="30" fill="#91dfbc" font-size="13" letter-spacing="1.6">ПЛАН ПОДТВЕРЖДЕН</text><text x="20" y="56" fill="#f7fcf8" font-size="19">Границы задачи согласованы</text>
-<rect x="0" y="153" width="280" height="91" rx="14" fill="#263b43" stroke="#67d2d0" stroke-width="2"/><circle cx="22" cy="178" r="5" fill="#7ee4dc"/><text x="38" y="183" fill="#8be5dc" font-size="13" letter-spacing="1.2">ВЫПОЛНЯЕТСЯ</text><text x="20" y="215" fill="#fff" font-size="21" font-weight="700">Изменение кода</text>
-<rect x="305" y="153" width="195" height="73" rx="14" fill="#322b40" stroke="#8c7d9d" stroke-dasharray="5 4"/><text x="325" y="181" fill="#c1b5cc" font-size="13" letter-spacing="1.2">СЛЕДУЮЩИЙ ЭТАП</text><text x="325" y="207" fill="#f9f3ff" font-size="19">Проверки и ревью</text>
-<rect x="0" y="312" width="280" height="64" rx="14" fill="#42352c" stroke="#d6b170"/><text x="20" y="350" fill="#ffe0a3" font-size="20">Приемка — за вами</text>
-</g>
-<g font-size="14" fill="#284d36"><rect x="60" y="369" width="170" height="35" rx="17" fill="#d3e7cb"/><text x="79" y="392">План до изменений</text><rect x="243" y="369" width="170" height="35" rx="17" fill="#d3e7cb"/><text x="263" y="392">Проверки и ревью</text></g>
-</g></svg>
+  <title id="title">Flowcairn — большая задача становится управляемой работой</title>
+  <desc id="desc">Graph проводит задачу через анализ проекта, план, изменения, проверки и приемку результата.</desc>
+  <defs>
+    <linearGradient id="surface" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#f7f8fc"/>
+      <stop offset="1" stop-color="#edf0fb"/>
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="480" rx="28" fill="url(#surface)"/>
+  <rect x="32" y="32" width="1216" height="416" rx="20" fill="#ffffff"/>
+  <g font-family="Arial, Helvetica, sans-serif">
+    <text x="72" y="91" fill="#1d2940" font-size="36" font-weight="700" letter-spacing="-1.1">Flowcairn</text>
+    <path d="M72 111H246" fill="none" stroke="#465ee8" stroke-width="3" stroke-linecap="round"/>
+    <text x="72" y="182" fill="#18243a" font-size="46" font-weight="700" letter-spacing="-1.5">Большая задача</text>
+    <text x="72" y="238" fill="#465ee8" font-size="46" font-weight="700" letter-spacing="-1.5">становится управляемой.</text>
+    <text x="72" y="286" fill="#59677e" font-size="19">Graph разбивает работу на шаги, связывает зависимости</text>
+    <text x="72" y="314" fill="#59677e" font-size="19">и сохраняет доказательства каждого результата.</text>
+    <g transform="translate(630 72)">
+      <path d="M153 79H201M353 79H401V201H259M259 245V293H507" fill="none" stroke="#aeb8ca" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M259 245V293H105" fill="none" stroke="#465ee8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M259 245V293" fill="none" stroke="#465ee8" stroke-width="3" stroke-dasharray="7 7" stroke-linecap="round"/>
+      <rect x="0" y="38" width="153" height="82" rx="14" fill="#f8f9fd" stroke="#cdd5e5" stroke-width="2"/>
+      <text x="18" y="70" fill="#64728a" font-size="13" font-weight="700" letter-spacing="1">ЗАДАЧА</text>
+      <text x="18" y="100" fill="#1c2940" font-size="18" font-weight="700">Суть задачи</text>
+      <rect x="201" y="38" width="152" height="82" rx="14" fill="#f8f9fd" stroke="#cdd5e5" stroke-width="2"/>
+      <text x="219" y="70" fill="#64728a" font-size="13" font-weight="700" letter-spacing="1">АНАЛИЗ</text>
+      <text x="219" y="100" fill="#1c2940" font-size="18" font-weight="700">Контекст</text>
+      <rect x="105" y="163" width="154" height="82" rx="14" fill="#eef0ff" stroke="#465ee8" stroke-width="2"/>
+      <circle cx="127" cy="190" r="5" fill="#465ee8"/>
+      <text x="143" y="195" fill="#465ee8" font-size="13" font-weight="700" letter-spacing="1">ПЛАН</text>
+      <text x="123" y="225" fill="#1c2940" font-size="19" font-weight="700">Согласовать шаги</text>
+      <rect x="401" y="163" width="212" height="82" rx="14" fill="#1d2a42"/>
+      <circle cx="423" cy="190" r="5" fill="#75d5cf"/>
+      <text x="439" y="195" fill="#9ae7e0" font-size="13" font-weight="700" letter-spacing="1">ВЫПОЛНЕНИЕ</text>
+      <text x="419" y="225" fill="#ffffff" font-size="19" font-weight="700">Изменения в коде</text>
+      <rect x="0" y="293" width="210" height="70" rx="14" fill="#f8f9fd" stroke="#cdd5e5" stroke-width="2"/>
+      <text x="20" y="322" fill="#64728a" font-size="13" font-weight="700" letter-spacing="1">ПРОВЕРКИ</text>
+      <text x="20" y="349" fill="#1c2940" font-size="18" font-weight="700">Тесты и ревью</text>
+      <rect x="351" y="293" width="156" height="70" rx="14" fill="#eef8f5" stroke="#79bda8" stroke-width="2"/>
+      <text x="371" y="322" fill="#41826e" font-size="13" font-weight="700" letter-spacing="1">РЕЗУЛЬТАТ</text>
+      <text x="371" y="349" fill="#1c2940" font-size="18" font-weight="700">Приемка вами</text>
+    </g>
+  </g>
+</svg>
