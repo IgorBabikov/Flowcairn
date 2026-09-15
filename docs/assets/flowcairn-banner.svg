@@ -29,7 +29,7 @@
       <rect x="105" y="163" width="154" height="82" rx="14" fill="#eef0ff" stroke="#465ee8" stroke-width="2"/>
       <circle cx="127" cy="190" r="5" fill="#465ee8"/>
       <text x="143" y="195" fill="#465ee8" font-size="13" font-weight="700" letter-spacing="1">ПЛАН</text>
-      <text x="123" y="225" fill="#1c2940" font-size="19" font-weight="700">Согласовать шаги</text>
+      <text x="123" y="225" fill="#1c2940" font-size="19" font-weight="700">План готов</text>
       <rect x="401" y="163" width="212" height="82" rx="14" fill="#1d2a42"/>
       <circle cx="423" cy="190" r="5" fill="#75d5cf"/>
       <text x="439" y="195" fill="#9ae7e0" font-size="13" font-weight="700" letter-spacing="1">ВЫПОЛНЕНИЕ</text>

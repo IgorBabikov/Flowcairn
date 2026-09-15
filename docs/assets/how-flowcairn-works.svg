@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="500" viewBox="0 0 1800 500" role="img" aria-labelledby="title desc">
+  <title id="title">Как Flowcairn превращает задачу в граф работы</title>
+  <desc id="desc">Задача проходит через анализ, планирование, согласование, выполнение, проверки и сохраненную историю.</desc>
+  <rect width="1800" height="500" rx="30" fill="#f8f9fc"/>
+  <g font-family="Arial, Helvetica, sans-serif">
+    <text x="74" y="72" fill="#202b3d" font-size="36" font-weight="700" letter-spacing="-.7">Flowcairn превращает большую задачу в граф работы</text>
+    <text x="74" y="113" fill="#647188" font-size="25">Граф — это карта: карточки показывают подзадачи, стрелки — их порядок.</text>
+    <path d="M362 232H410M690 232H738M1018 232H1066M1346 232H1394" fill="none" stroke="#aeb8ca" stroke-width="4" stroke-linecap="round"/>
+    <path d="M1378 220L1400 232L1378 244Z" fill="#8392a9"/>
+    <path d="M877 304V352M1560 304V352" fill="none" stroke="#aeb8ca" stroke-width="3" stroke-dasharray="8 8" stroke-linecap="round"/>
+    <path d="M877 352H756" fill="none" stroke="#aeb8ca" stroke-width="3" stroke-dasharray="8 8" stroke-linecap="round"/>
+    <path d="M877 352V326" fill="none" stroke="#8392a9" stroke-width="3"/>
+    <path d="M866 341L877 319L888 341Z" fill="#8392a9"/>
+    <rect x="74" y="166" width="288" height="138" rx="20" fill="#f0efff" stroke="#8274ff" stroke-width="2"/>
+    <text x="100" y="206" fill="#524998" font-size="17" font-weight="700" letter-spacing="1">ВЫ СТАВИТЕ ЗАДАЧУ</text>
+    <text x="100" y="249" fill="#303454" font-size="31" font-weight="700">Опишите задачу</text>
+    <text x="100" y="280" fill="#69708d" font-size="20">Без JSON и команд</text>
+    <rect x="410" y="166" width="280" height="138" rx="20" fill="#e8f6f0" stroke="#62ad87" stroke-width="2"/>
+    <text x="436" y="206" fill="#367554" font-size="17" font-weight="700" letter-spacing="1">AI-АНАЛИЗ</text>
+    <text x="436" y="249" fill="#285a42" font-size="32" font-weight="700">Изучает проект</text>
+    <text x="436" y="280" fill="#5c7b6b" font-size="20">Только нужные файлы</text>
+    <rect x="738" y="166" width="280" height="138" rx="20" fill="#fff4d7" stroke="#d49a26" stroke-width="2"/>
+    <text x="764" y="206" fill="#9b6c15" font-size="17" font-weight="700" letter-spacing="1">ГРАФ</text>
+    <text x="764" y="249" fill="#6d4d15" font-size="32" font-weight="700">План подзадач</text>
+    <text x="764" y="280" fill="#8c7042" font-size="20">Порядок и зависимости</text>
+    <rect x="1066" y="166" width="280" height="138" rx="20" fill="#fff4d7" stroke="#d49a26" stroke-width="2"/>
+    <text x="1092" y="206" fill="#9b6c15" font-size="17" font-weight="700" letter-spacing="1">ВЫ РЕШАЕТЕ</text>
+    <text x="1092" y="249" fill="#6d4d15" font-size="32" font-weight="700">Согласуете план</text>
+    <text x="1092" y="280" fill="#8c7042" font-size="20">До изменения кода</text>
+    <rect x="1394" y="166" width="332" height="138" rx="20" fill="#e4f4d5" stroke="#70a749" stroke-width="2"/>
+    <text x="1420" y="206" fill="#4a8232" font-size="17" font-weight="700" letter-spacing="1">ИСПОЛНИТЕЛЬ</text>
+    <text x="1420" y="249" fill="#315a29" font-size="32" font-weight="700">Выполняет этапы</text>
+    <text x="1420" y="280" fill="#5e7e55" font-size="20">Изменения, проверки, ревью</text>
+    <rect x="546" y="352" width="1014" height="64" rx="17" fill="#ffffff" stroke="#d4dae6" stroke-width="2"/>
+    <text x="620" y="392" fill="#536076" font-size="22">Сохраненная история: анализ, план, отчеты, проверки и контрольные суммы</text>
+  </g>
+</svg>
