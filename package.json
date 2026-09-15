@@ -11,6 +11,9 @@
     "flowcairn": "bin/flowcairn.mjs"
   },
   "files": [
+    ".claude-plugin",
+    ".codex-plugin",
+    ".cursor-plugin",
     "bin",
     "scripts/ai-graph/lib",
     "scripts/ai-graph/cli.mjs",

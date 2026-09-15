@@ -3,6 +3,7 @@
 ## 0.2.5 — готовится к публикации
 
 - Убрал обязательный ввод ID модели при обычной настройке Codex: Flowcairn использует выбор модели и усиления из самого Codex.
+- Добавил native manifests и capability registry для Codex, Claude Code и Cursor без дублирования Skills и без ложного заявления об execution support.
 
 ## 0.2.4
 

@@ -11,6 +11,7 @@
 | Понять Graph, Executor, память и границы AI | [Как работает Flowcairn](HOW-FLOWCAIRN-WORKS.md) |
 | Понять правила качества Flowcairn | [Workflow Contract](FLOWCAIRN-WORKFLOW.md) |
 | Использовать свои Skills и правила тестирования | [Skills](SKILLS.md) |
+| Подключить Codex, Claude Code или Cursor | [Интеграция AI-клиентов](AI-HARNESS-INTEGRATION.md) |
 | Настроить проверки, файлы и провайдера | [Конфигурация](CONFIGURATION.md) |
 | Разобрать остановку и восстановить работу | [Решение проблем](TROUBLESHOOTING.md) |
 

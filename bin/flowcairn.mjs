@@ -46,6 +46,7 @@ import { instructionsCommand } from './instructions.mjs';
 import { uninstallCommand } from './uninstall.mjs';
 import { selectProjectSkills } from './skills-selection.mjs';
 import { createTask } from '../scripts/ai-graph/lib/task-registration.mjs';
+import { inspectHarnesses } from '../scripts/ai-graph/lib/harnesses.mjs';
 import { collectOnboarding, inspectOnboarding, onboardingInput, saveOnboarding } from './onboarding.mjs';
 export { createTask };
 
@@ -591,6 +592,7 @@ export async function doctorProject(input) {
     packageManager: profile.packageManager,
     manager,
     configuredChecks: profile.checks,
+    assistants: inspectHarnesses(),
     ai: ai.ai,
     checks,
     note: 'Это проверка окружения, не AI-вызов и не доказательство качества модели.',
