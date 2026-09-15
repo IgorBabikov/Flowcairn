@@ -32,6 +32,10 @@ test('старый init не предоставляет разрешение н�
 });
 
 test('Codex init без ID модели сохраняет выбор из самого Codex', t => {
+  if (process.platform !== 'darwin') {
+    t.skip('Исполнение Codex ограничено macOS; Linux проверяет OpenAI API adapter.');
+    return;
+  }
   const result = initializeProject(fixture(t), {provider:'codex'});
   assert.equal(result.profile.ai.model, 'provider-default');
   assert.equal(result.profile.ai.modelMode, 'provider');

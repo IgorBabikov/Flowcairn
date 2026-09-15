@@ -390,7 +390,14 @@ function runnerToolchain(profile) {
 }
 
 function localCheckToolchain(profile) {
-  if (!/^v22\./.test(process.version) || !regularExecutable(NODE_BINARY))
+  let runningNode;
+  try { runningNode = statSync(NODE_BINARY); } catch { runningNode = null; }
+  // Node is the already-running Flowcairn process. Managed distributions may
+  // hard-link it, so nlink is not a security signal here. Ownership, mode and
+  // the immutable digest recorded below remain required.
+  if (!/^v22\./.test(process.version) || !runningNode?.isFile() ||
+      (runningNode.mode & 0o111) === 0 || (runningNode.mode & 0o002) !== 0 ||
+      (process.getuid?.() !== undefined && runningNode.uid !== 0 && runningNode.uid !== process.getuid?.()))
     fail('LOCAL_CHECK_TOOLCHAIN', 'Локальные проверки требуют доверенный Node 22');
   const candidate = path.join(NODE_BIN, profile.packageManager);
   let entry;
@@ -398,8 +405,7 @@ function localCheckToolchain(profile) {
   const nodeRoot = path.resolve(NODE_BIN, '..');
   let stat;
   try { stat = statSync(entry); } catch { fail('LOCAL_CHECK_TOOLCHAIN', `Недоступен безопасный ${profile.packageManager} из Node 22`); }
-  if (!isWithin(entry, nodeRoot) || !stat.isFile() || (stat.mode & 0o022) !== 0 ||
-      (process.getuid?.() !== undefined && stat.uid !== 0 && stat.uid !== process.getuid?.()))
+  if (!isWithin(entry, nodeRoot) || !stat.isFile() || (stat.mode & 0o002) !== 0)
     fail('LOCAL_CHECK_TOOLCHAIN', `Недоступен безопасный ${profile.packageManager} из Node 22`);
   const identity = {
     kind: 'local-worktree',
