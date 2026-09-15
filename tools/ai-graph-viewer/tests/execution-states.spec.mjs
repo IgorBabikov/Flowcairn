@@ -76,9 +76,20 @@ test('native nodes follow backend transitions and only passed incoming dependenc
       await expect(page.locator('.react-flow__edge[data-id="pending-to-work"]')).not.toHaveClass(
         /animated/,
       );
-      expect(await node.evaluate((el) => getComputedStyle(el, '::before').animationName)).toBe(
-        'execution-glow',
+      const snake = node.locator('.execution-border rect');
+      expect(await snake.evaluate((el) => getComputedStyle(el).animationName)).toBe(
+        'execution-snake',
       );
+      expect(await node.evaluate((el) => getComputedStyle(el, '::after').animationName)).toBe(
+        'execution-pulse',
+      );
+      const initialSnakePosition = await snake.evaluate((el) => getComputedStyle(el).strokeDashoffset);
+      await expect
+        .poll(
+          () => snake.evaluate((el) => getComputedStyle(el).strokeDashoffset),
+          { timeout: 500 },
+        )
+        .not.toBe(initialSnakePosition);
       await page.getByRole('button', { name: 'Весь граф', exact: true }).click();
       await capture(page, 'execution-desktop-light-running');
       await page.getByRole('button', { name: 'Сменить тему' }).click();
@@ -130,7 +141,7 @@ for (const dark of [false, true]) {
     await expect(node).toContainText('Выполняется');
     await expect(page.locator('.dependency-active')).toHaveCount(1);
     const motion = await node.evaluate((el) => ({
-      glow: getComputedStyle(el, '::before').animationName,
+      glow: getComputedStyle(el.querySelector('.execution-border rect')).animationName,
       border: getComputedStyle(el).borderTopStyle,
       color: getComputedStyle(el).borderTopColor,
     }));

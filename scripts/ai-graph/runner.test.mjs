@@ -391,6 +391,20 @@ test('AI actions are source read-only and the result contract carries bounded st
   assert.match(prompt, /Объявленный read context: scripts\/ai-graph/);
   assert.match(prompt, /Зарегистрированные проверки запускает Executor/);
   assert.match(prompt, /Ты не записываешь файлы/);
+  const analysisNode = {
+    ...contract.node,
+    id: 'analyze',
+    action: { id: 'ai-analyze', version: 1, inputs: {} },
+  };
+  const analysisPrompt = buildPrompt({
+    nodeId: analysisNode.id,
+    task: contract.task,
+    plan: { ...contract.plan, workflow: 'autonomous', nodes: [analysisNode] },
+    skills: 'No assigned skills.',
+    priorEvidence: null,
+  });
+  assert.match(analysisPrompt, /Неизвестный backend\/API-контракт/);
+  assert.match(analysisPrompt, /ограничить такой план локальным UI/);
 });
 
 test('AI failure diagnostics persist only fixed codes and ignore untrusted item output', async () => {

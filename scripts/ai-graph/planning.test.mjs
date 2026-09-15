@@ -156,7 +156,9 @@ for (const verdict of ['fail', 'uncertain']) test(`planning ${verdict} never pro
     assert.equal(next.phase, 'planning');
     assert.deepEqual(next.gates[0].requiredPermissions, ['ai.read']);
   } else {
-    await assert.rejects(f.service.command(planned.runId, 'replan', request(planned)), (e) => e.code === 'RECOVERY_REQUIRED');
+    assert.equal(planned.capabilities.recover.allowed, false, 'completed semantic uncertainty is not a process recovery');
+    const next = await f.service.command(planned.runId, 'replan', request(planned));
+    assert.equal(next.phase, 'planning');
   }
 });
 

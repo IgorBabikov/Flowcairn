@@ -508,6 +508,25 @@ export class WorkflowService {
       typeof Reflect.get(ProjectPolicy, 'hasOnboardingConsent') === 'function' && Reflect.get(ProjectPolicy, 'hasOnboardingConsent')(this.root, this.adapters.project);
   }
 
+  // A completed AI response can be semantically uncertain without any uncertain
+  // process. Re-running recovery for it only overwrites useful evidence and traps
+  // the user in a recovery loop. Keep process recovery for interrupted work.
+  #semanticUncertainty(state) {
+    if (state.status !== 'uncertain' || state.activeOperation) return false;
+    const uncertain = Object.values(state.nodes).filter((node) => node.status === 'uncertain');
+    return uncertain.length > 0 && uncertain.every((node) => {
+      const receiptId = node.receipts.at(-1);
+      if (!receiptId) return false;
+      try {
+        const receipt = ReceiptSchema.parse(this.store.readObject('receipts', receiptId));
+        return receipt.phase === 'finished' && receipt.verdict === 'uncertain' &&
+          receipt.termination?.stopped === true && receipt.termination.uncertain !== true;
+      } catch {
+        return false;
+      }
+    });
+  }
+
   async onboarding() {
     const { inspectOnboarding } = await import(new URL('../../../bin/onboarding.mjs', import.meta.url).href);
     return inspectOnboarding(this.root);
@@ -1073,6 +1092,7 @@ export class WorkflowService {
       historical: plan.registryHash !== REGISTRY_HASH || plan.policyHash !== POLICY_HASH,
       orphan,
       terminalRecovery,
+      semanticUncertainty: this.#semanticUncertainty(state),
       lock: state.setupPending
         ? { recoverable: false }
         : lock
@@ -2101,8 +2121,17 @@ export class WorkflowService {
         assertJsonBounds(result.output);
         const output = aiOutput ?? AIResultSchema.parse(result.output);
         verifySkillsUsed(this.adapters.loadSkills(definition.skills), output.skillsUsed);
+        // Analysis is evidence for the planner, not an implementation claim. A
+        // warnings-only analysis has already identified a bounded local path, so
+        // do not let an overly cautious model turn it into a terminal state.
+        const continuableAnalysis =
+          definition.action.id === 'ai-analyze' &&
+          plan.workflow === 'autonomous' &&
+          output.verdict === 'uncertain' &&
+          !output.findings.some((finding) => finding.severity === 'blocking');
         const safe = {
           ...output,
+          ...(continuableAnalysis ? { verdict: 'pass' } : {}),
           summary: sanitizeText(output.summary),
           findings: output.findings.map((f) => ({ ...f, message: sanitizeText(f.message) })),
           plan: output.plan.map((p) => ({ ...p, outcome: sanitizeText(p.outcome) })),
@@ -2110,9 +2139,9 @@ export class WorkflowService {
           ...(definition.action.id === 'ai-plan' ? { steps: AIPlanningResultSchema.parse(output).steps.map((step) => ({ ...step, title: sanitizeText(step.title), outcome: sanitizeText(step.outcome) })) } : {}),
         };
         verdict =
-          output.verdict === 'pass' && !output.findings.some((f) => f.severity === 'blocking')
+          safe.verdict === 'pass' && !output.findings.some((f) => f.severity === 'blocking')
             ? 'pass'
-            : output.verdict === 'uncertain'
+            : safe.verdict === 'uncertain'
               ? 'uncertain'
               : 'fail';
         if (verdict !== 'pass') {
@@ -2509,7 +2538,7 @@ export class WorkflowService {
     if (
       state.activeOperation ||
       Object.values(state.nodes).some((node) => node.status === 'running') ||
-      (state.status === 'uncertain' && !state.recovered)
+      (state.status === 'uncertain' && !state.recovered && !this.#semanticUncertainty(state))
     )
       fail('RECOVERY_REQUIRED', 'Перед replan требуется доказанное recovery');
     if (!caps.run.requestReplan.allowed)
@@ -2530,6 +2559,7 @@ export class WorkflowService {
     let nextStage = plan.stage;
     let planningTransitions = state.planningTransitions ?? 0;
     let planningEvidence = null;
+    let analysisArtifact = null;
     if (plan.stage === 'planning') {
       if (request.draft) fail('PLANNING_DRAFT_DENIED', 'Planning компилирует только сохраненный AI proposal');
       const planner = plan.nodes.find((node) => node.action.id === 'ai-plan');
@@ -2545,6 +2575,15 @@ export class WorkflowService {
         nextStage = 'execution';
         planningTransitions = (state.planningTransitions ?? 0) + 1;
         planningEvidence = { artifactId, receiptIds: state.nodes[planner.id].receipts, steps: output.steps };
+      } else if (state.nodes[planner.id].status === 'uncertain' && this.#semanticUncertainty(state)) {
+        const analyzer = plan.nodes.find((node) => node.action.id === 'ai-analyze');
+        if (analyzer) {
+          analysisArtifact = state.nodes[analyzer.id].artifacts.find((id) => {
+            const artifact = this.#artifact(id);
+            return artifact.kind === 'analysis' && artifact.mediaType === 'application/json' && Boolean(JSON.parse(artifact.content).analysis);
+          });
+          if (!analysisArtifact) fail('ANALYSIS_REQUIRED', 'Нет подтвержденного анализа для повторного планирования');
+        }
       } else if (!['ready', 'failed', 'uncertain', 'stale'].includes(state.status)) {
         fail('PLANNING_INCOMPLETE', 'Сначала выполните AI-планирование');
       }
@@ -2575,6 +2614,8 @@ export class WorkflowService {
       );
     }
     const { schemaVersion: _, sourceHash: __, ...input } = task;
+    if (request.feedback)
+      input.planningFeedback = [...(task.planningFeedback ?? []), request.feedback];
     let fingerprint = null;
     if (state.binding) {
       this.adapters.verifyBinding(state.binding);
@@ -2605,6 +2646,7 @@ export class WorkflowService {
       ...(policyGrant ? { policyGrant } : {}),
       stage: nextStage ?? null,
       workflow: plan.workflow ?? null,
+      ...(analysisArtifact ? { analysisArtifact } : {}),
       retainedArtifacts: unique([...state.planningArtifacts, ...plan.nodes.filter((node) => node.success.kind === 'analysis').flatMap((node) => state.nodes[node.id].artifacts)]),
       planningTransitions,
       feedback: {

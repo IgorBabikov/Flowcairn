@@ -35,12 +35,12 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 const request=(s,extra={})=>({operationId:`op-${randomUUID()}`,expectedRevision:s.revision,planHash:s.planHash,...extra});
 const analysis={requirements:['Валидация email'],constraints:['Сохранить интерфейс'],projectFacts:[{path:'src/form.mjs',fact:'Форма уже существует'}],acceptance:['Неверный email отклонен'],risks:[]};
-async function fixture(t,{consent=true,reviewFails=0,checkFails=0,uncertain=false,steps=output.steps,maxReplans=2,scopeCandidates=['src']}={}) {
+async function fixture(t,{consent=true,reviewFails=0,checkFails=0,uncertain=false,plannerUncertain=0,steps=output.steps,maxReplans=2,scopeCandidates=['src']}={}) {
  const root=mkdtempSync(path.join(os.tmpdir(),'flowcairn-product-'));
  t.after(()=>rmSync(root,{recursive:true,force:true}));
  const worktree=path.join(root,'.ai-orchestrator','worktrees','fixture-1');
  mkdirSync(worktree,{recursive:true,mode:0o700});
- const calls=[]; let reviews=0,checks=0;
+ const calls=[]; let reviews=0,checks=0,remainingPlannerUncertainty=plannerUncertain;
  let runtimeHash=hash;
  const fingerprint=()=>({hash,files:[],git:{head:'a'.repeat(40),indexHash:hash}});
  const adapters={identity:()=>runtimeHash,skills:()=>skills,hasReadConsent:()=>consent,
@@ -55,7 +55,9 @@ async function fixture(t,{consent=true,reviewFails=0,checkFails=0,uncertain=fals
   calls.push({nodeId:node.id,action:node.action.id,priorEvidence,reviewEvidence,task,planVersion:plan.version});await onStart({ticket:'fixture',pid:process.pid});
   if(node.action.id==='check-tests')return {exitCode:checks++<checkFails?1:0,stopped:true,uncertain:false};
   const fail=node.action.id==='ai-review' && reviews++<reviewFails;
-  return {exitCode:0,stopped:true,uncertain:false,output:{...output,steps:undefined,verdict:uncertain&&node.action.id==='ai-analyze'?'uncertain':fail?'fail':'pass',skillsUsed:node.skills,findings:fail?[{severity:'blocking',message:'Неверный email принят',path:'src/form.mjs'}]:[],...(node.action.id==='ai-plan'?{steps}:{}),...(node.action.id==='ai-analyze'?{analysis}:{}),...(reviewEvidence?{reviewEvidenceHash:hashObject(reviewEvidence)}:{})}};
+  const plannerIsUncertain=node.action.id==='ai-plan'&&remainingPlannerUncertainty>0;
+  if(plannerIsUncertain)remainingPlannerUncertainty-=1;
+  return {exitCode:0,stopped:true,uncertain:false,output:{...output,steps:undefined,verdict:uncertain&&node.action.id==='ai-analyze'?'uncertain':plannerIsUncertain?'uncertain':fail?'fail':'pass',skillsUsed:node.skills,findings:fail?[{severity:'blocking',message:'Неверный email принят',path:'src/form.mjs'}]:[],...(node.action.id==='ai-plan'?{steps}:{}),...(node.action.id==='ai-analyze'?{analysis}:{}),...(reviewEvidence?{reviewEvidenceHash:hashObject(reviewEvidence)}:{})}};
  }
  };
  // optional fields не включаются в strict JSON fixture.
@@ -171,8 +173,19 @@ test('повторный review failure останавливается посл�
  f.service.store.updateRun(s.runId,state.revision,current=>({...current,policyGrant:{...current.policyGrant,cycle:1}}));
  assert.equal(f.service.snapshot(s.runId).integrity.valid,false,'понижение счетчика должно нарушать integrity');
 });
-test('uncertain analysis останавливается, план и реализация не запускаются',async(t)=>{
- const f=await fixture(t,{uncertain:true});let s=await f.settle(await f.intake());assert.equal(s.status,'uncertain');assert.deepEqual(f.calls.map(c=>c.action),['ai-analyze']);
+test('warnings-only uncertain analysis continues to planning instead of stopping a local task',async(t)=>{
+ const f=await fixture(t,{uncertain:true});const s=await f.settle(await f.intake());
+ assert.equal(s.status,'waiting-for-human');assert.equal(s.phase,'execution');
+ assert.deepEqual(f.calls.map(c=>c.action),['ai-analyze','ai-plan']);
+});
+
+test('semantic planner uncertainty retries planning from saved analysis without restarting intake',async(t)=>{
+ const f=await fixture(t,{plannerUncertain:1});let s=await f.settle(await f.intake());
+ assert.equal(s.status,'uncertain');assert.deepEqual(f.calls.map(c=>c.action),['ai-analyze','ai-plan']);
+ assert.equal(s.capabilities.recover.allowed,false);assert.equal(s.capabilities.requestReplan.allowed,true);
+ s=await f.settle(await f.service.command(s.runId,'replan',request(s)));
+ assert.equal(s.status,'waiting-for-human');assert.equal(s.phase,'execution');
+ assert.deepEqual(f.calls.map(c=>c.action),['ai-analyze','ai-plan','ai-plan']);
 });
 
 test('истекший общий срок не запускает implementation даже после согласования',async(t)=>{

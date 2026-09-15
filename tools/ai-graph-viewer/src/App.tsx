@@ -424,6 +424,11 @@ function GraphNodeCard({ data }: NodeProps<Node<GraphNodeData, 'operator'>>) {
       role="button"
       tabIndex={0}
     >
+      {data.status === 'running' && (
+        <svg className="execution-border" aria-hidden="true" preserveAspectRatio="none" viewBox="0 0 100 100">
+          <rect height="98" pathLength="100" rx="5" ry="5" width="98" x="1" y="1" />
+        </svg>
+      )}
       <NodeToolbar
         className="node-toolbar"
         isVisible={

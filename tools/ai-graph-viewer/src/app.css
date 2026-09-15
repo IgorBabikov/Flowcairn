@@ -561,6 +561,8 @@ pre {
   color: var(--text);
   text-align: start;
   cursor: pointer;
+  isolation: isolate;
+  position: relative;
   transition: border-color 180ms ease-out, background-color 180ms ease-out;
 }
 .graph-node.selected {
@@ -1187,16 +1189,40 @@ dialog::backdrop {
 .graph-node.status-running {
   background: color-mix(in srgb, var(--status-running) 6%, var(--surface));
 }
-.graph-node.status-running::before {
+.graph-node.status-running.selected { outline: none; }
+.execution-border {
+  position: absolute;
+  z-index: 0;
+  inset: -4px;
+  pointer-events: none;
+  overflow: visible;
+}
+.execution-border rect {
+  fill: none;
+  stroke: var(--status-running);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-dasharray: 18 82;
+  filter: drop-shadow(0 2px 3px color-mix(in srgb, var(--status-running) 25%, transparent));
+  animation: execution-snake 3.6s linear infinite;
+}
+.graph-node.status-running::after {
   content: '';
   position: absolute;
-  inset: -2px;
-  border-radius: inherit;
+  z-index: 0;
+  inset: -3px;
+  border-radius: 17px;
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--status-running) 26%, transparent);
+  opacity: .32;
   pointer-events: none;
-  box-shadow: 0 0 14px color-mix(in srgb, var(--status-running) 35%, transparent);
-  animation: execution-glow 2.8s ease-in-out infinite alternate;
+  animation: execution-pulse 2.8s ease-in-out infinite;
 }
-@keyframes execution-glow { from { opacity: .35; } to { opacity: .85; } }
+.graph-node.status-running > :not(.execution-border) { position: relative; z-index: 1; }
+@keyframes execution-snake { to { stroke-dashoffset: -100; } }
+@keyframes execution-pulse {
+  0%, 100% { opacity: .22; transform: scale(.992); }
+  50% { opacity: .48; transform: scale(1); }
+}
 .status-icon { width: 20px; height: 20px; flex: 0 0 auto; color: var(--node-status-color); }
 .graph-node .node-status { color: var(--text); font-weight: 650; }
 .node-hint { display: block; margin-top: 5px; color: var(--muted); font-size: .68rem; line-height: 1.4; }
@@ -1205,10 +1231,11 @@ dialog::backdrop {
   animation-duration: 1.6s;
 }
 .react-flow__edge.dependency-idle .react-flow__edge-path { animation: none; }
-[data-page-hidden] .graph-node::before,
+[data-page-hidden] .execution-border rect,
 [data-page-hidden] .react-flow__edge-path { animation-play-state: paused !important; }
 @media (prefers-reduced-motion: reduce) {
-  .graph-node.status-running::before { animation: none; opacity: .5; }
+  .execution-border rect { animation: none; stroke-dasharray: 22 78; }
+  .graph-node.status-running::after { animation: none; opacity: .24; }
   .react-flow__edge.animated .react-flow__edge-path { animation: none; }
 }
 
@@ -1307,11 +1334,12 @@ a { text-underline-offset: 3px; }
 .status-icon[data-status='running'] { color: var(--status-running); }
 .status-icon[data-status='failed'] { color: var(--status-failed); }
 .status-icon[data-status='waiting-for-human'] { color: var(--status-waiting-for-human); }
-.graph-node.status-waiting-for-human { background: color-mix(in srgb, var(--status-waiting-for-human) 7%, var(--surface)); }
-.graph-node.status-waiting-for-human::after { content: ''; position: absolute; inset: -5px; border: 1px solid var(--status-waiting-for-human); border-radius: 17px; pointer-events: none; animation: plan-wait 2.8s ease-in-out infinite; }
-@keyframes plan-wait { 0%, 100% { opacity: .22; } 50% { opacity: .8; } }
+.graph-node.status-waiting-for-human {
+  background: color-mix(in srgb, var(--status-waiting-for-human) 7%, var(--surface));
+  border-color: color-mix(in srgb, var(--status-waiting-for-human) 82%, var(--border-strong));
+}
+.graph-node.status-waiting-for-human.selected { outline: none; }
 [data-page-hidden] .graph-node::after { animation-play-state: paused; }
-@media (prefers-reduced-motion: reduce) { .graph-node.status-waiting-for-human::after { animation: none; opacity: .55; } }
 @media (max-width: 720px) {
   .autonomous .detail-panel { order: 1; }
   .autonomous .graph-region { order: 2; }

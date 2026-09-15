@@ -75,6 +75,7 @@ export function calculateCapabilities(
     runner = { ai: { available: false }, checks: { available: false } },
     orphan = false,
     terminalRecovery = false,
+    semanticUncertainty = false,
     lock = null,
   } = {},
 ) {
@@ -141,7 +142,7 @@ export function calculateCapabilities(
         integrity &&
           (!closed || terminalRecovery) &&
           !runningControl &&
-          (terminalRecovery || orphan || (!state.activeOperation && node.status === 'uncertain')),
+          (terminalRecovery || orphan || (!semanticUncertainty && !state.activeOperation && node.status === 'uncertain')),
         reason,
       ),
       openReceipt: capability(node.receipts.length > 0, 'Receipt еще нет'),
@@ -152,7 +153,7 @@ export function calculateCapabilities(
       requestReplan: capability(
         usable &&
           state.status !== 'running' &&
-          (state.status !== 'uncertain' || state.recovered === true) &&
+          (state.status !== 'uncertain' || state.recovered === true || semanticUncertainty) &&
           state.planVersion <= state.maxReplans,
         reason,
       ),
@@ -185,14 +186,14 @@ export function calculateCapabilities(
           (terminalRecovery ||
             orphan ||
             (!state.activeOperation &&
-              (state.status === 'uncertain' || Boolean(lock?.recoverable)))),
+              ((!semanticUncertainty && state.status === 'uncertain') || Boolean(lock?.recoverable)))),
         reason,
       ),
       stop: capability(!closed && Boolean(state.activeOperation) && !orphan, reason),
       requestReplan: capability(
         usable &&
           state.status !== 'running' &&
-          (state.status !== 'uncertain' || state.recovered === true) &&
+          (state.status !== 'uncertain' || state.recovered === true || semanticUncertainty) &&
           state.planVersion <= state.maxReplans,
         reason,
       ),
