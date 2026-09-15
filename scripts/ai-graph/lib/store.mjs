@@ -35,6 +35,7 @@ const OBJECT_KINDS = new Set([
   'tasks',
   'plans',
   'envelopes',
+  'provider-consents',
   'receipts',
   'artifacts',
   'operations',

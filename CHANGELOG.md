@@ -1,9 +1,13 @@
 # Изменения
 
+## 0.2.9 — готовится к публикации
+
+- Добавил реальные Claude Code и Cursor adapters: проверенный CLI, strict structured output, отдельное consent на передачу ограниченного контекста, immutable plan и receipt.
+- Claude запускается без tools через официальный `--tools ""`; Cursor — в private workspace с официальными `--sandbox enabled --mode plan`.
+
 ## 0.2.8 — готовится к публикации
 
-- Добавил честные capability states для Claude Code и Cursor: обнаружение больше не выглядит как готовый execution adapter.
-- CLI объясняет, почему обнаруженный Claude Code или Cursor пока не появляется среди провайдеров выполнения.
+- Добавил capability states и нативные manifests Claude Code/Cursor.
 
 ## 0.2.7 — готовится к публикации
 

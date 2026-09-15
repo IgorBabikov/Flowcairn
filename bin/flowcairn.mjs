@@ -48,6 +48,7 @@ import { uninstallCommand } from './uninstall.mjs';
 import { selectProjectSkills } from './skills-selection.mjs';
 import { createTask } from '../scripts/ai-graph/lib/task-registration.mjs';
 import { inspectHarnesses } from '../scripts/ai-graph/lib/harnesses.mjs';
+import { probeExternalProvider } from '../scripts/ai-graph/lib/providers.mjs';
 import { collectOnboarding, inspectOnboarding, onboardingInput, saveOnboarding } from './onboarding.mjs';
 export { createTask };
 
@@ -58,6 +59,8 @@ const LOCAL_EXCLUDE = '.git/info/exclude';
 const VALUE_OPTIONS = new Set([
   'root',
   'provider',
+  'provider-path',
+  'provider-version',
   'model-mode',
   'reasoning-effort',
   'review-reasoning-effort',
@@ -304,8 +307,8 @@ export async function setupCommand(input, options = {}, terminal = {}) {
 }
 
 function assertProviderPlatform(options) {
-  if (options.provider && !['codex', 'openai'].includes(options.provider))
-    fail('PROVIDER_UNSUPPORTED', 'Claude и Cursor пока не подключены к исполнителю Flowcairn. Выберите Codex на macOS или OpenAI API; автоматическое наследование настроек IDE недоступно.');
+  if (options.provider && !['codex', 'openai', 'claude', 'cursor'].includes(options.provider))
+    fail('PROVIDER_UNSUPPORTED', 'Выберите Codex, OpenAI API, Claude Code или Cursor.');
   if (process.platform !== 'darwin' && (options.provider ?? defaultProvider()) === 'codex')
     fail(
       'PROVIDER_PLATFORM',
@@ -320,6 +323,11 @@ export function initializeProject(input, options = {}) {
     ? loadProjectProfile(root)
     : null;
   const selectedProvider = options.provider ?? defaultProvider();
+  if (!existingProfile && ['claude', 'cursor'].includes(selectedProvider)) {
+    const probe = probeExternalProvider(selectedProvider, { executable: options['provider-path'] });
+    if (!probe.available) fail('PROVIDER_TOOLCHAIN_INVALID', 'Claude Code/Cursor не найден или не прошел безопасную проверку версии.');
+    options = { ...options, model: 'provider-default', 'model-mode': 'provider', 'provider-path': probe.executable, 'provider-version': probe.version };
+  }
   if (!existingProfile && !options.model && selectedProvider === 'codex')
     options = { ...options, model: 'provider-default', 'model-mode': 'provider' };
   if (existingProfile && options.skills !== undefined &&
@@ -365,7 +373,7 @@ export function initializeProject(input, options = {}) {
         model: options.model,
       }).success)
   )
-    fail('AI_CONFIG', 'Укажите --provider codex или openai и --model с ID модели (не API-ключом).');
+    fail('AI_CONFIG', 'Укажите поддерживаемый provider и модель; Claude Code/Cursor наследуют выбранную в клиенте модель.');
   if (!existingProfile && options['model-mode'] === 'manual' &&
       ((options['review-model'] && options['review-model'] !== options.model) ||
        (options['review-reasoning-effort'] && options['review-reasoning-effort'] !== options['reasoning-effort'])))
@@ -429,6 +437,8 @@ export function initializeProject(input, options = {}) {
         ...(options['review-reasoning-effort'] ? { reviewReasoningEffort: options['review-reasoning-effort'] } : {}),
         provider: selectedProvider,
         model: options.model,
+        ...(options['provider-path'] ? { providerPath: path.resolve(options['provider-path']) } : {}),
+        ...(options['provider-version'] ? { providerVersion: options['provider-version'] } : {}),
         ...(options['review-model'] ? { reviewModel: options['review-model'] } : {}),
         ...(options['codex-path'] ? { codexPath: path.resolve(options['codex-path']) } : {}),
       },

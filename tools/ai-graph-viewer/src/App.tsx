@@ -2138,7 +2138,9 @@ const GateDialog = React.forwardRef<
             onChange={(event) => setConfirmed(event.target.checked)}
             type="checkbox"
           />
-          {labels.confirmation}
+          {gate.type === 'provider-consent' && locale === 'ru'
+            ? 'Я понимаю, что Flowcairn передаст только перечисленные данные выбранному AI-провайдеру.'
+            : labels.confirmation}
         </label>
         <label className="confirmation">
           <input

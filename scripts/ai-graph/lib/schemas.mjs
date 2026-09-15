@@ -160,7 +160,7 @@ export const PlanningEnvelopeSchema = z.strictObject({
   policyHash: Hash,
   skills: z.array(SkillManifestSchema).max(20),
   readPaths: z.array(RelativePath).max(96),
-  provider: z.enum(['codex', 'openai']),
+  provider: z.enum(['codex', 'openai', 'claude', 'cursor']),
   timeoutMs: z.number().int().min(1000).max(1800000),
 });
 export const AIResultSchema = z.strictObject({
@@ -270,6 +270,7 @@ export const ReceiptSchema = z.strictObject({
   actor: z.string().min(1).max(120),
   operationId: Id,
   previousReceipt: Hash.nullable(),
+  providerConsentHash: Hash.nullable().optional(),
 });
 const FingerprintSchema = z.strictObject({
   hash: Hash,
@@ -344,6 +345,7 @@ export const RunStateSchema = z.strictObject({
     .nullable()
     .optional(),
   permissions: z.array(Permission).max(3),
+  providerConsentHash: Hash.nullable().optional(),
   binding: BindingSchema.nullable(),
   pendingBinding: BindingSchema.nullable().optional(),
   workspaceFingerprint: FingerprintSchema.nullable(),

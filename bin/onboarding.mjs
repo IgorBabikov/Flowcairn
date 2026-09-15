@@ -9,12 +9,14 @@ import { acquireUninstallGuard } from '../scripts/ai-graph/lib/lifecycle.mjs';
 import { readIntegrationTarget, replaceIntegrationFile } from '../scripts/ai-graph/lib/integration.mjs';
 import { migrateProjectProfile } from '../scripts/ai-orchestrator.mjs';
 import { inspectHarnesses } from '../scripts/ai-graph/lib/harnesses.mjs';
+import { probeExternalProvider } from '../scripts/ai-graph/lib/providers.mjs';
 
 const effort = z.enum(['low', 'medium', 'high', 'xhigh']);
 const SetupSchema = z.strictObject({
   profileHash: z.string().regex(/^[a-f0-9]{64}$/).nullable(),
-  provider: z.enum(['codex', 'openai']), model: ProjectProfileSchema.shape.ai.shape.model,
+  provider: z.enum(['codex', 'openai', 'claude', 'cursor']), model: ProjectProfileSchema.shape.ai.shape.model,
   modelMode: z.enum(['provider', 'manual', 'auto']), reasoningEffort: effort,
+  providerPath: z.string().max(1024).optional(), providerVersion: z.string().max(160).optional(),
   reviewModel: ProjectProfileSchema.shape.ai.shape.model.optional(), reviewReasoningEffort: effort.optional(),
   testPolicy: z.enum(['keep', 'add']), coverage: z.boolean(), readConsent: z.boolean(),
 });
@@ -35,18 +37,14 @@ export function inspectOnboarding(root) {
   const harnesses = new Map(inspectHarnesses().map((item) => [item.id, item]));
   const externalProvider = (id) => {
     const harness = harnesses.get(id);
-    const runtime = harness?.runtime;
-    const detected = harness?.detected === true;
+    const probe = probeExternalProvider(id, { executable: harness?.executable });
     return {
       id,
       label: harness?.label ?? id,
-      supported: false,
-      state: detected
-        ? runtime?.status ?? 'not-detected'
-        : 'not-detected',
-      reason: detected
-        ? runtime?.reason ?? 'Execution adapter не подтвержден.'
-        : `${harness?.label ?? id} не найден; execution adapter не включен.`,
+      supported: probe.available,
+      state: probe.available ? 'available' : 'not-detected',
+      reason: probe.available ? null : `${harness?.label ?? id} не найден или не прошел безопасную проверку версии.`,
+      ...(probe.available ? { executable: probe.executable, version: probe.version } : {}),
     };
   };
   return {
@@ -65,6 +63,8 @@ export function inspectOnboarding(root) {
       ...(profile?.ai.reviewReasoningEffort ? { reviewReasoningEffort: profile.ai.reviewReasoningEffort } : {}),
       testPolicy: profile?.onboarding?.testPolicy ?? 'keep', coverage: profile?.onboarding?.coverage ?? false,
       readConsent: Boolean(profile && hasOnboardingConsent(root, profile)),
+      ...(profile?.ai.providerPath ? { providerPath: profile.ai.providerPath } : {}),
+      ...(profile?.ai.providerVersion ? { providerVersion: profile.ai.providerVersion } : {}),
     },
     limitations: [
       'Для Codex обычный режим наследует выбранную в Codex модель и усиление. OpenAI API требует явную модель.',
@@ -97,25 +97,28 @@ export async function collectOnboarding(root, options = {}, terminal = {}) {
     if (detected.length) output.write(`${paint(output, '38;5;245', `Обнаружены AI-клиенты: ${detected.join(', ')}.`)}\n`);
     output.write(`${paint(output, '38;5;99', '[1]')} Codex — использовать настроенный Codex\n`);
     output.write(`${paint(output, '38;5;99', '[2]')} OpenAI API — использовать ваш ключ из окружения\n`);
-    for (const item of harnesses.filter((value) => ['claude', 'cursor'].includes(value.id) && value.detected))
-      output.write(`${paint(output, '38;5;245', `${item.label}: execution Graph пока выключен — ${item.runtime.reason}`)}\n`);
+    const externalChoices = /** @type {Array<'claude'|'cursor'>} */ (['claude', 'cursor']).map((id) => ({ id, probe: probeExternalProvider(id, { executable: harnesses.find((item) => item.id === id)?.executable }) }));
+    externalChoices.forEach(({ id, probe }, index) => output.write(`${paint(output, '38;5;99', `[${index + 3}]`)} ${id === 'claude' ? 'Claude Code' : 'Cursor'} — ${probe.available ? 'использовать выбранный CLI' : 'нужен установленный и проверенный CLI'}\n`));
     const providerAnswer = options.provider ?? await ask(`Выбор [${defaultProvider() === 'codex' ? '1' : '2'}]: `, defaultProvider());
-    const provider = ({'1':'codex','2':'openai'})[providerAnswer] ?? providerAnswer;
-    if (!['codex','openai'].includes(provider)) fail('PROVIDER_UNSUPPORTED', 'Выберите Codex или OpenAI API. Claude и Cursor пока не подключены.');
+    const provider = ({'1':'codex','2':'openai', ...Object.fromEntries(externalChoices.map(({id}, index) => [String(index + 3), id]))})[providerAnswer] ?? providerAnswer;
+    if (!['codex','openai', ...externalChoices.map(({ id }) => id)].includes(provider)) fail('PROVIDER_UNSUPPORTED', 'Выберите AI-клиент из списка.');
+    const external = externalChoices.find((item) => item.id === provider)?.probe;
+    if (['claude', 'cursor'].includes(provider) && !external?.available)
+      fail('PROVIDER_TOOLCHAIN_INVALID', `${provider === 'claude' ? 'Claude Code' : 'Cursor Agent'} не найден или не прошел проверку версии. Установите официальный CLI и повторите.`);
     if (provider === 'codex' && process.platform !== 'darwin') fail('PROVIDER_PLATFORM', 'Исполнение Codex пока доступно только на macOS.');
     const advanced = options.advanced === true;
     step(output, 2, 'Как выбирать модель');
-    const providerManaged = provider === 'codex' && !advanced && options['model-mode'] === undefined;
+    const providerManaged = ['codex', 'claude', 'cursor'].includes(provider) && !advanced && options['model-mode'] === undefined;
     if (providerManaged)
       output.write(`${paint(output, '38;5;245', 'Flowcairn использует модель и усиление, выбранные в вашем Codex. ID модели вводить не нужно.')}\n`);
-    else if (provider === 'codex')
+    else if (['codex', 'claude', 'cursor'].includes(provider))
       output.write(`${paint(output, '38;5;245', 'Укажите модель и усиление, только если хотите переопределить настройки Codex для Flowcairn.')}\n`);
     else
       output.write(`${paint(output, '38;5;245', 'OpenAI API требует явный ID модели: он не наследует выбор из интерфейса AI.')}\n`);
     const mode = providerManaged ? 'provider' : advanced
       ? await choice('model-mode', 'Режим: provider — настройки Codex, manual — одна модель, auto — отдельные настройки ревью [Enter — manual]: ', ['provider','manual','auto'], 'manual')
       : options['model-mode'] ?? 'manual';
-    if (mode === 'provider' && provider !== 'codex') fail('ONBOARDING_CHOICE', 'Этот провайдер требует явный ID модели.');
+    if (mode === 'provider' && !['codex', 'claude', 'cursor'].includes(provider)) fail('ONBOARDING_CHOICE', 'Этот провайдер требует явный ID модели.');
     const model = mode === 'provider' ? 'provider-default' : options.model ?? await ask('ID модели, например gpt-5.6-terra: ', '');
     if (!model) fail('MODEL_REQUIRED', 'Нужен ID модели. Файлы не изменены.');
     const reasoning = mode === 'provider' ? undefined : advanced ? await choice('reasoning-effort', 'Усиление: low, medium, high или xhigh [Enter — medium]: ', ['low','medium','high','xhigh'], 'medium') : options['reasoning-effort'] ?? 'medium';
@@ -161,7 +164,7 @@ export async function collectOnboarding(root, options = {}, terminal = {}) {
       if (report.findings.length) output.write(`${paint(output, '38;5;245', 'Нашли существующие AI-правила. Они будут сохранены и учтены.')}\n`);
     }
     const consent = options.consent ?? await yes('Подключить Graph к правилам проекта? [да / нет; Enter — нет]: ');
-    return { ...options, provider, model, 'model-mode':mode, ...(reasoning ? {'reasoning-effort':reasoning} : {}), ...review, 'test-policy':testPolicy, coverage, 'check-mode': checkMode, checks: checkMode === 'none' ? '' : discoveredChecks.checks.join(','), ...(trustedLocalConsent ? {'trusted-local-consent': true} : {}), 'read-consent':readConsent, consent };
+    return { ...options, provider, model, 'model-mode':mode, ...(reasoning ? {'reasoning-effort':reasoning} : {}), ...review, ...(external ? {'provider-path': external.executable, 'provider-version': external.version} : {}), 'test-policy':testPolicy, coverage, 'check-mode': checkMode, checks: checkMode === 'none' ? '' : discoveredChecks.checks.join(','), ...(trustedLocalConsent ? {'trusted-local-consent': true} : {}), 'read-consent':readConsent, consent };
   } finally { if (!terminal.prompt) prompt.close(); }
 }
 
@@ -169,6 +172,8 @@ export function onboardingInput(options, profileHash) {
   return SetupSchema.parse({
     profileHash, provider: options.provider, model: options.model,
     modelMode: options['model-mode'] ?? 'manual', reasoningEffort: options['reasoning-effort'] ?? 'medium',
+    ...(options['provider-path'] ? { providerPath: options['provider-path'] } : {}),
+    ...(options['provider-version'] ? { providerVersion: options['provider-version'] } : {}),
     ...(options['review-model'] ? { reviewModel: options['review-model'] } : {}),
     ...(options['review-reasoning-effort'] ? { reviewReasoningEffort: options['review-reasoning-effort'] } : {}),
     testPolicy: options['test-policy'] ?? 'keep', coverage: options.coverage === true, readConsent: options['read-consent'] === true,
@@ -176,10 +181,11 @@ export function onboardingInput(options, profileHash) {
 }
 
 function configuredProfile(previous, value) {
-  const { model: _model, reviewModel: _review, modelMode: _mode, reasoningEffort: _effort, reviewReasoningEffort: _reviewEffort, provider: _provider, ...extraAi } = previous.ai;
+  const { model: _model, reviewModel: _review, modelMode: _mode, reasoningEffort: _effort, reviewReasoningEffort: _reviewEffort, provider: _provider, providerPath: _providerPath, providerVersion: _providerVersion, ...extraAi } = previous.ai;
   return ProjectProfileSchema.parse({ ...previous,
       ai: { ...extraAi, provider:value.provider, model:value.model, modelMode:value.modelMode, reasoningEffort:value.reasoningEffort,
         ...(value.reviewModel ? {reviewModel:value.reviewModel} : {}), ...(value.reviewReasoningEffort ? {reviewReasoningEffort:value.reviewReasoningEffort} : {}),
+        ...(value.providerPath ? {providerPath:value.providerPath} : {}), ...(value.providerVersion ? {providerVersion:value.providerVersion} : {}),
       },
       onboarding:{version:1,readConsent:value.readConsent,readScope:'tracked-project',testPolicy:value.testPolicy,coverage:value.coverage,instructions:'preserve'},
     });
@@ -195,6 +201,8 @@ function sameProfileStructure(previous, next) {
 export async function saveOnboarding(root, input, { dryRun = false } = {}) {
   const value = SetupSchema.parse(input);
   if (value.provider === 'codex' && process.platform !== 'darwin') fail('PROVIDER_PLATFORM', 'Codex пока поддерживается только на macOS.');
+  if (['claude', 'cursor'].includes(value.provider) && (!value.providerPath || !value.providerVersion || value.modelMode !== 'provider' || value.model !== 'provider-default'))
+    fail('PROVIDER_PIN_REQUIRED', 'Claude Code/Cursor используют только проверенный CLI с наследуемой моделью. Повторите setup.');
   if (/^(?:sk-|sess-)/i.test(value.model) || /^(?:sk-|sess-)/i.test(value.reviewModel ?? '')) fail('AI_CONFIG', 'Укажите ID модели, не ключ.');
   if (value.modelMode === 'manual' && ((value.reviewModel && value.reviewModel !== value.model) || (value.reviewReasoningEffort && value.reviewReasoningEffort !== value.reasoningEffort))) fail('AI_CONFIG', 'Ручной режим закрепляет одну модель и усиление.');
   if (value.profileHash !== projectProfileHash(root)) fail('ONBOARDING_STALE', 'Профиль изменился. Повторите настройку.');

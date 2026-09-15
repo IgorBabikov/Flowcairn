@@ -81,7 +81,7 @@ export interface GraphNodeSnapshot {
 
 export interface GateSnapshot {
   nodeId: string;
-  type: 'approve-plan' | 'accept-result';
+  type: 'provider-consent' | 'approve-plan' | 'accept-result';
   readPaths?: string[];
   title: string;
   scope: string[];

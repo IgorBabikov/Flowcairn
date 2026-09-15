@@ -20,7 +20,7 @@ const same = (a, b) => JSON.stringify([...a].sort()) === JSON.stringify([...b].s
 export function validatePlan(
   input,
   taskInput,
-  { runtimeHash = undefined, skills = undefined, resolveSkills = undefined, resolveReadPaths = undefined, contextHash = undefined, mode = 'current' } = {},
+  { runtimeHash = undefined, skills = undefined, resolveSkills = undefined, resolveReadPaths = undefined, contextHash = undefined, provider = undefined, mode = 'current' } = {},
 ) {
   if (!['current', 'historical'].includes(mode))
     reject('INVALID_VALIDATION_MODE', 'Неизвестный режим проверки плана');
@@ -74,6 +74,8 @@ export function validatePlan(
   }
   const autonomous = plan.workflow === 'autonomous';
   const productPlanning = autonomous && plan.stage === 'planning';
+  const providerConsent = plan.nodes.filter((node) => node.action.id === 'human-provider-consent');
+  const externalProvider = ['claude', 'cursor'].includes(provider) || (historical && providerConsent.length === 1);
   const historicalGates = historical && !autonomous
     ? plan.nodes.filter((node) => node.success.kind === 'gate')
     : [];
@@ -88,10 +90,14 @@ export function validatePlan(
       )
     : plan.nodes.filter((n) => n.action.id === 'human-accept');
   if (
-    (!autonomous && historical && historicalGates.length !== 2) ||
+    (!autonomous && historical && historicalGates.length !== (externalProvider ? 3 : 2)) ||
+    providerConsent.length !== (externalProvider ? 1 : 0) ||
+    (providerConsent.length && providerConsent[0].needs.length !== 0) ||
     approve.length !== (productPlanning ? 0 : 1) ||
     accept.length !== 1 ||
-    (!productPlanning && approve[0].needs.length) ||
+    (!historical && !productPlanning && (externalProvider
+      ? !approve[0].needs.includes('provider-consent')
+      : approve[0].needs.length)) ||
     (autonomous && plan.nodes.some((n) => n.action.id === 'human-accept'))
   )
     reject('INVALID_GATES', 'Нужны один начальный approve-plan и один конечный accept-result');
@@ -128,7 +134,7 @@ export function validatePlan(
       : Math.min(action.maxAttempts, task.limits.maxAttempts);
     if (node.retry.maxAttempts > maxAttempts)
       reject('UNSAFE_RETRY_POLICY', 'Retry policy превышает безопасный предел');
-    if (!productPlanning && node.id !== approve[0].id && !ancestors.get(node.id).has(approve[0].id))
+    if (!productPlanning && node.id !== approve[0].id && node.id !== providerConsent[0]?.id && !ancestors.get(node.id).has(approve[0].id))
       reject('APPROVAL_BYPASS', 'Node не зависит от approval');
     if (node.id !== accept[0].id && !ancestors.get(accept[0].id).has(node.id))
       reject('ACCEPTANCE_BYPASS', 'Final gate должен ждать все nodes');
@@ -175,11 +181,11 @@ export function validatePlan(
       const planner = plan.nodes.filter((n) => n.action.id === 'ai-plan');
       if (planner.length !== 1 || analyze.length !== (plan.analysisArtifact ? 0 : 1) ||
           (analyze.length && !ancestors.get(planner[0].id).has(analyze[0].id)) ||
-          plan.nodes.some((n) => !['ai-analyze','ai-plan','artifact-handoff'].includes(n.action.id)) ||
+          plan.nodes.some((n) => !['human-provider-consent','ai-analyze','ai-plan','artifact-handoff'].includes(n.action.id)) ||
           plan.nodes.some((n) => n.permissions.some((p) => p !== 'ai.read')))
         reject('INVALID_PLANNING_STAGE', 'Нужны последовательные read-only анализ и план');
-    } else if (plan.nodes.length !== 3 || plan.nodes.filter((n) => n.action.id === 'ai-plan').length !== 1 ||
-        plan.nodes.some((n) => !['human-approve', 'ai-plan', 'human-accept'].includes(n.action.id)) ||
+    } else if (plan.nodes.length !== (externalProvider ? 4 : 3) || plan.nodes.filter((n) => n.action.id === 'ai-plan').length !== 1 ||
+        plan.nodes.some((n) => !['human-provider-consent', 'human-approve', 'ai-plan', 'human-accept'].includes(n.action.id)) ||
         plan.nodes.some((n) => n.permissions.some((permission) => permission !== 'ai.read')))
       reject('INVALID_PLANNING_STAGE', 'Planning допускает только consent, read-only planner и terminal boundary');
   }
@@ -250,8 +256,9 @@ export function assertPlanHash(plan, expectedHash) {
     reject('PLAN_INTEGRITY', 'Immutable plan hash не совпадает');
 }
 
-export function compilePlan(task, { runtimeHash, skills, resolveSkills = undefined, resolveReadPaths = undefined, contextHash = undefined, version = 1, parentPlanHash = null }) {
+export function compilePlan(task, { runtimeHash, skills, resolveSkills = undefined, resolveReadPaths = undefined, contextHash = undefined, provider = undefined, version = 1, parentPlanHash = null }) {
   const nodes = [];
+  const externalProvider = ['claude', 'cursor'].includes(provider);
   const aiReads = [...new Set([...task.scope, ...task.contextPaths, ...REQUIRED_AI_CONTEXT_PATHS])];
   const add = (id, actionId, title, outcome, needs) => {
     const action = resolveAction(actionId);
@@ -278,12 +285,19 @@ export function compilePlan(task, { runtimeHash, skills, resolveSkills = undefin
       },
     });
   };
+  if (externalProvider) add(
+    'provider-consent',
+    'human-provider-consent',
+    'Согласовать передачу ограниченного контекста провайдеру',
+    'Отдельное согласие привязано к текущему immutable плану, scope и версии CLI.',
+    [],
+  );
   add(
     'approve-plan',
     'human-approve',
     'Подтвердить план',
     'Утверждены конкретный план и разрешения',
-    [],
+    externalProvider ? ['provider-consent'] : [],
   );
   add('analyze', 'ai-analyze', 'Понять задачу', 'Подтвержден конкретный путь реализации', [
     'approve-plan',
@@ -343,6 +357,6 @@ export function compilePlan(task, { runtimeHash, skills, resolveSkills = undefin
       nodes,
     },
     task,
-    { runtimeHash, skills, resolveSkills, resolveReadPaths, contextHash },
+    { runtimeHash, skills, resolveSkills, resolveReadPaths, contextHash, provider },
   );
 }

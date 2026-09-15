@@ -51,8 +51,8 @@ test('settings stay outside three-field task form', async ({page}) => {
   await mockApi(page,workflow(),{emptyUntilIntake:true});await page.goto(`/#session=${token}`);
   await page.getByRole('button',{name:'Настройки проекта',exact:true}).click();
   await expect(page.getByRole('region',{name:'Настройки проекта',exact:true})).toContainText('Ручной');
-  await expect(page.getByRole('region',{name:'Настройки проекта',exact:true})).toContainText('Claude Code: Execution adapter еще не включен.');
-  await expect(page.getByRole('region',{name:'Настройки проекта',exact:true})).toContainText('Cursor: Безопасный adapter не реализован.');
+  await expect(page.getByRole('region',{name:'Настройки проекта',exact:true})).toContainText('Claude Code: Поддержан.');
+  await expect(page.getByRole('region',{name:'Настройки проекта',exact:true})).toContainText('Cursor: Поддержан.');
   await expect(page.getByText('npx flowcairn setup',{exact:true})).toBeVisible();
   await expect(page.locator('.task-composer form').locator('input,textarea,select')).toHaveCount(3);
 });

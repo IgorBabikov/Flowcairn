@@ -60,21 +60,21 @@ test('итог первого запуска говорит о следующе�
   assert.doesNotMatch(text, /Ветка:|Менеджер:|Docker/);
 });
 
-test('неподдерживаемый провайдер и противоречивый ручной режим не создают профиль', t => {
+test('непроверенный provider и противоречивый ручной режим не создают профиль', t => {
   const root = fixture(t);
-  for (const provider of ['claude','cursor']) assert.throws(() => initializeProject(root,{...options,provider}), {code:'PROVIDER_UNSUPPORTED'});
+  for (const provider of ['claude','cursor']) assert.throws(() => initializeProject(root,{...options,provider}), {code:'PROVIDER_TOOLCHAIN_INVALID'});
   assert.throws(() => initializeProject(root,{...options,'review-model':'other-model'}), {code:'AI_CONFIG'});
   assert.equal(existsSync(path.join(root,'.flowcairn.json')),false);
 });
 
-test('Claude и Cursor показываются как disabled execution, а не как доступный выбор', async t => {
+test('Claude и Cursor доступны только после local capability probe', async t => {
   const { inspectOnboarding } = await import('../bin/onboarding.mjs');
   const status = inspectOnboarding(fixture(t));
   for (const id of ['claude', 'cursor']) {
     const provider = status.providers.find((item) => item.id === id);
     assert.equal(provider.supported, false);
     assert.notEqual(provider.state, 'available');
-    assert.match(provider.reason, /execution|адаптер|безопасный|запуск запрещен/i);
+    assert.match(provider.reason, /не найден|безопасную проверку/i);
   }
 });
 

@@ -119,7 +119,7 @@ export function calculateCapabilities(
       usable &&
       !historical &&
       node.status === 'waiting-for-human' &&
-      definition.action.id === 'human-approve';
+      ['human-approve', 'human-provider-consent'].includes(definition.action.id);
     const accept =
       usable &&
       !historical &&

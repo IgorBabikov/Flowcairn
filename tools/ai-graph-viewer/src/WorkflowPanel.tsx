@@ -11,7 +11,7 @@ export function WorkflowPanel({ snapshot, plan, busy, onApprove, onRevise }: {
   onRevise: (feedback: string) => void;
 }) {
   const [feedback, setFeedback] = useState('');
-  const gate = snapshot.gates.find(item => item.type === 'approve-plan');
+  const gate = snapshot.gates.find(item => item.type === 'provider-consent') ?? snapshot.gates.find(item => item.type === 'approve-plan');
   const gateNode = snapshot.nodes.find(node => node.id === gate?.nodeId);
   const approved = Boolean(snapshot.nodes.find(node => node.id === 'approve-plan' && node.status === 'passed'));
   const done = snapshot.integrity.valid && snapshot.status === 'passed' && snapshot.completion === 'ready-for-review' && !snapshot.failureReason;
@@ -21,10 +21,11 @@ export function WorkflowPanel({ snapshot, plan, busy, onApprove, onRevise }: {
   const changes = [...new Set(snapshot.nodes.flatMap(node => node.changedFiles))];
   const checks = snapshot.nodes.flatMap(node => node.checks);
   return <section className="workflow-panel" aria-label="План и результат">
-    <h2>{done ? 'Готово к вашему ревью' : blocked ? 'Работа приостановлена' : gate ? 'План работы' : approved ? 'Выполняем задачу' : 'Разбираемся в задаче'}</h2>
+    <h2>{done ? 'Готово к вашему ревью' : blocked ? 'Работа приостановлена' : gate?.type === 'provider-consent' ? 'Согласие на передачу данных' : gate ? 'План работы' : approved ? 'Выполняем задачу' : 'Разбираемся в задаче'}</h2>
     <p className="workflow-summary" role="status">{done
       ? 'Реализация и проверки завершены. Проверьте изменения, затем создайте коммит и PR.'
       : blocked ? humanText(snapshot.failureReason || current?.reason || snapshot.integrity.reason) || 'Откройте отчеты этапа: продолжение требует проверки.'
+      : gate?.type === 'provider-consent' ? 'Проверьте, какие данные могут быть переданы выбранному AI. Без согласия передача не начнется.'
       : gate ? 'Проверьте шаги и границы изменений. Можно дополнить план перед разработкой.'
       : approved ? 'Реализация, проверки и исправления пройдут автоматически. Можно вернуться к результату позже.'
       : 'Изучаем проект и требования. Затем покажем план для согласования.'}</p>
@@ -37,12 +38,12 @@ export function WorkflowPanel({ snapshot, plan, busy, onApprove, onRevise }: {
     </ol>
     {gate && <>
       <section className="plan-boundaries">
-        <h3>Границы изменений</h3>
+        <h3>{gate.type === 'provider-consent' ? 'Границы передачи' : 'Границы изменений'}</h3>
         <ul className="path-list">{gate.scope.map(path => <li key={path}><code>{path}</code></li>)}</ul>
         {gate.risks.length > 0 && <><h3>На что обратить внимание</h3><ul>{gate.risks.map(risk => <li key={risk}>{humanText(risk)}</li>)}</ul></>}
         <p>{humanText(gate.consequences.approve)}</p>
       </section>
-      {snapshot.capabilities.revisePlan?.allowed && <form className="plan-feedback" onSubmit={event => {
+      {gate.type !== 'provider-consent' && snapshot.capabilities.revisePlan?.allowed && <form className="plan-feedback" onSubmit={event => {
         event.preventDefault();
         if (feedback.trim() && !busy && reviewable) onRevise(feedback.trim());
       }}>
@@ -51,8 +52,8 @@ export function WorkflowPanel({ snapshot, plan, busy, onApprove, onRevise }: {
           onChange={event => setFeedback(event.target.value)} />
         <button className="button" type="submit" disabled={!feedback.trim() || busy || !reviewable}>Обновить план</button>
       </form>}
-      <button className="button primary approve-workflow" type="button" disabled={busy || !reviewable || !gateNode?.capabilities.approve?.allowed || Boolean(feedback.trim())}
-        onClick={() => onApprove(gate)}>Согласен</button>
+      <button className="button primary approve-workflow" type="button" disabled={busy || !reviewable || !gateNode?.capabilities.approve?.allowed || (gate.type !== 'provider-consent' && Boolean(feedback.trim()))}
+        onClick={() => onApprove(gate)}>{gate.type === 'provider-consent' ? 'Разрешить передачу' : 'Согласен'}</button>
       {feedback.trim() && <p className="field-hint">Сначала обновите план с вашими правками.</p>}
       {!plan && <p role="status">Проверяем сохраненный план…</p>}
       <details className="plan-technical"><summary>Права и подтверждение</summary>

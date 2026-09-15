@@ -251,7 +251,7 @@ export async function mockApi(page, initial = snapshot(), options = {}) {
     expect(request.headers()['x-flowcairn-control']).toBe(token);
     const url = new URL(request.url());
     if (url.pathname === '/api/onboarding') {
-      await route.fulfill({json: {configured:true, profileHash:hash('a'), providers:[{id:'codex',label:'Codex',supported:true,state:'available',reason:null},{id:'claude',label:'Claude Code',supported:false,state:'consent-required',reason:'Execution adapter еще не включен.'},{id:'cursor',label:'Cursor',supported:false,state:'official-adapter-unavailable',reason:'Безопасный adapter не реализован.'}], values:{provider:'codex',model:'gpt-test',modelMode:'manual',reasoningEffort:'high',testPolicy:'keep',coverage:false,readConsent:true}, limitations:[]}}); return;
+      await route.fulfill({json: {configured:true, profileHash:hash('a'), providers:[{id:'codex',label:'Codex',supported:true,state:'available',reason:null},{id:'claude',label:'Claude Code',supported:true,state:'available',reason:null},{id:'cursor',label:'Cursor',supported:true,state:'available',reason:null}], values:{provider:'codex',model:'gpt-test',modelMode:'manual',reasoningEffort:'high',testPolicy:'keep',coverage:false,readConsent:true}, limitations:[]}}); return;
     }
     if (url.pathname === '/api/project') {
       await route.fulfill({ json: options.projectContext ?? projectContext }); return;

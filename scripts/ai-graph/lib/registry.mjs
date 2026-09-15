@@ -16,6 +16,7 @@ const definition = (id, kind, permissions, skills, artifacts, retrySafe = false)
     inputSchema: empty,
   });
 const entries = [
+  definition('human-provider-consent', 'gate', [], [], []),
   definition('human-approve', 'gate', [], [], []),
   definition('human-accept', 'gate', [], [], []),
   definition('ai-plan', 'analysis', ['ai.read'], Reflect.get(SKILL_ROUTES, 'plan') ?? SKILL_ROUTES.analyze, ['analysis']),

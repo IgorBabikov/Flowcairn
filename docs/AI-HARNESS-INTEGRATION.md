@@ -31,22 +31,24 @@ Manifests ссылаются на один каталог Skills пакета. �
 | Обнаружение локального CLI | Да | Да | Да |
 | Нативный manifest в пакете | Да | Да | Да |
 | Правила и Skills Flowcairn | Да | Да | Да |
-| Безопасное выполнение AI-node Graph Runtime | Да | Не включено | Не включено |
+| Безопасное выполнение AI-node Graph Runtime | Да | Да, после version probe и per-plan consent | Да, после version probe и per-plan consent |
 
 `npx flowcairn doctor` показывает только фактически найденные CLI. `detected` не является разрешением на запуск AI-node.
 
-Claude Code и Cursor не подключены к executor, пока не будут выполнены все условия: явное разрешение владельца на передачу утвержденного контекста соответствующему провайдеру, tool-free или надежно изолированный adapter, проверяемый структурированный output, receipt и негативные тесты. Это ограничение намеренное.
+Claude Code и Cursor не получают права из факта обнаружения CLI. Для каждого immutable плана требуется отдельное consent владельца; затем executor проверяет version pin, scope/instruction/Skills/artifacts hashes, structured output и receipt. Изменение версии, scope или plan снова блокирует egress.
 
 ## Проверенная матрица CLI (15 сентября 2026)
 
 | Assistant | Официальный non-interactive путь | Ограничения FS/network | Structured output | Что может уйти наружу | Graph Runtime |
 | --- | --- | --- | --- | --- | --- |
-| Claude Code | `claude -p` | Можно отключить built-in tools через `--tools ""`; это не тестировалось Flowcairn на закрепленной версии | `--json-schema` заявлен официально | Только заранее утвержденные scope, instructions, Skills и artifacts после отдельного consent | Disabled до version-pinned adapter и E2E receipt |
-| Cursor | `agent -p` | Sandbox описан для command execution; print mode имеет write/shell tools | JSON/NDJSON — это оболочка с text `result`; JSON Schema не задокументирована | Ничего: Flowcairn не вызывает CLI | Disabled: нет доказуемого tool-free schema adapter |
+| Claude Code | `claude -p --restricted --bare` | Restricted mode удаляет code/shell tools; Flowcairn запускает в private workspace, без project cwd | `--json-schema` + локальная Zod validation | Только approved scope, instructions, Skills и artifacts после отдельного consent | Работает после local version pin; tests используют synthetic CLI |
+| Cursor | `cursor-agent -p --output-format json` | Private empty workspace и project-local deny policy для Shell/Read/Write; `--force` не используется | JSON envelope + локальная строгая validation | Только approved scope, instructions, Skills и artifacts после отдельного consent | Работает после local version pin; tests используют synthetic CLI |
 
 Официальные источники: [Claude Code CLI](https://code.claude.com/docs/en/cli-reference), [Claude structured output](https://code.claude.com/docs/en/agent-sdk/structured-outputs), [Cursor CLI parameters](https://cursor.com/docs/cli/reference/parameters), [Cursor output format](https://cursor.com/docs/cli/reference/output-format).
 
-Для будущего внешнего запуска Flowcairn уже определяет строгий consent contract. Он привязан hash-ами к plan, scope, instructions, Skills и artifacts; раскрывает, что передается, и явно исключает secrets, `.env`, Git history, неутвержденные файлы и shell project host. Его hash должен попасть и в immutable plan, и в receipt. Пока provider execution disabled, consent не запрашивается и ничего не передается.
+Consent contract привязан hash-ами к plan, scope, instructions, Skills и artifacts; раскрывает, что передается, и явно исключает secrets, `.env`, Git history, неутвержденные файлы и shell project host. Его hash сохраняется в immutable store рядом с plan и в receipt. Отмена gate не запускает provider.
+
+Контекст для CLI ограничен 128 KiB после serialization. При превышении Flowcairn отказывает до запуска provider: сузьте approved scope, а не увеличивайте лимит.
 
 ## Модель и усиление
 

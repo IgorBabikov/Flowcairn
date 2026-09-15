@@ -21,7 +21,7 @@ export const EXTERNAL_PROVIDER_CONSENT = Object.freeze({
   excluded: Object.freeze(['secrets', 'environment-files', 'git-history', 'unapproved-files', 'project-host-shell']),
 });
 
-/** Future external execution must bind this exact disclosure to its immutable plan and receipt. */
+/** External execution binds this exact disclosure to an immutable plan and receipt. */
 export function externalProviderConsentHash(value) {
   return hashObject(ExternalProviderConsentSchema.parse(value));
 }
@@ -41,9 +41,9 @@ export const HARNESS_DESCRIPTORS = Object.freeze({
     instructions: Object.freeze(['CLAUDE.md', '.claude/rules/']),
     skills: Object.freeze(['.claude/skills/']),
     runtime: Object.freeze({
-      status: 'consent-required',
-      execution: 'disabled',
-      reason: 'Официальный tool-free и JSON Schema путь найден, но Flowcairn еще не проверил закрепленную версию и полный receipt-цикл. До этого запуск запрещен.',
+      status: 'available-after-probe',
+      execution: 'restricted-cli-adapter',
+      reason: 'Нужны проверка точной версии CLI и отдельное согласие на передачу ограниченного контекста для каждого immutable плана.',
     }),
   }),
   cursor: Object.freeze({
@@ -53,9 +53,9 @@ export const HARNESS_DESCRIPTORS = Object.freeze({
     instructions: Object.freeze(['.cursor/rules/', '.cursorrules']),
     skills: Object.freeze(['.cursor/skills/', '.agents/skills/']),
     runtime: Object.freeze({
-      status: 'official-adapter-unavailable',
-      execution: 'disabled',
-      reason: 'Официальный CLI возвращает JSON-обертку, но не доказывает строгую JSON Schema без встроенных write/shell tools. Безопасный adapter не реализован.',
+      status: 'available-after-probe',
+      execution: 'isolated-cli-adapter',
+      reason: 'CLI запускается только в пустом private workspace с deny-политикой. Его JSON-ответ дополнительно валидируется Flowcairn; нужна точная версия и отдельное согласие.',
     }),
   }),
 });

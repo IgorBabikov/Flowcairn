@@ -36,11 +36,13 @@ import { captureBeforeContents, buildAttemptDiff } from './artifacts.mjs';
 import { buildHistoricalReviewEvidence, buildReviewEvidence, MAX_HISTORICAL_EXECUTIONS } from './review-evidence.mjs';
 import { applyProposedEdits } from './patch.mjs';
 import { prepareToolchain, verifyToolchain } from './toolchain.mjs';
+import { ExternalConsentSchema, makeExternalConsent, providerToolchain } from './providers.mjs';
 
 const fail = (code, message) => {
   throw new GraphError(code, message);
 };
 const unique = (values) => [...new Set(values)];
+const externalProvider = (provider) => ['claude', 'cursor'].includes(provider);
 const safeReason = (error) =>
   error instanceof GraphError
     ? `${error.code}: ${sanitizeText(error.message)}`
@@ -770,6 +772,7 @@ export class WorkflowService {
       parentPlanHash,
       workflow,
       analysisArtifact,
+      provider: this.adapters.project?.ai.provider,
     };
     if (workflow === 'autonomous' && stage === 'planning' && !this.#hasReadConsent())
       fail('ONBOARDING_REQUIRED', 'Нет локального согласия на чтение выбранным AI');
@@ -852,7 +855,7 @@ export class WorkflowService {
       plan,
       task,
       current
-        ? { runtimeHash: this.adapters.identity(), skills: this.adapters.skills(task), resolveSkills: this.adapters.resolveSkills, resolveReadPaths: this.adapters.resolveReadPaths, contextHash: this.adapters.contextHash?.(task) }
+        ? { runtimeHash: this.adapters.identity(), skills: this.adapters.skills(task), resolveSkills: this.adapters.resolveSkills, resolveReadPaths: this.adapters.resolveReadPaths, contextHash: this.adapters.contextHash?.(task), provider: this.adapters.project?.ai.provider }
         : { mode: 'historical' },
     );
     const envelope = PlanningEnvelopeSchema.parse(
@@ -1237,7 +1240,7 @@ export class WorkflowService {
       .filter((node) => node.status === 'waiting-for-human' && !driftReason && !(plan.stage === 'planning' && node.action.id === 'human-accept'))
       .map((node) => ({
         nodeId: node.id,
-        type: node.action.id === 'human-approve' ? 'approve-plan' : 'accept-result',
+        type: node.action.id === 'human-provider-consent' ? 'provider-consent' : node.action.id === 'human-approve' ? 'approve-plan' : 'accept-result',
         title: node.title,
         scope: plan.workflow === 'autonomous' ? unique(plan.nodes.flatMap(item => item.resources.writes)).sort() : task.scope,
         readPaths: unique(
@@ -1246,8 +1249,15 @@ export class WorkflowService {
             .flatMap((n) => n.resources.reads),
         ).sort(),
         planHash: state.planHash,
-        requiredPermissions: unique(plan.nodes.flatMap((n) => n.permissions)),
+        requiredPermissions: node.action.id === 'human-provider-consent'
+          ? []
+          : unique(plan.nodes.flatMap((n) => n.permissions)),
         risks: [
+          ...(node.action.id === 'human-provider-consent' ? [
+            `Передача: ${this.adapters.project?.ai.provider === 'claude' ? 'Claude Code / Anthropic' : 'Cursor'}. Будут переданы только approved scope, instructions, Skills и artifacts текущего плана.`,
+            'Не передаются .env и другие secrets, Git history, unapproved files и доступ к shell проекта. Можно отменить без передачи данных.',
+            `План: ${state.planHash}; scope: ${hashObject({ scope: task.scope, readPaths: plan.nodes.filter((item) => item.action.id.startsWith('ai-')).flatMap((item) => item.resources.reads).sort(), sourceHash: state.sourceHash })}.`,
+          ] : []),
           `AI provider: ${this.adapters.project?.ai.provider ?? 'codex'}; model: ${this.adapters.project?.ai.model ?? 'configured'}. Вызов может расходовать платный лимит.`,
           plan.workflow === 'autonomous'
             ? 'После согласования начнутся изменения, проверки и ревью. Разрешение чтения задано в настройках проекта.'
@@ -1258,7 +1268,9 @@ export class WorkflowService {
         evidence: unique(nodes.flatMap((n) => n.artifacts.map((a) => a.id))),
         consequences: {
           approve:
-            node.action.id === 'human-approve'
+            node.action.id === 'human-provider-consent'
+              ? 'Разрешить только эту одну передачу ограниченного контекста выбранному provider. Согласие будет сохранено рядом с immutable plan и receipt.'
+              : node.action.id === 'human-approve'
               ? plan.workflow === 'autonomous'
                 ? `Выполнить план автоматически в указанных границах, включая до ${plan.autonomy.maxRepairCycles} циклов исправлений. Общий срок — ${Math.floor(plan.autonomy.maxDurationMs / 60000)} минут. Commit и PR остаются за вами.`
                 : 'Разрешить исполнение этого immutable плана с указанными правами.'
@@ -1343,7 +1355,7 @@ export class WorkflowService {
         try {
           loaded = this.#read(runId, { current: false, verifySource: false });
           if (contextError) throw contextError;
-          validatePlan(loaded.plan, loaded.task, { ...context, skills: this.adapters.skills(loaded.task), contextHash: this.adapters.contextHash?.(loaded.task) });
+          validatePlan(loaded.plan, loaded.task, { ...context, skills: this.adapters.skills(loaded.task), contextHash: this.adapters.contextHash?.(loaded.task), provider: this.adapters.project?.ai.provider });
         } catch (error) {
           reason = safeReason(error);
         }
@@ -1440,6 +1452,28 @@ export class WorkflowService {
       updatedAt: now(),
     }));
   }
+  #providerConsent(state, task, plan) {
+    const provider = this.adapters.project?.ai.provider;
+    if (!externalProvider(provider)) return null;
+    if (!state.providerConsentHash) fail('PROVIDER_CONSENT_REQUIRED', 'До запуска Claude Code/Cursor нужно отдельное согласие на передачу данных.');
+    let consent;
+    try { consent = ExternalConsentSchema.parse(this.store.readObject('provider-consents', state.providerConsentHash)); }
+    catch { fail('PROVIDER_CONSENT_INVALID', 'Сохраненное согласие provider отсутствует или повреждено.'); }
+    const expected = {
+      provider,
+      planHash: state.planHash,
+      scopeHash: hashObject({ scope: task.scope, readPaths: plan.nodes.filter((node) => node.action.id.startsWith('ai-')).flatMap((node) => node.resources.reads).sort(), sourceHash: state.sourceHash }),
+      instructionsHash: hashObject({ instructions: task.instructions, acceptance: task.acceptance }),
+      skillsHash: hashObject(plan.skills),
+      artifactsHash: hashObject({ analysisArtifact: plan.analysisArtifact ?? null }),
+    };
+    if (Object.entries(expected).some(([key, value]) => consent[key] !== value))
+      fail('PROVIDER_CONSENT_STALE', 'Согласие не относится к текущему плану, scope или контексту.');
+    const toolchain = providerToolchain(this.adapters.project.ai);
+    if (consent.cliPath !== toolchain.executable || consent.cliVersion !== toolchain.version)
+      fail('PROVIDER_VERSION_DRIFT', 'CLI изменился после согласия. Повторите setup и согласие.');
+    return { hash: state.providerConsentHash, consent, toolchain };
+  }
   #receipt(state, task, plan, definition, fields) {
     const node = state.nodes[definition.id];
     return this.store.putObject(
@@ -1481,6 +1515,7 @@ export class WorkflowService {
         actor: state.actor,
         operationId: state.activeOperation?.id ?? `receipt-${randomUUID()}`,
         previousReceipt: node.receipts.at(-1) ?? null,
+        providerConsentHash: state.providerConsentHash ?? null,
         ...fields,
       }),
     );
@@ -1527,22 +1562,40 @@ export class WorkflowService {
             ? 'reject'
             : 'approve';
       if (!caps.nodes[definition.id][cap]?.allowed) fail('CONTROL_DENIED', 'Решение недоступно');
+      const providerGate = definition.action.id === 'human-provider-consent';
+      if (providerGate && !externalProvider(this.adapters.project?.ai.provider))
+        fail('PROVIDER_CONSENT_UNEXPECTED', 'Этот plan не использует внешний provider.');
+      if (providerGate && !['approve', 'reject'].includes(request.decision))
+        fail('PROVIDER_CONSENT_DECISION', 'Для provider consent доступны только approve или reject.');
       this.#verifyChallenge(state, definition.id, request.challenge);
       if (request.decision !== 'reject' && definition.action.id === 'human-accept')
         await this.#assertWorkspace(state);
-      const required = unique(plan.nodes.flatMap((n) => n.permissions));
+      const required = providerGate ? [] : unique(plan.nodes.flatMap((n) => n.permissions));
       if (
         request.decision === 'approve' &&
         hashObject([...(request.permissions ?? [])].sort()) !== hashObject(required.sort())
       )
         fail('PERMISSION_GRANT', 'Необходимо явно подтвердить точный набор прав плана');
       const rejected = request.decision === 'reject';
+      let providerConsentHash = null;
+      if (providerGate && !rejected) {
+        const toolchain = providerToolchain(this.adapters.project.ai);
+        const consent = makeExternalConsent({
+          provider: this.adapters.project.ai.provider,
+          planHash: state.planHash,
+          scopeHash: hashObject({ scope: task.scope, readPaths: plan.nodes.filter((node) => node.action.id.startsWith('ai-')).flatMap((node) => node.resources.reads).sort(), sourceHash: state.sourceHash }),
+          instructionsHash: hashObject({ instructions: task.instructions, acceptance: task.acceptance }),
+          skillsHash: hashObject(plan.skills), artifactsHash: hashObject({ analysisArtifact: plan.analysisArtifact ?? null }), toolchain,
+        });
+        providerConsentHash = this.store.putObject('provider-consents', consent);
+      }
       const receipt = this.#receipt(state, task, plan, definition, {
         phase: 'gate',
         grantedPermissions: request.decision === 'approve' ? required : state.permissions,
         verdict: rejected ? 'fail' : 'pass',
         actor,
         operationId: request.operationId,
+        ...(providerConsentHash ? { providerConsentHash } : {}),
         failureReason: rejected ? sanitizeText(request.reason ?? 'Отклонено оператором') : null,
       });
       const nodes = structuredClone(state.nodes),
@@ -1560,7 +1613,8 @@ export class WorkflowService {
         {
           ...state,
           nodes,
-          permissions: request.decision === 'approve' ? required : state.permissions,
+          permissions: request.decision === 'approve' && !providerGate ? required : state.permissions,
+          ...(providerConsentHash ? { providerConsentHash } : {}),
           finalDisposition: rejected
             ? 'rejected'
             : request.decision === 'accept'
@@ -1756,6 +1810,7 @@ export class WorkflowService {
       resolveSkills: this.adapters.resolveSkills,
       resolveReadPaths: this.adapters.resolveReadPaths,
       contextHash: this.adapters.contextHash?.(task),
+      provider: this.adapters.project?.ai.provider,
         });
         if (hashObject(current.binding) !== hashObject(executionState.binding))
           fail('EXECUTION_FENCED', 'Binding операции был заменен');
@@ -1800,6 +1855,9 @@ export class WorkflowService {
       durationMs: null,
       verdict: 'started',
       afterFingerprint: null,
+      ...(definition.action.id.startsWith('ai-') && externalProvider(this.adapters.project?.ai.provider)
+        ? { providerConsentHash: this.#providerConsent(state, task, plan).hash }
+        : {}),
     });
     const nodes = structuredClone(state.nodes);
     Object.assign(nodes[definition.id], {
@@ -1939,6 +1997,9 @@ export class WorkflowService {
           signal,
           priorEvidence,
           reviewEvidence: reviewBundle?.evidence ?? null,
+          ...(definition.action.id.startsWith('ai-') && externalProvider(this.adapters.project?.ai.provider)
+            ? { providerConsent: this.#providerConsent(state, task, plan) }
+            : {}),
           onStart: async (metadata) => {
             const current = this.store.readRun(state.runId);
             this.adapters.verifyBinding(current.binding);
@@ -1962,7 +2023,7 @@ export class WorkflowService {
         assertJsonBounds(result.output);
         aiOutput = (definition.action.id === 'ai-plan' ? AIPlanningResultSchema : definition.action.id === 'ai-analyze' && plan.workflow === 'autonomous' ? AIAnalysisResultSchema : reviewBundle ? AIReviewResultSchema : AIResultSchema).parse(result.output);
         if (definition.action.id === 'ai-plan' && aiOutput.verdict === 'pass')
-          compileTaskProposal(task, aiOutput, { runtimeHash: this.adapters.identity(), skills: this.adapters.skills(task), resolveSkills: this.adapters.resolveSkills, resolveReadPaths: this.adapters.resolveReadPaths, contextHash: this.adapters.contextHash?.(task) });
+          compileTaskProposal(task, aiOutput, { runtimeHash: this.adapters.identity(), skills: this.adapters.skills(task), resolveSkills: this.adapters.resolveSkills, resolveReadPaths: this.adapters.resolveReadPaths, contextHash: this.adapters.contextHash?.(task), provider: this.adapters.project?.ai.provider });
         if (reviewBundle) {
           const verified = buildReviewEvidence({
             state,
@@ -2463,6 +2524,7 @@ export class WorkflowService {
       version: plan.version + 1,
       parentPlanHash: state.planHash,
       workflow: plan.workflow,
+      provider: this.adapters.project?.ai.provider,
     };
     let nextDraft = request.draft ?? null;
     let nextStage = plan.stage;

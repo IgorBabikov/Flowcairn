@@ -5,10 +5,12 @@ import { resolveAction, pathAllowed } from './registry.mjs';
 
 const fail = (code, message) => { throw new GraphError(code, message); };
 const selected = (nodes, skills) => skills.filter((skill) => nodes.some((node) => node.skills.includes(skill.id)));
+const externalProvider = (context) => ['claude', 'cursor'].includes(context.provider);
 
 /** The staging graph has no write permission and is never an accepted implementation. */
 export function compilePlanningPlan(task, context) {
   const baseline = compilePlan(task, context).plan;
+  const consent = externalProvider(context) ? structuredClone(baseline.nodes.find((node) => node.action.id === 'human-provider-consent')) : null;
   if (context.workflow === 'autonomous') {
     const analyze = structuredClone(baseline.nodes.find((n) => n.action.id === 'ai-analyze'));
     analyze.needs = []; analyze.title = 'Анализ задачи и проекта';
@@ -19,7 +21,11 @@ export function compilePlanningPlan(task, context) {
     if (context.resolveReadPaths) planner.resources.reads = context.resolveReadPaths(planner, task);
     const terminal = structuredClone(baseline.nodes.find((n) => n.action.id === 'artifact-handoff'));
     terminal.id = 'plan-ready'; terminal.title = 'План подготовлен'; terminal.needs = [planner.id];
-    const nodes = [...(context.analysisArtifact ? [] : [analyze]), planner, terminal];
+    if (consent) {
+      if (!context.analysisArtifact) analyze.needs = ['provider-consent'];
+      else planner.needs = ['provider-consent'];
+    }
+    const nodes = [...(consent ? [consent] : []), ...(context.analysisArtifact ? [] : [analyze]), planner, terminal];
     return validatePlan({ ...baseline, workflow: 'autonomous', autonomy: { maxRepairCycles: 2, maxDurationMs: 1800000 },
       ...(context.analysisArtifact ? { analysisArtifact: context.analysisArtifact } : {}), stage: 'planning', skills: selected(nodes, context.skills), nodes }, task, context);
   }
@@ -39,7 +45,8 @@ export function compilePlanningPlan(task, context) {
   terminal.title = 'Передать план на компиляцию';
   terminal.outcome = 'Новая версия исполнения требует отдельного подтверждения';
   terminal.needs = [planner.id];
-  const nodes = [approve, planner, terminal];
+  if (consent) approve.needs = ['provider-consent'];
+  const nodes = [...(consent ? [consent] : []), approve, planner, terminal];
   return validatePlan({ ...baseline, stage: 'planning', skills: selected(nodes, context.skills), nodes }, task, context);
 }
 
@@ -72,7 +79,10 @@ export function compileTaskProposal(task, proposalInput, context) {
   for (const step of proposal.steps) visit(step.id);
   const baseline = compilePlan(task, context).plan;
   const template = baseline.nodes.find((node) => node.action.id === 'ai-implement');
-  const nodes = [structuredClone(baseline.nodes.find((node) => node.action.id === 'human-approve'))];
+  const approval = structuredClone(baseline.nodes.find((node) => node.action.id === 'human-approve'));
+  const consent = externalProvider(context) ? structuredClone(baseline.nodes.find((node) => node.action.id === 'human-provider-consent')) : null;
+  if (consent) approval.needs = ['provider-consent'];
+  const nodes = [...(consent ? [consent] : []), approval];
   let previous = 'approve-plan';
   for (const step of ordered) {
     const node = structuredClone(template);
