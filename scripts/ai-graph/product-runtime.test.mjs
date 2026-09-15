@@ -341,7 +341,8 @@ test('final review сохраняет подтвержденные partial chang
  let snapshot=await f.settle(await f.intake());
  snapshot=await f.approve(snapshot);snapshot=await f.settle(snapshot);
  assert.equal(snapshot.status,'uncertain');
- snapshot=await f.service.command(snapshot.runId,'recover',request(snapshot));
+ assert.equal(snapshot.capabilities.recover.allowed,false);
+ assert.equal(snapshot.capabilities.requestReplan.allowed,true);
  snapshot=await f.service.command(snapshot.runId,'replan',request(snapshot));
  snapshot=await f.settle(await f.approve(snapshot));
  assert.equal(snapshot.status,'failed');

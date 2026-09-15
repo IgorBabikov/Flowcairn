@@ -2,7 +2,7 @@
   "name": "flowcairn",
   "displayName": "Flowcairn",
   "description": "Проверяемый Graph Runtime для AI-разработки: планы, receipts и human gates.",
-  "version": "0.2.9",
+  "version": "0.2.11",
   "author": { "name": "Igor Babikov" },
   "homepage": "https://github.com/IgorBabikov/flowcairn",
   "repository": "https://github.com/IgorBabikov/flowcairn",
