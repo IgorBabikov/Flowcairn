@@ -395,7 +395,11 @@ function localCheckToolchain(profile) {
   const candidate = path.join(NODE_BIN, profile.packageManager);
   let entry;
   try { entry = realpathSync(candidate); } catch { fail('LOCAL_CHECK_TOOLCHAIN', `Не найден ${profile.packageManager} из Node 22`); }
-  if (!regularReadable(entry))
+  const nodeRoot = path.resolve(NODE_BIN, '..');
+  let stat;
+  try { stat = statSync(entry); } catch { fail('LOCAL_CHECK_TOOLCHAIN', `Недоступен безопасный ${profile.packageManager} из Node 22`); }
+  if (!isWithin(entry, nodeRoot) || !stat.isFile() || (stat.mode & 0o022) !== 0 ||
+      (process.getuid?.() !== undefined && stat.uid !== 0 && stat.uid !== process.getuid?.()))
     fail('LOCAL_CHECK_TOOLCHAIN', `Недоступен безопасный ${profile.packageManager} из Node 22`);
   const identity = {
     kind: 'local-worktree',
@@ -1026,8 +1030,10 @@ export async function runRegisteredAction({
   if (typeof onStart !== 'function') fail('RUNNER_START_CALLBACK_REQUIRED', 'onStart обязателен');
   const input = parseInputs({ node, task, plan, skills, priorEvidence, reviewEvidence });
   const profile = loadProjectProfile(root);
-  const localCheck = action.id.startsWith('check-');
+  const localCheck = ['check-typecheck', 'check-lint', 'check-tests', 'check-build'].includes(action.id);
   const allocation = validateAllocation(root, worktree, outputDirectory, localCheck ? 'local' : profile.ai.provider);
+  if (action.id.startsWith('check-') && !localCheck)
+    fail('RUNNER_CHECK_CONTAINMENT_UNAVAILABLE', 'Незарегистрированная project-проверка не исполняется локально.');
   const toolchain = localCheck ? localCheckToolchain(profile) : runnerToolchain(profile);
   const dependencyToolchain = verifyToolchain({
     root: allocation.rootPath,

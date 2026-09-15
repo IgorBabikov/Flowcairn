@@ -134,7 +134,7 @@ test('setup dry-run показывает изменение без записи 
   assert.equal(existsSync(path.join(root,'.ai-orchestrator/lifecycle-uninstall.lock')),false);
 });
 
-test('Docker-проверки готовятся только после явного согласия в первом запуске', async t => {
+test('обычная настройка не готовит Docker и оставляет проверки локальными', async t => {
   const root = fixture(t);
   const { maybePrepareChecks } = await import('../bin/flowcairn.mjs');
   const profile = initializeProject(root, options).profile;
@@ -143,16 +143,11 @@ test('Docker-проверки готовятся только после явн�
     probe: () => ({ available: false, reason: 'CHECK_IMAGE_MISSING' }),
     prepare: () => { prepared += 1; return { imageId: 'sha256:abc', hash: 'a'.repeat(64) }; },
   };
-  const declined = await maybePrepareChecks(root, profile, {}, {
-    input: { isTTY: true }, output: { isTTY: true, write() {} }, prompt: { question: async () => 'нет' },
-  }, checks);
-  assert.equal(declined.prepared, false);
-  assert.equal(prepared, 0);
-  const accepted = await maybePrepareChecks(root, profile, {}, {
+  const result = await maybePrepareChecks(root, profile, {}, {
     input: { isTTY: true }, output: { isTTY: true, write() {} }, prompt: { question: async () => 'да' },
   }, checks);
-  assert.equal(accepted.prepared, true);
-  assert.equal(prepared, 1);
+  assert.deepEqual(result, { prepared: false, reason: 'LOCAL_DEFAULT' });
+  assert.equal(prepared, 0);
 });
 
 test('handoff открывает проверенный результат для личного ревью без автоматического принятия', async () => {
