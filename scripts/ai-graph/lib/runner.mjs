@@ -395,10 +395,14 @@ function localCheckToolchain(profile) {
   // Node is the already-running Flowcairn process. Managed distributions may
   // hard-link it, so nlink is not a security signal here. Ownership, mode and
   // the immutable digest recorded below remain required.
-  if (!/^v22\./.test(process.version) || !runningNode?.isFile() ||
-      (runningNode.mode & 0o111) === 0 || (runningNode.mode & 0o002) !== 0 ||
-      (process.getuid?.() !== undefined && runningNode.uid !== 0 && runningNode.uid !== process.getuid?.()))
-    fail('LOCAL_CHECK_NODE_UNSAFE', 'Локальные проверки требуют доверенный Node 22');
+  if (!/^v22\./.test(process.version))
+    fail('LOCAL_CHECK_NODE_VERSION', 'Локальные проверки требуют Node 22');
+  if (!runningNode?.isFile())
+    fail('LOCAL_CHECK_NODE_FILE', 'Node для локальных проверок не является обычным файлом');
+  if ((runningNode.mode & 0o111) === 0 || (runningNode.mode & 0o002) !== 0)
+    fail('LOCAL_CHECK_NODE_MODE', 'Node для локальных проверок имеет небезопасные права');
+  if (process.getuid?.() !== undefined && runningNode.uid !== 0 && runningNode.uid !== process.getuid?.())
+    fail('LOCAL_CHECK_NODE_OWNER', 'Node для локальных проверок принадлежит неизвестному владельцу');
   const candidate = path.join(NODE_BIN, profile.packageManager);
   let entry;
   try { entry = realpathSync(candidate); } catch { fail('LOCAL_CHECK_TOOLCHAIN', `Не найден ${profile.packageManager} из Node 22`); }
