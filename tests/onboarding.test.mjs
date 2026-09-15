@@ -22,7 +22,8 @@ test('явный onboarding сохраняет разрешение, ручну�
   assert.deepEqual(result.profile.onboarding, {version:1,readConsent:true,readScope:'tracked-project',testPolicy:'keep',coverage:false,instructions:'preserve'});
   assert.equal(result.profile.ai.modelMode, 'manual');
   assert.equal(result.profile.ai.reasoningEffort, 'high');
-  assert.deepEqual(result.profile.checks, ['tests','build']);
+  assert.deepEqual(result.profile.checks, []);
+  assert.equal(result.profile.checkMode, 'none');
   assert.equal(readFileSync(path.join(root,'AGENTS.md'),'utf8'),'Правила владельца');
 });
 
@@ -86,7 +87,7 @@ test('опрос OpenAI фиксирует только явное соглас�
   const root = fixture(t);
   const api = await import('../bin/onboarding.mjs').catch(() => ({}));
   assert.equal(typeof api.collectOnboarding,'function');
-  const replies = ['openai','manual','my-model','high','keep','нет','нет','нет'];
+  const replies = ['openai','manual','my-model','high','keep','нет','none','нет','нет'];
   let text='';
   const result=await api.collectOnboarding(root, {advanced:true}, {input:{isTTY:true},output:{isTTY:true,write:value=>{text+=value;}},prompt:{question:async()=>replies.shift()}});
   assert.equal(result['read-consent'],false);
@@ -138,7 +139,7 @@ test('setup dry-run показывает изменение без записи 
   assert.equal(existsSync(path.join(root,'.ai-orchestrator/lifecycle-uninstall.lock')),false);
 });
 
-test('обычная настройка не готовит Docker и оставляет проверки локальными', async t => {
+test('обычная настройка не запускает scripts проекта и не готовит Docker', async t => {
   const root = fixture(t);
   const { maybePrepareChecks } = await import('../bin/flowcairn.mjs');
   const profile = initializeProject(root, options).profile;
@@ -150,7 +151,7 @@ test('обычная настройка не готовит Docker и остав
   const result = await maybePrepareChecks(root, profile, {}, {
     input: { isTTY: true }, output: { isTTY: true, write() {} }, prompt: { question: async () => 'да' },
   }, checks);
-  assert.deepEqual(result, { prepared: false, reason: 'LOCAL_DEFAULT' });
+  assert.deepEqual(result, { prepared: false, reason: 'NOT_NEEDED' });
   assert.equal(prepared, 0);
 });
 

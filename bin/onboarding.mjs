@@ -1,8 +1,9 @@
 import path from 'node:path';
+import { readFileSync } from 'node:fs';
 import { createInterface } from 'node:readline/promises';
 import { z } from 'zod';
 import { GraphError, hashObject, sha256 } from '../scripts/ai-graph/lib/io.mjs';
-import { ProjectProfileSchema, loadProjectProfile, projectProfileHash, hasOnboardingConsent, onboardingConsentHash } from '../scripts/ai-graph/lib/project.mjs';
+import { ProjectProfileSchema, discoverProjectChecks, loadProjectProfile, projectProfileHash, hasOnboardingConsent, onboardingConsentHash } from '../scripts/ai-graph/lib/project.mjs';
 import { defaultProvider } from '../scripts/ai-graph/lib/platform.mjs';
 import { acquireUninstallGuard } from '../scripts/ai-graph/lib/lifecycle.mjs';
 import { readIntegrationTarget, replaceIntegrationFile } from '../scripts/ai-graph/lib/integration.mjs';
@@ -73,7 +74,7 @@ export async function collectOnboarding(root, options = {}, terminal = {}) {
   };
   try {
     output.write(`\n${paint(output, '1;38;5;99', 'Flowcairn')} ${paint(output, '2', '· от задачи до проверенного результата')}\n`);
-    output.write(`${paint(output, '38;5;245', 'Ответьте на четыре коротких вопроса. Код не изменится до согласования плана.')}\n`);
+    output.write(`${paint(output, '38;5;245', 'Ответьте на пять коротких вопросов. Код не изменится до согласования плана.')}\n`);
     step(output, 1, 'Как Flowcairn будет работать с AI');
     const detected = inspectHarnesses().filter((item) => item.detected).map((item) => item.label);
     if (detected.length) output.write(`${paint(output, '38;5;245', `Обнаружены AI-клиенты: ${detected.join(', ')}.`)}\n`);
@@ -111,7 +112,26 @@ export async function collectOnboarding(root, options = {}, terminal = {}) {
     if (!['keep','add'].includes(testPolicy)) fail('ONBOARDING_CHOICE', 'Выберите подход к тестам из списка.');
     const yes = async (text) => ['да', 'yes'].includes((await ask(text, 'нет')).toLowerCase());
     const coverage = options.coverage ?? (advanced ? await yes('Нужно измерять покрытие тестами? [да / нет; Enter — нет]: ') : false);
-    step(output, 4, 'Согласуйте границы работы');
+    step(output, 4, 'Как запускать проверки проекта');
+    let discoveredChecks = { checks: [], checkScripts: {} };
+    try { discoveredChecks = discoverProjectChecks(JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'))); } catch { /* Init validates package.json before writing. */ }
+    const listed = discoveredChecks.checks.map((id) => `${id} → ${discoveredChecks.checkScripts[id]}`).join(', ');
+    output.write(`${paint(output, '38;5;245', listed ? `Найдены: ${listed}.` : 'Подходящих scripts не найдено.')}\n`);
+    output.write(`${paint(output, '38;5;99', '[1]')} Не запускать scripts автоматически — безопасный старт\n`);
+    output.write(`${paint(output, '38;5;99', '[2]')} Docker — изолированные проверки\n`);
+    output.write(`${paint(output, '38;5;99', '[3]')} Доверенный локальный проект — scripts получат права вашей учетной записи\n`);
+    const rawCheckMode = options['check-mode'] ?? await ask('Режим проверок [1]: ', 'none');
+    const checkMode = ({ '1': 'none', '2': 'hardened', '3': 'trusted-local' })[rawCheckMode] ?? rawCheckMode;
+    if (!['none', 'hardened', 'trusted-local'].includes(checkMode))
+      fail('ONBOARDING_CHOICE', 'Выберите способ запуска проверок из списка.');
+    if (checkMode !== 'none' && !discoveredChecks.checks.length)
+      fail('CHECK_SCRIPT_MISSING', 'В проекте нет conventional scripts для выбранного режима проверок.');
+    const trustedLocalConsent = checkMode === 'trusted-local'
+      ? await yes(`Подтверждаете локальный запуск: ${listed}? [да / нет; Enter — нет]: `)
+      : false;
+    if (checkMode === 'trusted-local' && !trustedLocalConsent)
+      fail('CHECK_LOCAL_CONSENT', 'Без отдельного согласия trusted-local не включается.');
+    step(output, 5, 'Согласуйте границы работы');
     output.write(`${paint(output, '38;5;245', 'Flowcairn прочитает только разрешенные файлы проекта. Изменения начнутся только после вашего согласования плана.')}\n`);
     const readConsent = options['read-consent'] ?? await yes('Разрешить чтение проекта для подготовки плана? [да / нет; Enter — нет]: ');
     output.write(`${paint(output, '38;5;245', 'Ваши правила проекта сохранятся. Flowcairn добавит только слой управления Graph.')}\n`);
@@ -122,7 +142,7 @@ export async function collectOnboarding(root, options = {}, terminal = {}) {
       if (report.findings.length) output.write(`${paint(output, '38;5;245', 'Нашли существующие AI-правила. Они будут сохранены и учтены.')}\n`);
     }
     const consent = options.consent ?? await yes('Подключить Graph к правилам проекта? [да / нет; Enter — нет]: ');
-    return { ...options, provider, model, 'model-mode':mode, ...(reasoning ? {'reasoning-effort':reasoning} : {}), ...review, 'test-policy':testPolicy, coverage, 'read-consent':readConsent, consent };
+    return { ...options, provider, model, 'model-mode':mode, ...(reasoning ? {'reasoning-effort':reasoning} : {}), ...review, 'test-policy':testPolicy, coverage, 'check-mode': checkMode, checks: checkMode === 'none' ? '' : discoveredChecks.checks.join(','), ...(trustedLocalConsent ? {'trusted-local-consent': true} : {}), 'read-consent':readConsent, consent };
   } finally { if (!terminal.prompt) prompt.close(); }
 }
 

@@ -183,7 +183,9 @@ async function defaultAdapters(root) {
   const profile = loadProjectProfile(root);
   const checks = profile.checkMode === 'hardened'
     ? dockerChecks.probeChecks({ root })
-    : runner.probeLocalChecks({ root });
+    : profile.checkMode === 'trusted-local'
+      ? runner.probeLocalChecks({ root })
+      : { available: false, reason: profile.checkMode === 'local' ? 'LOCAL_CHECK_RECONFIGURATION_REQUIRED' : 'CHECKS_NOT_ENABLED' };
   // These modules are bundled trusted runtime code, never a user-supplied import path.
   const rulesFile = new URL('./instructions.mjs', import.meta.url);
   const rules = existsSync(rulesFile) ? await import(rulesFile.href) : null;
@@ -286,7 +288,9 @@ async function defaultAdapters(root) {
     runner: { ...(await runner.probeRunner({ root })), checks },
     execute: (options) =>
       options.node.action.id.startsWith('check-')
-        ? profile.checkMode === 'hardened' ? dockerChecks.runCheck(options) : runner.runRegisteredAction(options)
+        ? profile.checkMode === 'hardened' ? dockerChecks.runCheck(options)
+          : profile.checkMode === 'trusted-local' ? runner.runRegisteredAction(options)
+            : fail('CHECKS_NOT_ENABLED', 'Проверки не включены. Выберите hardened или trusted-local в настройке проекта.')
         : runner.runRegisteredAction(options),
     inspectProcess: (process) =>
       process.kind === 'docker-check'

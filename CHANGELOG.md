@@ -1,5 +1,11 @@
 # Изменения
 
+## 0.2.7 — готовится к публикации
+
+- Закрыл security-блокер local checks: новый проект больше не запускает scripts репозитория автоматически.
+- Добавил безопасный default `checkMode: "none"`, Docker-режим `hardened` и отдельное согласие для `trusted-local`.
+- Синхронизировал версию root `package-lock.json` с `package.json`.
+
 ## 0.2.6 — готовится к публикации
 
 - Обычные `typecheck`, `lint`, `test` и `build` теперь выполняются в выделенной Git worktree и не требуют Docker.

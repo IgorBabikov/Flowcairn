@@ -30,7 +30,7 @@ function fixture(t) {
 }
 test('strict portable project profile does not require a product layout', (t) => {
   const root = fixture(t);
-  assert.deepEqual(loadProjectProfile(root), { ...profile, checkMode: 'local' });
+  assert.deepEqual(loadProjectProfile(root), { ...profile, checkMode: 'none' });
   assert.deepEqual(projectContextPaths(root), []);
   assert.equal(projectProfileHash(root).length, 64);
   assert.notEqual(RUNTIME_ROOT, root);

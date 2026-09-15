@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, lstatSync, mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, lstatSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { prepareToolchain } from './lib/toolchain.mjs';
 import { probeLocalChecks, runRegisteredAction } from './lib/runner.mjs';
+import { trustedLocalChecksHash } from './lib/project.mjs';
 
 function canonicalJson(value) {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
@@ -30,7 +31,7 @@ test('local checks execute only a profile-bound script in the allocated worktree
   writeFileSync(path.join(root, 'package-lock.json'), '{"lockfileVersion":3}\n');
   writeFileSync(path.join(root, '.flowcairn.json'), JSON.stringify({
     version: 1, integrationBranch: 'main', packageManager: 'npm', contextPaths: [],
-    checks: ['tests'], checkMode: 'local', checkScripts: { tests: 'test' }, outputPaths: [],
+    checks: ['tests'], checkMode: 'trusted-local', checkScripts: { tests: 'test' }, outputPaths: [],
     manifests: ['package.json', 'package-lock.json'], ai: { provider: 'openai', model: 'fixture-model' },
   }) + '\n');
   git('add', '.'); git('commit', '-m', 'fixture');
@@ -39,6 +40,11 @@ test('local checks execute only a profile-bound script in the allocated worktree
   mkdirSync(path.join(graph, 'runner-tickets'), { recursive: true, mode: 0o700 });
   mkdirSync(worktrees, { recursive: true, mode: 0o700 });
   chmodSync(path.join(root, '.ai-orchestrator'), 0o700); chmodSync(graph, 0o700); chmodSync(worktrees, 0o700);
+  const profile = JSON.parse(readFileSync(path.join(root, '.flowcairn.json'), 'utf8'));
+  writeFileSync(path.join(root, '.ai-orchestrator', 'flowcairn-install.json'), JSON.stringify({
+    tool: 'flowcairn', owner: 'flowcairn-12345678-1234-4123-8123-123456789abc',
+    trustedLocalChecksHash: trustedLocalChecksHash(root, profile),
+  }), { mode: 0o600 });
   const worktree = path.join(worktrees, 'task-1');
   git('worktree', 'add', '--detach', worktree, 'HEAD');
   assert.equal(lstatSync(path.join(root, 'package.json')).nlink, 1);

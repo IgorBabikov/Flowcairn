@@ -8,7 +8,8 @@ Flowcairn из текущего `main` — локальный инструмен
 | --- | --- | --- |
 | Codex adapter | macOS, Codex CLI `0.145.0`, настроенная сессия, доступная модель | Изоляция зависит от поддерживаемых CLI permissions и macOS sandbox; другие версии/ОС не обещаются |
 | OpenAI API adapter | Linux или macOS как целевые платформы, собственный API-ключ, доступная модель | Tool-free адаптер; реальный внешний AI E2E на Linux пока не подтвержден |
-| Checks, обычный режим | Node 22, npm/pnpm/Yarn 4 и существующие project scripts | Scripts запускаются в отдельной worktree, но это не системная песочница от кода проекта и зависимостей |
+| Checks, новый проект | Не запускаются автоматически | План и AI-этапы не подтверждают выполнение project scripts |
+| Checks, `trusted-local` | Node 22, явное согласие, npm/pnpm/Yarn 4 и существующие project scripts | Scripts запускаются с правами пользователя; режим только для известного кода |
 | Checks, усиленный режим | Docker Engine, подготовленный образ, npm/pnpm/Yarn 4 project scripts | Container/unit tests не заменяют проверку конкретного приложения и его окружения |
 | UI | Современный браузер, локальная session-ссылка | Только loopback control plane; не многопользовательский удаленный сервис |
 | Windows | WSL2 на Linux filesystem как целевая среда | Нативный Windows запрещен; реальный WSL2 acceptance пока не выполнен |

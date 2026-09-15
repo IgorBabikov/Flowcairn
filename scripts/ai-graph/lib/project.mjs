@@ -79,9 +79,10 @@ export const ProjectProfileSchema = z.strictObject({
     .array(checkId)
     .max(4)
     .refine((values) => new Set(values).size === values.length),
-  // Local worktree checks are the default. Hardened checks remain an explicit
-  // optional backend because they need Docker/Podman or a remote sandbox.
-  checkMode: z.enum(['local', 'hardened']).default('local'),
+  // New projects do not execute repository scripts until the owner selects an
+  // execution boundary. `local` remains readable only to block legacy profiles
+  // and force a conscious migration to `trusted-local`.
+  checkMode: z.enum(['none', 'trusted-local', 'hardened', 'local']).default('none'),
   checkScripts: z
     .object({
       typecheck: checkScript.optional(),
@@ -299,6 +300,17 @@ export function onboardingConsentHash(root, profile) {
   return hashObject({ root: realpathSync(root), profile });
 }
 
+/** A local script consent binds the exact registered names, not task prose. */
+export function trustedLocalChecksHash(root, profile) {
+  return hashObject({
+    root: realpathSync(root),
+    mode: 'trusted-local',
+    packageManager: profile.packageManager,
+    checks: profile.checks,
+    checkScripts: profile.checkScripts ?? {},
+  });
+}
+
 export function hasOnboardingConsent(root, profile = loadProjectProfile(root)) {
   if (profile.onboarding?.readConsent !== true) return false;
   try {
@@ -313,6 +325,24 @@ export function hasOnboardingConsent(root, profile = loadProjectProfile(root)) {
       const value = JSON.parse(readFileSync(fd, 'utf8'));
       return value.tool === 'flowcairn' && /^flowcairn-[a-f0-9-]+$/.test(value.owner ?? '') &&
         value.readConsentHash === onboardingConsentHash(root, profile);
+    } finally { closeSync(fd); }
+  } catch { return false; }
+}
+
+export function hasTrustedLocalChecksConsent(root, profile = loadProjectProfile(root)) {
+  if (profile.checkMode !== 'trusted-local' || !profile.checks.length) return false;
+  try {
+    const directory = path.join(realpathSync(root), '.ai-orchestrator');
+    const stat = lstatSync(directory);
+    if (!stat.isDirectory() || stat.isSymbolicLink() || (stat.mode & 0o077)) return false;
+    const file = path.join(directory, 'flowcairn-install.json');
+    const fd = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      const entry = fstatSync(fd);
+      if (!entry.isFile() || entry.nlink !== 1 || entry.size > 1024 * 1024 || (entry.mode & 0o077)) return false;
+      const value = JSON.parse(readFileSync(fd, 'utf8'));
+      return value.tool === 'flowcairn' && /^flowcairn-[a-f0-9-]+$/.test(value.owner ?? '') &&
+        value.trustedLocalChecksHash === trustedLocalChecksHash(root, profile);
     } finally { closeSync(fd); }
   } catch { return false; }
 }

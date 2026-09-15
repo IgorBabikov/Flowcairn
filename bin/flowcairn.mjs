@@ -29,6 +29,7 @@ import {
   PACKAGE_MANAGER_LOCKS,
   packageManagerLock,
   discoverProjectChecks,
+  trustedLocalChecksHash,
   PROJECT_CHECK_IDS,
   validatePackageManagerProject,
 } from '../scripts/ai-graph/lib/project.mjs';
@@ -69,6 +70,7 @@ const VALUE_OPTIONS = new Set([
   'manifests',
   'context',
   'checks',
+  'check-mode',
   'outputs',
   'codex-path',
   'file',
@@ -94,7 +96,7 @@ const VALUE_OPTIONS = new Set([
   'skill-actions',
   'skill-scope',
 ]);
-const BOOLEAN_OPTIONS = new Set(['json', 'dry-run', 'help', 'snapshot', 'no-open', 'consent', 'read-consent', 'coverage']);
+const BOOLEAN_OPTIONS = new Set(['json', 'dry-run', 'help', 'snapshot', 'no-open', 'consent', 'read-consent', 'coverage', 'trusted-local-consent']);
 
 function fail(code, message) {
   throw new GraphError(code, message);
@@ -391,7 +393,14 @@ export function initializeProject(input, options = {}) {
     );
   validatePackageManagerProject(root, manager, pkg);
   const discoveredChecks = discoverProjectChecks(pkg);
-  const checks = options.checks === undefined ? discoveredChecks.checks : csv(options.checks);
+  const checkMode = options['check-mode'] ?? 'none';
+  if (!['none', 'trusted-local', 'hardened'].includes(checkMode))
+    fail('CHECK_MODE', 'Доступны check-mode: none, hardened или trusted-local.');
+  const checks = options.checks === undefined ? [] : csv(options.checks);
+  if (checkMode === 'none' && checks.length)
+    fail('CHECK_MODE', 'Для project checks выберите hardened или trusted-local.');
+  if (checkMode === 'trusted-local' && checks.length && options['trusted-local-consent'] !== true)
+    fail('CHECK_LOCAL_CONSENT', 'trusted-local запускает scripts проекта с правами пользователя. Повторите с --trusted-local-consent после проверки scripts.');
   for (const check of checks) {
     if (!PROJECT_CHECK_IDS.includes(check) || !discoveredChecks.checkScripts[check])
       fail('CHECK_SCRIPT_MISSING', `Для проверки ${check} нужен существующий script package.json.`);
@@ -405,6 +414,7 @@ export function initializeProject(input, options = {}) {
       packageManager: manager,
       contextPaths: csv(options.context),
       checks,
+      checkMode,
       ...(checks.length ? { checkScripts } : {}),
       outputPaths: csv(options.outputs),
       manifests: discoverManifests(root, pkg, manager, options.manifests),
@@ -479,6 +489,9 @@ export function initializeProject(input, options = {}) {
           owner: `flowcairn-${randomUUID()}`,
           profileHash: sha256(profileText),
           ...(!existingProfile && options['read-consent'] === true ? { readConsentHash: onboardingConsentHash(root, profile) } : {}),
+          ...(profile.checkMode === 'trusted-local' && options['trusted-local-consent'] === true
+            ? { trustedLocalChecksHash: trustedLocalChecksHash(root, profile) }
+            : {}),
           profileOwned: !existingProfile,
           localExcludeBefore: oldExclude,
           localExcludeAfterHash: sha256(exclude),

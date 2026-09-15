@@ -47,7 +47,7 @@ import {
   disposeReviewEvidenceFile,
 } from './review-evidence.mjs';
 import { verifyToolchain } from './toolchain.mjs';
-import { loadProjectProfile, resolveProjectCheckScript } from './project.mjs';
+import { hasTrustedLocalChecksConsent, loadProjectProfile, resolveProjectCheckScript } from './project.mjs';
 import { fingerprintWorkspace } from './workspace.mjs';
 
 const NODE_BINARY = realpathSync(process.execPath);
@@ -454,6 +454,10 @@ function makeLocalCheckCommand({ root, worktree, node, profile, toolchain, depen
 export function probeLocalChecks({ root }) {
   try {
     const profile = loadProjectProfile(root);
+    if (profile.checkMode !== 'trusted-local')
+      return { available: false, reason: profile.checkMode === 'local' ? 'LOCAL_CHECK_RECONFIGURATION_REQUIRED' : 'CHECKS_NOT_ENABLED', mode: 'trusted-local' };
+    if (!hasTrustedLocalChecksConsent(root, profile))
+      return { available: false, reason: 'CHECK_LOCAL_CONSENT_REQUIRED', mode: 'trusted-local' };
     localCheckToolchain(profile);
     for (const id of profile.checks) resolveProjectCheckScript(root, `check-${id}`, profile);
     return { available: true, reason: null, mode: 'local' };
@@ -1041,6 +1045,8 @@ export async function runRegisteredAction({
   const input = parseInputs({ node, task, plan, skills, priorEvidence, reviewEvidence });
   const profile = loadProjectProfile(root);
   const localCheck = ['check-typecheck', 'check-lint', 'check-tests', 'check-build'].includes(action.id);
+  if (localCheck && !hasTrustedLocalChecksConsent(root, profile))
+    fail('CHECK_LOCAL_CONSENT_REQUIRED', 'trusted-local требует подтверждение exact scripts текущего профиля.');
   const allocation = validateAllocation(root, worktree, outputDirectory, localCheck ? 'local' : profile.ai.provider);
   if (action.id.startsWith('check-') && !localCheck)
     fail('RUNNER_CHECK_CONTAINMENT_UNAVAILABLE', 'Незарегистрированная project-проверка не исполняется локально.');

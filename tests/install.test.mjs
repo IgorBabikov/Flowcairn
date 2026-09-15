@@ -81,7 +81,8 @@ test('init dry run has no effects; setup is repeatable and preserves owner instr
   assert.equal(installed.created, true);
   assert.equal(installed.profile.integrationBranch, 'main');
   assert.equal(installed.profile.packageManager, 'npm');
-  assert.deepEqual(installed.profile.checks, ['tests']);
+  assert.deepEqual(installed.profile.checks, []);
+  assert.equal(installed.profile.checkMode, 'none');
   assert.deepEqual(installed.profile.manifests, ['package.json']);
   assert.equal(readFileSync(path.join(root, 'AGENTS.md')).equals(original), true);
   assert.equal(readFileSync(hook, 'utf8'), '#!/bin/sh\nexit 0\n');
@@ -134,7 +135,7 @@ test('task registration works in a clean main repo without tool source or host d
   const snapshot = await createTask(root, task, { run: 'run-first-task' });
   assert.equal(snapshot.status, 'waiting-for-human');
   assert.equal(snapshot.integrity.valid, true);
-  assert.ok(snapshot.nodes.some((node) => node.id === 'tests'));
+  assert.equal(snapshot.nodes.some((node) => node.id === 'tests'), false);
   assert.equal(existsSync(path.join(root, 'scripts/ai-graph')), false);
   assert.equal(existsSync(path.join(root, 'node_modules')), false);
   assert.equal(snapshot.nodes.find((node) => node.id === 'analyze').attempt, 0);
@@ -336,7 +337,7 @@ test('TTY init asks for a model; non-TTY, JSON and dry-run never prompt or write
     const text = bytes.toString();
     transcript += text;
     const replies = [
-      ['ID модели, например', 'configured-test-model'], ['Выбор [1]:', 'keep'],
+      ['ID модели, например', 'configured-test-model'], ['Выбор [1]:', 'keep'], ['Режим проверок [1]:', 'none'],
       ['Разрешить чтение проекта', 'да'], ['Подключить Graph', 'нет'],
     ];
     for (const [marker, answer] of replies) if (text.includes(marker)) setImmediate(() => input.write(answer + '\n'));

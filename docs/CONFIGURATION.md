@@ -9,7 +9,7 @@
 | `packageManager` | `npm`, `pnpm` или поддерживаемый `yarn`; должен соответствовать lockfile проекта |
 | `contextPaths` | Дополнительные разрешенные пути чтения, относительно проекта |
 | `checks` | Обязательные `typecheck`, `lint`, `tests`, `build` |
-| `checkMode` | `local` по умолчанию; `hardened` только для подготовленного Docker-режима |
+| `checkMode` | `none` по умолчанию; `hardened` для Docker-проверок; `trusted-local` только после отдельного согласия |
 | `checkScripts` | Проверенный script проекта для каждой включенной проверки |
 | `outputPaths` | Каталоги/файлы generated outputs; не исходный код |
 | `manifests` | Манифесты и lockfiles для установки зависимостей проверок |
@@ -65,7 +65,7 @@ packages:
 | `tests` | `test` |
 | `build` | `build` |
 
-При `init` Flowcairn выбирает существующий script и сохраняет соответствие в `checkScripts`. Перед проверкой он повторно убеждается, что этот script все еще есть в `package.json`. Task JSON и браузер не могут передать свой executable или argv. Обычный режим запускает script в выделенной worktree; Docker-режим добавляет контейнерную изоляцию. Однако scripts проекта — исполняемый код: прежде чем запускать чужой репозиторий, изучите его происхождение и команды.
+При новом `init` Flowcairn обнаруживает conventional scripts, но не включает и не запускает их. Task JSON и браузер не могут передать свой executable или argv. Для непроверенного проекта выберите `hardened`: Docker запускает только зарегистрированные scripts в контейнере. `trusted-local` запускает exact scripts в отдельной worktree с правами вашей учетной записи, поэтому требует отдельного согласия, привязанного к names scripts и профилю. Не используйте этот режим для чужого кода.
 
 ## Scope, context и outputs
 

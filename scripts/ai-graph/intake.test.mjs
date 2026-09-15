@@ -24,7 +24,7 @@ function fixture(t) {
   writeFileSync(path.join(root, '.gitignore'), 'node_modules/\n');
   writeFileSync(path.join(root, 'AGENTS.md'), '# Правила проекта\n');
   git('add', '.'); git('commit', '-m', 'fixture baseline');
-  const installed = initializeProject(root, { provider: 'openai', model: 'gpt-4.1-mini', checks: 'tests', 'package-manager': 'npm' });
+  const installed = initializeProject(root, { provider: 'openai', model: 'gpt-4.1-mini', checks: 'tests', 'check-mode': 'hardened', 'package-manager': 'npm' });
   return { root, git, profile: installed.profile };
 }
 async function service(root, profile) {
