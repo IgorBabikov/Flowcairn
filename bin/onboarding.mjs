@@ -27,7 +27,7 @@ function paint(output, code, text) {
 }
 
 function step(output, index, title) {
-  output.write(`\n${paint(output, '1;38;5;99', `Шаг ${index} из 4`)} ${paint(output, '1', title)}\n`);
+  output.write(`\n${paint(output, '1;38;5;99', `Шаг ${index} из 5`)} ${paint(output, '1', title)}\n`);
 }
 
 export function inspectOnboarding(root) {

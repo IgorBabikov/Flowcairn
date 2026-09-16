@@ -106,7 +106,8 @@ test('опрос OpenAI фиксирует только явное соглас�
   assert.equal(result['reasoning-effort'],'high');
   assert.equal(result.coverage,false);
   assert.match(text,/OpenAI API требует явный ID модели/);
-  assert.match(text,/Шаг 1 из 4/);
+  assert.match(text,/Шаг 1 из 5/);
+  assert.match(text,/Шаг 5 из 5/);
   assert.match(text,/\x1b\[/);
   assert.doesNotMatch(text,/Codex — macOS/);
   assert.equal(existsSync(path.join(root,'.flowcairn.json')),false);
