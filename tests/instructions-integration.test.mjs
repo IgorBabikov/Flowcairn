@@ -114,8 +114,8 @@ test('activation requires consent and fresh fingerprint; instruction changes inv
   assert.throws(() => readInstructionBundle({ projectRoot: f.root, expectedFingerprint: fingerprint, paths: ['AGENTS.md'] }), { code: 'INSTRUCTION_CHANGED' });
   assert.equal(existsSync(path.join(f.root, INTEGRATION_JOURNAL)), false);
 });
-test('managed edits, duplicate markers and orphan blocks refuse without deletion', (t) => {
-  const f = fixture(t); f.activate(); const original = f.read('AGENTS.md');
+test('managed edits and duplicate markers refuse without deletion; exact orphan blocks are adopted', (t) => {
+  const f = fixture(t); f.write('AGENTS.md', 'owner\n'); f.activate(); const original = f.read('AGENTS.md');
   f.write('AGENTS.md', original.toString().replace('Flowcairn активирован', 'User edited'));
   assert.equal(inspectIntegration({ projectRoot: f.root }).status, 'modified');
   assert.throws(f.uninstall, { code: 'INTEGRATION_MODIFIED' });
@@ -123,8 +123,12 @@ test('managed edits, duplicate markers and orphan blocks refuse without deletion
   f.write('AGENTS.md', Buffer.concat([original, original]));
   assert.throws(f.uninstall, { code: 'INTEGRATION_CONFLICT' });
   f.write('AGENTS.md', original); rmSync(path.join(f.root, INTEGRATION_JOURNAL));
-  assert.throws(f.activate, { code: 'INTEGRATION_CONFLICT' });
-  assert.throws(f.uninstall, { code: 'INTEGRATION_CONFLICT' });
+  const adopted = f.activate();
+  assert.equal(adopted.status, 'active');
+  assert.equal(adopted.adopted, true);
+  f.uninstall();
+  assert.match(f.read('AGENTS.md').toString(), /^owner/);
+  assert.doesNotMatch(f.read('AGENTS.md').toString(), /FLOWCAIRN:WORKFLOW/);
 });
 test('symlink files, parents and hardlinks are not read or overwritten', (t) => {
   const f = fixture(t), outside = fixture(t); outside.write('AGENTS.md', 'outside');

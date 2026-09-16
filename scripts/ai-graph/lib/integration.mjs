@@ -100,6 +100,42 @@ export function withIntegrationLock(root, callback) {
 export function writeIntegrationJournal(root, value, expected) {
   return replaceIntegrationFile(root, INTEGRATION_JOURNAL, Buffer.from(`${JSON.stringify(value, null, 2)}\n`), expected, 16384);
 }
+
+function currentWorkflowBlock(bytes) {
+  const block = integrationBlock(bytes);
+  if (!block) return null;
+  const text = bytes.toString('utf8');
+  const start = text.indexOf(START);
+  const markerEnd = text.indexOf('\n', start) + 1;
+  const end = text.indexOf(END, start);
+  if (start < 0 || markerEnd <= 0 || end < markerEnd || text.slice(markerEnd, end) !== WORKFLOW_PAYLOAD) return null;
+  return block;
+}
+
+function adoptOrphanIntegration(root, candidates) {
+  if (candidates.length !== 1) return null;
+  const { target, data, block } = candidates[0];
+  // Keep every byte before the managed marker untouched. The adopted journal
+  // owns only the exact Flowcairn block, so recovery cannot delete a user's
+  // separator or surrounding rules when the original journal is missing.
+  const before = data.bytes.subarray(0, block.start);
+  const owned = data.bytes.subarray(block.start, block.end);
+  const journal = {
+    version: 1,
+    owner: 'flowcairn',
+    phase: 'complete',
+    target,
+    createdFile: false,
+    separator: '',
+    blockHash: sha256(owned),
+    beforeHash: sha256(before),
+    afterHash: data.sha256,
+  };
+  writeIntegrationJournal(root, journal, null);
+  const status = inspectIntegration({ projectRoot: root });
+  if (status.status !== 'active') instructionError('INTEGRATION_VERIFY_FAILED', 'Existing Flowcairn block was not adopted safely.');
+  return { ...status, changed: true, adopted: true };
+}
 export function ownedBlockRange(bytes, journal) {
   const block = integrationBlock(bytes);
   if (!block) instructionError('INTEGRATION_MODIFIED', 'Owned managed block is missing; no user data was removed.');
@@ -139,6 +175,16 @@ export function activateIntegration({ projectRoot, consent = false, expectedFing
       if (status.status !== 'active') instructionError('INTEGRATION_CONFLICT', 'Existing integration is modified, shadowed or incomplete; preserve it and resolve first.');
       return { ...status, changed: false, previousFingerprint: before.fingerprint, fingerprint: status.instructions.fingerprint };
     }
+    const orphanCandidates = [];
+    for (const target of ['AGENTS.md', 'AGENTS.override.md']) {
+      const current = readIntegrationTarget(root, target);
+      if (!current) continue;
+      const block = currentWorkflowBlock(current.bytes);
+      if (block) orphanCandidates.push({ target, data: current, block });
+      else if (integrationBlock(current.bytes)) instructionError('INTEGRATION_CONFLICT', 'Existing managed block belongs to another or modified Flowcairn integration.');
+    }
+    const adopted = adoptOrphanIntegration(root, orphanCandidates);
+    if (adopted) return { ...adopted, previousFingerprint: before.fingerprint, fingerprint: adopted.instructions.fingerprint, invalidatesActivePlans: true };
     // One adapter only. CLAUDE/Cursor/Copilot files are observed, never overwritten or duplicated.
     const target = exists(root, 'AGENTS.override.md') ? 'AGENTS.override.md' : 'AGENTS.md';
     for (const name of ['AGENTS.md', 'AGENTS.override.md']) {
