@@ -8,6 +8,44 @@ function workflow() {
   state.task = {...state.task,title:'Форма заявки',description:'Создать форму заявки со строгой валидацией полей.',taskNumber:'FORM-12'};
   return state;
 }
+
+test('ready analysis shows a permitted start action or an explicit executor problem', async ({ page }, testInfo) => {
+  const current = workflow();
+  current.phase = 'planning'; current.status = 'ready'; current.gates = [];
+  current.nodes = current.nodes.slice(0, 1).map(node => ({ ...node, status: 'ready', action: { id: 'ai-analyze', kind: 'analysis' }, capabilities: { ...allDenied, run: allowed } }));
+  current.capabilities = { ...allDenied, run: allowed };
+  const fixture = await mockApi(page, current);
+  await page.goto(`/#session=${token}`);
+  await expect(page.getByRole('button', { name: 'Начать анализ', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Начать анализ', exact: true }).click();
+  expect(fixture.calls.filter(call => call.action === 'run')).toHaveLength(1);
+  const reason = 'RUNNER_TOOLCHAIN_INVALID';
+  const stopped = fixture.current();
+  stopped.status = 'ready'; stopped.runner.ai = { available: false, reason };
+  stopped.capabilities = { ...allDenied, run: { allowed: false, reason } };
+  stopped.nodes = stopped.nodes.map(node => ({ ...node, status: 'ready', capabilities: allDenied }));
+  stopped.revision += 1;
+  for (const [name, width, height] of [['desktop', 1440, 900], ['mobile', 390, 844]]) {
+    await page.setViewportSize({ width, height });
+    await page.goto(`/#session=${token}`);
+    await expect(page.getByRole('heading', { name: 'Работа приостановлена', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Начать анализ', exact: true })).toHaveCount(0);
+    await expect(page.locator('.workflow-summary')).toContainText('Инструменты исполнителя не прошли проверку');
+    await page.locator('.health-details summary').click();
+    const health = page.locator('.run-health');
+    await health.scrollIntoViewIfNeeded();
+    const fits = await health.evaluate(element => {
+      const box = element.getBoundingClientRect();
+      return [...element.querySelectorAll('dt,dd')].every(item => {
+        const bounds = item.getBoundingClientRect();
+        return bounds.left >= box.left && bounds.right <= box.right + 1;
+      });
+    });
+    expect(fits).toBe(true);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath(`runner-health-${name}.png`), fullPage: true });
+  }
+});
 test('one approval binds the displayed plan without a manual run', async ({page}) => {
   const fixture = await mockApi(page, workflow());
   await page.goto(`/#session=${token}`);

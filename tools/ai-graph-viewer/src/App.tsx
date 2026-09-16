@@ -1428,7 +1428,7 @@ export function App() {
           <div className="detail-scroll">
             {snapshot?.workflow === 'autonomous' ? (
               <>
-                <div hidden={tab !== 'overview' && tab !== 'plan'}><WorkflowPanel key={snapshot.runId} snapshot={snapshot} plan={plan} busy={busy || Boolean(pending)} onApprove={approveWorkflow} onRevise={reviseWorkflow} /></div>
+                <div hidden={tab !== 'overview' && tab !== 'plan'}><WorkflowPanel key={snapshot.runId} snapshot={snapshot} plan={plan} busy={busy || Boolean(pending)} onApprove={approveWorkflow} onRevise={reviseWorkflow} onStart={() => void execute('run')} onSetup={() => setShowSetup(true)} /></div>
                 {tab === 'overview' && autonomousRecoveryNode && (
                   <NodeDetails
                     node={autonomousRecoveryNode}

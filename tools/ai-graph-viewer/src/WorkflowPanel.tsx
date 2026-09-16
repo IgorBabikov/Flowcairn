@@ -3,19 +3,26 @@ import type { GateSnapshot, GraphPlan, Snapshot } from './contracts';
 import { humanText, nodeTitle, StatusIcon } from './presentation';
 
 /** Пользователь видит только подтвержденное исполнителем состояние. */
-export function WorkflowPanel({ snapshot, plan, busy, onApprove, onRevise }: {
+export function WorkflowPanel({ snapshot, plan, busy, onApprove, onRevise, onStart, onSetup }: {
   snapshot: Snapshot;
   plan: GraphPlan | null;
   busy: boolean;
   onApprove: (gate: GateSnapshot) => void;
   onRevise: (feedback: string) => void;
+  onStart: () => void;
+  onSetup: () => void;
 }) {
   const [feedback, setFeedback] = useState('');
   const gate = snapshot.gates.find(item => item.type === 'provider-consent') ?? snapshot.gates.find(item => item.type === 'approve-plan');
   const gateNode = snapshot.nodes.find(node => node.id === gate?.nodeId);
   const approved = Boolean(snapshot.nodes.find(node => node.id === 'approve-plan' && node.status === 'passed'));
   const done = snapshot.integrity.valid && snapshot.status === 'passed' && snapshot.completion === 'ready-for-review' && !snapshot.failureReason;
-  const blocked = Boolean(snapshot.failureReason) || ['failed', 'uncertain', 'stale'].includes(snapshot.status) || !snapshot.integrity.valid;
+  const readyWithoutGate = snapshot.status === 'ready' && !gate;
+  const waitingToStart = snapshot.phase === 'planning' && readyWithoutGate;
+  const unavailableReason = readyWithoutGate && snapshot.capabilities.run?.allowed === false
+    ? humanText(snapshot.capabilities.run.reason || snapshot.runner?.ai.reason) || 'Исполнитель сейчас недоступен.'
+    : null;
+  const blocked = Boolean(snapshot.failureReason || unavailableReason) || ['failed', 'uncertain', 'stale'].includes(snapshot.status) || !snapshot.integrity.valid;
   const current = snapshot.nodes.find(node => node.id === snapshot.activeNodeId) ?? snapshot.nodes.find(node => ['failed', 'uncertain', 'running'].includes(node.status));
   const reviewable = Boolean(plan && gate && snapshot.integrity.valid && gate.planHash === snapshot.planHash);
   const changes = [...new Set(snapshot.nodes.flatMap(node => node.changedFiles))];
@@ -24,11 +31,18 @@ export function WorkflowPanel({ snapshot, plan, busy, onApprove, onRevise }: {
     <h2>{done ? 'Готово к вашему ревью' : blocked ? 'Работа приостановлена' : gate?.type === 'provider-consent' ? 'Согласие на передачу данных' : gate ? 'План работы' : approved ? 'Выполняем задачу' : 'Разбираемся в задаче'}</h2>
     <p className="workflow-summary" role="status">{done
       ? 'Реализация и проверки завершены. Проверьте изменения, затем создайте коммит и PR.'
-      : blocked ? humanText(snapshot.failureReason || current?.reason || snapshot.integrity.reason) || 'Откройте отчеты этапа: продолжение требует проверки.'
+      : blocked ? humanText(snapshot.failureReason || unavailableReason || current?.reason || snapshot.integrity.reason) || 'Откройте отчеты этапа: продолжение требует проверки.'
       : gate?.type === 'provider-consent' ? 'Проверьте, какие данные могут быть переданы выбранному AI. Без согласия передача не начнется.'
       : gate ? 'Проверьте шаги и границы изменений. Можно дополнить план перед разработкой.'
       : approved ? 'Реализация, проверки и исправления пройдут автоматически. Можно вернуться к результату позже.'
+      : waitingToStart ? 'Анализ еще не начался. Начните работу, чтобы получить план для согласования.'
       : 'Изучаем проект и требования. Затем покажем план для согласования.'}</p>
+    {unavailableReason && <div className="workflow-start-help">
+      <p>Проверьте выбранный AI-клиент в настройках проекта. После исправления установки перезапустите Flowcairn.</p>
+      <button className="button" type="button" onClick={onSetup}>Настройки проекта</button>
+    </div>}
+    {waitingToStart && !blocked && snapshot.capabilities.run?.allowed &&
+      <button className="button primary" type="button" disabled={busy} onClick={onStart}>Начать анализ</button>}
     {current && !done && !blocked && <p className="current-stage"><StatusIcon status={current.status} /><span>{nodeTitle(current, 'ru')}</span></p>}
     <ol className="workflow-steps">
       {snapshot.nodes.filter(node => node.action.kind !== 'gate').map(node => <li key={node.id}>
