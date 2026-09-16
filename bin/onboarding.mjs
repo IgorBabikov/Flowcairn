@@ -16,7 +16,7 @@ import { inspectCodexInstallation } from '../scripts/ai-graph/lib/runner.mjs';
 const effort = z.enum(['low', 'medium', 'high', 'xhigh']);
 const SetupSchema = z.strictObject({
   profileHash: z.string().regex(/^[a-f0-9]{64}$/).nullable(),
-  provider: z.enum(['codex', 'openai', 'claude', 'cursor']), model: ProjectProfileSchema.shape.ai.shape.model,
+  provider: z.enum(['codex', 'claude', 'cursor']), model: ProjectProfileSchema.shape.ai.shape.model,
   modelMode: z.enum(['provider', 'manual', 'auto']), reasoningEffort: effort,
   providerPath: z.string().max(1024).optional(), providerVersion: z.string().max(160).optional(),
   reviewModel: ProjectProfileSchema.shape.ai.shape.model.optional(), reviewReasoningEffort: effort.optional(),
@@ -49,7 +49,9 @@ export function inspectOnboarding(root) {
       label: harness?.label ?? id,
       supported: probe.available,
       state: probe.available ? 'available' : 'not-detected',
-      reason: probe.available ? null : `${harness?.label ?? id} не найден или не прошел безопасную проверку версии.`,
+      reason: probe.available ? null : probe.reason === 'PROVIDER_AUTH_REQUIRED'
+        ? `${harness?.label ?? id}: войдите в CLI и повторите проверку.`
+        : `${harness?.label ?? id} не найден или не прошел безопасную проверку версии.`,
       ...(probe.available ? { executable: probe.executable, version: probe.version } : {}),
     };
   };
@@ -58,7 +60,6 @@ export function inspectOnboarding(root) {
     profileHash: profile ? projectProfileHash(root) : null,
     providers: [
       (() => { const cli = inspectCodexInstallation(profile?.ai ?? {}); return { id: 'codex', label: 'Codex', supported: cli.available, state: cli.available ? 'available' : 'not-detected', reason: cli.reason }; })(),
-      { id: 'openai', label: 'OpenAI API', supported: true, state: 'available', reason: null },
       externalProvider('claude'),
       externalProvider('cursor'),
     ],
@@ -103,15 +104,16 @@ export async function collectOnboarding(root, options = {}, terminal = {}) {
     const detected = harnesses.filter((item) => item.detected).map((item) => item.label);
     if (detected.length) output.write(`${paint(output, '38;5;245', `Обнаружены AI-клиенты: ${detected.join(', ')}.`)}\n`);
     output.write(`${paint(output, '38;5;99', '[1]')} Codex — использовать настроенный Codex\n`);
-    output.write(`${paint(output, '38;5;99', '[2]')} OpenAI API — использовать ваш ключ из окружения\n`);
-    const externalChoices = /** @type {Array<'claude'|'cursor'>} */ (['claude', 'cursor']).map((id) => ({ id, probe: probeExternalProvider(id, { executable: harnesses.find((item) => item.id === id)?.executable }) }));
-    externalChoices.forEach(({ id, probe }, index) => output.write(`${paint(output, '38;5;99', `[${index + 3}]`)} ${id === 'claude' ? 'Claude Code' : 'Cursor'} — ${probe.available ? 'использовать выбранный CLI' : 'нужен установленный и проверенный CLI'}\n`));
+    const externalChoices = /** @type {Array<'claude'|'cursor'>} */ (['claude', 'cursor']).map((id) => ({ id, probe: probeExternalProvider(id, { executable: options.provider === id ? options['provider-path'] : harnesses.find((item) => item.id === id)?.executable }) }));
+    externalChoices.forEach(({ id, probe }, index) => output.write(`${paint(output, '38;5;99', `[${index + 2}]`)} ${id === 'claude' ? 'Claude Code' : 'Cursor'} — ${probe.available ? 'использовать выбранный CLI' : probe.reason === 'PROVIDER_AUTH_REQUIRED' ? 'нужно войти в CLI' : 'нужен установленный и проверенный CLI'}\n`));
     const providerAnswer = options.provider ?? await ask(`Выбор [${defaultProvider() === 'codex' ? '1' : '2'}]: `, defaultProvider());
-    const provider = ({'1':'codex','2':'openai', ...Object.fromEntries(externalChoices.map(({id}, index) => [String(index + 3), id]))})[providerAnswer] ?? providerAnswer;
-    if (!['codex','openai', ...externalChoices.map(({ id }) => id)].includes(provider)) fail('PROVIDER_UNSUPPORTED', 'Выберите AI-клиент из списка.');
+    const provider = ({'1':'codex', ...Object.fromEntries(externalChoices.map(({id}, index) => [String(index + 2), id]))})[providerAnswer] ?? providerAnswer;
+    if (!['codex', ...externalChoices.map(({ id }) => id)].includes(provider)) fail('PROVIDER_UNSUPPORTED', 'Выберите Codex, Claude Code или Cursor из списка.');
     const external = externalChoices.find((item) => item.id === provider)?.probe;
     if (['claude', 'cursor'].includes(provider) && !external?.available)
-      fail('PROVIDER_TOOLCHAIN_INVALID', `${provider === 'claude' ? 'Claude Code' : 'Cursor Agent'} не найден или не прошел проверку версии. Установите официальный CLI и повторите.`);
+      fail(external?.reason === 'PROVIDER_AUTH_REQUIRED' ? 'PROVIDER_AUTH_REQUIRED' : 'PROVIDER_TOOLCHAIN_INVALID', external?.reason === 'PROVIDER_AUTH_REQUIRED'
+        ? `${provider === 'claude' ? 'Claude Code' : 'Cursor'} не авторизован. Войдите в CLI и повторите.`
+        : `${provider === 'claude' ? 'Claude Code' : 'Cursor Agent'} не найден или не прошел проверку версии. Установите официальный CLI и повторите.`);
     if (provider === 'codex' && process.platform !== 'darwin') fail('PROVIDER_PLATFORM', 'Исполнение Codex пока доступно только на macOS.');
     if (provider === 'codex') {
       const cli = inspectCodexInstallation();
@@ -119,13 +121,11 @@ export async function collectOnboarding(root, options = {}, terminal = {}) {
     }
     const advanced = options.advanced === true;
     step(output, 2, 'Как выбирать модель');
-    const providerManaged = ['codex', 'claude', 'cursor'].includes(provider) && !advanced && options['model-mode'] === undefined;
+    const providerManaged = ['claude', 'cursor'].includes(provider) || (provider === 'codex' && !advanced && options['model-mode'] === undefined);
     if (providerManaged)
-      output.write(`${paint(output, '38;5;245', 'Flowcairn использует настройки отдельного CLI. Выбор активного чата в VS Code не наследуется.')}\n`);
+      output.write(`${paint(output, '38;5;245', provider === 'codex' ? 'Flowcairn использует настройки отдельного CLI. Выбор активного чата в VS Code не наследуется.' : 'Flowcairn использует настроенный CLI. Модель и доступ определяет выбранный клиент.') }\n`);
     else if (['codex', 'claude', 'cursor'].includes(provider))
       output.write(`${paint(output, '38;5;245', 'Укажите модель и усиление, только если хотите переопределить настройки Codex для Flowcairn.')}\n`);
-    else
-      output.write(`${paint(output, '38;5;245', 'OpenAI API требует явный ID модели: он не наследует выбор из интерфейса AI.')}\n`);
     const mode = providerManaged ? 'provider' : advanced
       ? await choice('model-mode', 'Режим: provider — настройки Codex, manual — одна модель, auto — отдельные настройки ревью [Enter — manual]: ', ['provider','manual','auto'], 'manual')
       : options['model-mode'] ?? 'manual';
@@ -215,9 +215,18 @@ function sameProfileStructure(previous, next) {
 /** Изменение доступно только локальному CLI после остановки исполнителей. */
 export async function saveOnboarding(root, input, { dryRun = false } = {}) {
   const value = SetupSchema.parse(input);
+  const externalProvider = value.provider === 'claude' || value.provider === 'cursor' ? value.provider : null;
   if (value.provider === 'codex' && process.platform !== 'darwin') fail('PROVIDER_PLATFORM', 'Codex пока поддерживается только на macOS.');
-  if (['claude', 'cursor'].includes(value.provider) && (!value.providerPath || !value.providerVersion || value.modelMode !== 'provider' || value.model !== 'provider-default'))
+  if (externalProvider && (!value.providerPath || !value.providerVersion || value.modelMode !== 'provider' || value.model !== 'provider-default'))
     fail('PROVIDER_PIN_REQUIRED', 'Claude Code/Cursor используют только проверенный CLI с наследуемой моделью. Повторите setup.');
+  if (externalProvider) {
+    const probe = probeExternalProvider(externalProvider, { executable: value.providerPath });
+    if (!probe.available || probe.version !== value.providerVersion)
+      if (probe.reason === 'PROVIDER_AUTH_REQUIRED')
+        fail('PROVIDER_AUTH_REQUIRED', `${externalProvider === 'claude' ? 'Claude Code' : 'Cursor'} не авторизован. Войдите в CLI и повторите.`);
+    if (!probe.available || probe.version !== value.providerVersion)
+      fail('PROVIDER_TOOLCHAIN_INVALID', 'Выбранный CLI изменился или не прошел безопасную проверку. Повторите setup.');
+  }
   if (/^(?:sk-|sess-)/i.test(value.model) || /^(?:sk-|sess-)/i.test(value.reviewModel ?? '')) fail('AI_CONFIG', 'Укажите ID модели, не ключ.');
   if (value.modelMode === 'manual' && ((value.reviewModel && value.reviewModel !== value.model) || (value.reviewReasoningEffort && value.reviewReasoningEffort !== value.reasoningEffort))) fail('AI_CONFIG', 'Ручной режим закрепляет одну модель и усиление.');
   if (value.profileHash !== projectProfileHash(root)) fail('ONBOARDING_STALE', 'Профиль изменился. Повторите настройку.');

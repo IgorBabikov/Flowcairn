@@ -16,7 +16,7 @@ export function isWsl(kernel = release()) {
 
 export function defaultProvider(platform = process.platform) {
   if (platform === 'darwin') return 'codex';
-  if (platform === 'linux') return 'openai';
+  if (platform === 'linux') return 'claude';
   throw new GraphError('PLATFORM', 'Native Windows не поддерживается; используйте Linux в WSL2.');
 }
 

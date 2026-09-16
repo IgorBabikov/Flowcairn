@@ -58,7 +58,6 @@ const CODEX_VERSIONS = ['0.145.0', '0.154.0'];
 const CODEX_VERSION = 'codex-cli 0.154.0';
 const PNPM_VERSION = '11.8.0';
 const SANDBOX_EXEC = '/usr/bin/sandbox-exec';
-const OPENAI_WORKER_FILE = fileURLToPath(new URL('./openai-worker.mjs', import.meta.url));
 const EXTERNAL_WORKER_FILE = fileURLToPath(new URL('./external-worker.mjs', import.meta.url));
 const SUPERVISOR_FILE = fileURLToPath(new URL('./supervisor.mjs', import.meta.url));
 const MAX_AI_RESULT_BYTES = 2 * 1024 * 1024;
@@ -352,23 +351,8 @@ function discoverCodex(ai) {
 function runnerToolchain(profile) {
   if (!/^v22\./.test(process.version) || !regularExecutable(NODE_BINARY))
     fail('RUNNER_TOOLCHAIN_VERSION', 'Runner должен исполняться доверенным Node 22');
-  if (profile.ai.provider === 'openai') {
-    if (!['darwin', 'linux'].includes(process.platform))
-      fail('RUNNER_PLATFORM_UNSUPPORTED', 'OpenAI worker требует Linux или macOS');
-    if (!regularReadable(OPENAI_WORKER_FILE))
-      fail('RUNNER_TOOLCHAIN_INVALID', 'OpenAI worker небезопасен');
-    const identity = {
-      nodeVersion: process.version,
-      nodeDigest: fileDigest(NODE_BINARY),
-      workerDigest: fileDigest(OPENAI_WORKER_FILE),
-    };
-    return Object.freeze({
-      node: NODE_BINARY,
-      codexEntry: null,
-      digest: sha256(canonicalJson(identity)),
-      identity: Object.freeze(identity),
-    });
-  }
+  if (profile.ai.provider === 'openai')
+    fail('PROVIDER_RETIRED', 'OpenAI API больше не поддерживается. Выполните flowcairn setup и выберите Codex, Claude Code или Cursor.');
   if (['claude', 'cursor'].includes(profile.ai.provider)) {
     if (!['darwin', 'linux'].includes(process.platform) || !regularReadable(EXTERNAL_WORKER_FILE))
       fail('RUNNER_PLATFORM_UNSUPPORTED', 'External CLI adapter требует macOS/Linux и trusted worker.');
@@ -401,6 +385,14 @@ function runnerToolchain(profile) {
     digest: sha256(canonicalJson(identity)),
     identity: Object.freeze(identity),
   });
+}
+
+function codexLoginAvailable(entry) {
+  const run = spawnSync(NODE_BINARY, [entry, 'login', 'status'], {
+    encoding: 'utf8', timeout: 10_000, maxBuffer: 16 * 1024, env: aiEnvironment(), shell: false,
+  });
+  if (run.error || run.status !== 0)
+    fail('CODEX_AUTH_REQUIRED', 'Codex не авторизован. Выполните codex login и повторите.');
 }
 
 function localCheckToolchain(profile) {
@@ -743,115 +735,6 @@ function selectedSourceContext(worktree, node, task, profile, dependencyToolchai
   });
 }
 
-function makeOpenAiCommand({
-  worktree,
-  node,
-  task,
-  plan,
-  skills,
-  priorEvidence,
-  reviewBundle,
-  outputPath,
-  toolchain,
-  dependencyToolchain,
-  profile,
-}) {
-  const inputFile = path.join(outputPath, `ai-input-${randomUUID()}.json`);
-  const resultFile = path.join(outputPath, `ai-result-${randomUUID()}.json`);
-  let reviewFile = null;
-  try {
-    if (profile.ai.baseUrl && profile.ai.baseUrl.replace(/\/$/, '') !== 'https://api.openai.com/v1')
-      fail('AI_ENDPOINT_UNSUPPORTED', 'v0.1 поддерживает только https://api.openai.com/v1');
-    const key = process.env.FLOWCAIRN_OPENAI_API_KEY;
-    if (!key || key.length > 4096 || /[\r\n]/.test(key))
-      fail('AI_AUTH_REQUIRED', 'Задайте FLOWCAIRN_OPENAI_API_KEY');
-    reviewFile = reviewBundle ? createReviewEvidenceFile(outputPath, reviewBundle) : null;
-    if (reviewFile) verifyReviewEvidenceFile(reviewFile);
-    const source = selectedSourceContext(worktree, node, task, profile, dependencyToolchain);
-    const model =
-      node.action.id === 'ai-review' && Reflect.get(profile.ai, 'modelMode') !== 'manual'
-        ? (profile.ai.reviewModel ?? profile.ai.model)
-        : profile.ai.model;
-    // Передаем только явный выбор. Поддержку выбранной моделью проверяет API без подмены параметра.
-    const reasoningEffort = node.action.id === 'ai-review' && Reflect.get(profile.ai, 'modelMode') !== 'manual'
-      ? (Reflect.get(profile.ai, 'reviewReasoningEffort') ?? Reflect.get(profile.ai, 'reasoningEffort'))
-      : Reflect.get(profile.ai, 'reasoningEffort');
-    const schema = aiResponseSchema(node, plan);
-    // Responses strict mode requires every object property, including nullable/defaulted fields.
-    const requireProperties = (value) => {
-      if (!value || typeof value !== 'object') return;
-      if (value.type === 'object' && value.properties) {
-        value.required = Object.keys(value.properties);
-        value.additionalProperties = false;
-      }
-      for (const child of Object.values(value)) {
-        if (Array.isArray(child)) child.forEach(requireProperties);
-        else requireProperties(child);
-      }
-    };
-    requireProperties(schema);
-    const prompt = buildPrompt({
-      nodeId: node.id,
-      profile,
-      task,
-      plan,
-      skills: renderSkillInstructions(skills),
-      priorEvidence,
-    });
-    const payload = {
-      version: 1,
-      model,
-      ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
-      schema,
-      prompt,
-      source,
-      reviewEvidence: reviewFile
-        ? {
-            hash: reviewFile.hash,
-            bytes: reviewFile.bytes,
-            content: readFileSync(reviewFile.path, 'utf8'),
-          }
-        : null,
-    };
-    const body = JSON.stringify(payload);
-    if (Buffer.byteLength(body) > 2 * 1024 * 1024)
-      fail('AI_CONTEXT_LIMIT', 'Полный AI payload превышает 2 MiB');
-    createExclusiveFile(inputFile, body);
-    createExclusiveFile(resultFile, '');
-    return {
-      command: {
-        executable: toolchain.node,
-        args: [OPENAI_WORKER_FILE, inputFile, resultFile, sha256(body)],
-        cwd: outputPath,
-        env: safeEnvironment({ FLOWCAIRN_OPENAI_API_KEY: key }),
-      },
-      input: '',
-      inputFile,
-      resultFile,
-      reviewFile,
-      maxOutputBytes: MAX_AI_PROCESS_OUTPUT,
-      execution: Object.freeze({
-        provider: 'openai',
-        cliVersion: null,
-        model,
-        ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
-        sandboxDigest: sha256(
-          canonicalJson({
-            kind: 'trusted-tool-free-worker',
-            endpoint: 'https://api.openai.com/v1/responses',
-            inputHash: sha256(body),
-            runnerToolchain: toolchain.digest,
-            dependencyToolchain: dependencyToolchain.hash,
-          }),
-        ),
-      }),
-    };
-  } catch (error) {
-    cleanupPrepared({ inputFile, resultFile, reviewFile });
-    throw error;
-  }
-}
-
 function makeExternalCommand({ worktree, node, task, plan, skills, priorEvidence, reviewBundle, outputPath, toolchain, dependencyToolchain, profile, providerConsent }) {
   const inputFile = path.join(outputPath, `provider-input-${randomUUID()}.json`);
   const resultFile = path.join(outputPath, `ai-result-${randomUUID()}.json`);
@@ -1098,8 +981,7 @@ export async function runRegisteredAction({
   });
   const prepare = localCheck
     ? makeLocalCheckCommand
-    : profile.ai.provider === 'openai' ? makeOpenAiCommand
-      : ['claude', 'cursor'].includes(profile.ai.provider) ? makeExternalCommand : makeAiCommand;
+    : ['claude', 'cursor'].includes(profile.ai.provider) ? makeExternalCommand : makeAiCommand;
   const prepared = prepare({
     ...input,
     root: allocation.rootPath,
@@ -1399,30 +1281,30 @@ export async function probeRunner({ root }) {
       details,
     };
   }
-  if (profile.ai.provider === 'openai') {
+  if (profile.ai.provider === 'openai')
+    return {
+      ai: { available: false, reason: 'PROVIDER_RETIRED' },
+      checks: { available: false, reason: 'USE_DOCKER_PROBE' },
+      details,
+    };
+  if (['claude', 'cursor'].includes(profile.ai.provider)) {
     try {
-      if (
-        profile.ai.baseUrl &&
-        profile.ai.baseUrl.replace(/\/$/, '') !== 'https://api.openai.com/v1'
-      )
-        fail('AI_ENDPOINT_UNSUPPORTED', 'Only official endpoint supported');
       const toolchain = runnerToolchain(profile);
-      const keyPresent =
-        typeof process.env.FLOWCAIRN_OPENAI_API_KEY === 'string' &&
-        process.env.FLOWCAIRN_OPENAI_API_KEY.length > 0;
+      const external = 'provider' in toolchain ? toolchain.provider : null;
+      if (!external) fail('RUNNER_TOOLCHAIN_INVALID', 'External CLI toolchain отсутствует.');
       return {
         ai: {
-          available: keyPresent,
-          reason: keyPresent ? 'LOCAL_OPENAI_WORKER_READY_REAL_AI_UNVERIFIED' : 'AI_AUTH_REQUIRED',
+          available: true,
+          reason: 'LOCAL_EXTERNAL_CLI_READY_AUTH_AND_REAL_AI_UNVERIFIED',
         },
         checks: { available: false, reason: 'USE_DOCKER_PROBE' },
         details: {
-          provider: 'openai',
+          provider: external.provider,
           platform: details.platform,
           toolchainDigest: toolchain.digest,
           limitations: [
-            'Tool-free API worker; only bounded selected context is sent.',
-            'Real AI and endpoint authentication have not been verified.',
+            'Точная версия и безопасные non-interactive параметры CLI проверены локально.',
+            'Аутентификация и реальный AI-вызов проверяются только при явном запуске после consent.',
             'Docker checks are probed separately.',
           ],
         },
@@ -1457,6 +1339,7 @@ export async function probeRunner({ root }) {
   try {
     toolchain = runnerToolchain(profile);
     if (profile.ai.modelMode === 'provider' || profile.ai.model === 'provider-default') codexModelSettings();
+    codexLoginAvailable(toolchain.codexEntry);
     details.toolchainDigest = toolchain.digest;
   } catch (error) {
     const reason = errorReason(error, 'RUNNER_TOOLCHAIN_INVALID');
@@ -1532,7 +1415,6 @@ export async function probeRunner({ root }) {
 // Pure preparation seam: tests inspect exact permissions/prompt without spawning external AI.
 export const RUNNER_TESTING = Object.freeze({
   makeAiCommand,
-  makeOpenAiCommand,
   makeExternalCommand,
   selectedSourceContext,
   instructionDenials,
@@ -1543,6 +1425,7 @@ export const RUNNER_TESTING = Object.freeze({
 export function inspectCodexInstallation(ai = {}) {
   try {
     const toolchain = runnerToolchain({ ai: { ...ai, provider: 'codex' } });
+    codexLoginAvailable(toolchain.codexEntry);
     return { available: true, reason: null, version: Reflect.get(toolchain.identity, 'codexVersion') };
   } catch (error) {
     return { available: false, reason: errorReason(error, 'RUNNER_TOOLCHAIN_INVALID'), version: null };

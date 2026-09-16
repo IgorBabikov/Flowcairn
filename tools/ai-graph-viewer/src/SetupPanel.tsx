@@ -12,11 +12,13 @@ export function SetupPanel({ onClose }: { onClose: () => void }) {
     return () => { active = false; };
   }, []);
   const values = setup?.values;
+  const retiredProvider = values?.provider === 'openai';
   return <section className="setup-panel" aria-labelledby="setup-title">
     <header><h2 id="setup-title">Настройки проекта</h2><button type="button" className="button quiet" onClick={onClose}>Закрыть настройки</button></header>
     {!setup && !error && <p role="status">Загружаем настройки…</p>}
     {error && <p role="alert">{error}</p>}
     {setup && values && <>
+      {retiredProvider && <p role="alert">OpenAI API больше не поддерживается. Закройте Flowcairn и выполните <code>npx flowcairn setup</code>, выбрав Codex, Claude Code или Cursor.</p>}
       <p>{setup.configured ? 'Первоначальная настройка завершена.' : 'Перед первой задачей завершите настройку.'}</p>
       <dl className="fact-list">
         <dt>AI-инструмент</dt><dd>{setup.providers.find(item => item.id === values.provider)?.label ?? values.provider}</dd>

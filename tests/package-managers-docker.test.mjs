@@ -42,7 +42,7 @@ for (const [manager, version] of [['npm', null], ['pnpm', '11.8.0'], ['yarn', '4
         : `corepack prepare yarn@${version} --activate && YARN_ENABLE_GLOBAL_CACHE=false corepack yarn install --mode=skip-build`;
     docker(['run', '--rm', '--mount', `type=bind,src=${root},dst=/fixture`, '--workdir', '/fixture', base, '/bin/sh', '-ec', install]);
     assert.equal(existsSync(path.join(root, 'forbidden-hook')), false);
-    initializeProject(root, { provider: 'openai', model: 'fixture-model' });
+    initializeProject(root, { provider: 'claude', 'provider-path':path.resolve(import.meta.dirname, 'fixtures/verified-claude/node_modules/@anthropic-ai/claude-code/bin/claude.exe') });
     const image = prepareCheckImage({ root });
     const sources = ['package.json', 'check.cjs', 'packages/app/package.json', 'packages/app/index.cjs'];
     const contract = { version: 4, actionId: 'check-tests', checkScript: 'test', packageManager: manager, timeoutMs: 10000, files: sources.map((relative) => { const bytes = readFileSync(path.join(root, relative)); return { path: relative, size: bytes.length, hash: sha256(bytes), mode: '100644' }; }) };
@@ -62,7 +62,7 @@ for (const [manager, version] of [['npm', null], ['pnpm', '11.8.0'], ['yarn', '4
   });
 }
 
-test('actual Linux tarball init chooses OpenAI without provider flags and preserves an existing project', { skip: process.env.FLOWCAIRN_DOCKER_TESTS !== '1', timeout: 300000 }, (t) => {
+test('actual Linux tarball init accepts a verified Claude CLI and preserves an existing project', { skip: process.env.FLOWCAIRN_DOCKER_TESTS !== '1', timeout: 300000 }, (t) => {
   const directory = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'flowcairn-linux-install-')));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const runtimeRoot = fileURLToPath(new URL('..', import.meta.url));
@@ -77,13 +77,17 @@ git init --initial-branch=main >/dev/null
 printf '%s\\n' '{"name":"existing-linux-project","version":"1.0.0","private":true}' > package.json
 printf '%s\\n' '# Owner rules' > AGENTS.md
 npm install --ignore-scripts --no-audit --no-fund /artifact.tgz >/dev/null
-./node_modules/.bin/flowcairn init --model fixture-model --json > /result.json
-node -e "const a=require('node:assert/strict'),f=require('node:fs');const r=JSON.parse(f.readFileSync('/result.json'));a.equal(r.result.profile.ai.provider,'openai');a.equal(f.readFileSync('AGENTS.md','utf8'),'# Owner rules\\n');a.equal(JSON.parse(f.readFileSync('package.json')).name,'existing-linux-project');console.log('LINUX_DEFAULT_INIT_PASSED')"
+mkdir -p /fixture/node_modules/@anthropic-ai/claude-code/bin
+printf '%s\\n' '{"name":"@anthropic-ai/claude-code","version":"2.1.198"}' > /fixture/node_modules/@anthropic-ai/claude-code/package.json
+printf '%s\\n' '#!/bin/sh' 'if [ "$1" = "--version" ]; then printf "2.1.198 (Claude Code)\\n"; exit 0; fi' 'if [ "$1" = "auth" ] && [ "$2" = "status" ]; then printf "{\\"loggedIn\\":true}\\n"; exit 0; fi' 'for argument in "$@"; do [ "$argument" = "--help" ] && exit 0; done' 'printf "{\\"structured_output\\":{\\"summary\\":\\"ok\\"}}\\n"' > /fixture/node_modules/@anthropic-ai/claude-code/bin/claude.exe
+chmod 700 /fixture/node_modules/@anthropic-ai/claude-code/bin/claude.exe
+./node_modules/.bin/flowcairn init --provider claude --provider-path /fixture/node_modules/@anthropic-ai/claude-code/bin/claude.exe --json > /result.json
+node -e "const a=require('node:assert/strict'),f=require('node:fs');const r=JSON.parse(f.readFileSync('/result.json'));a.equal(r.result.profile.ai.provider,'claude');a.equal(f.readFileSync('AGENTS.md','utf8'),'# Owner rules\\n');a.equal(JSON.parse(f.readFileSync('package.json')).name,'existing-linux-project');console.log('LINUX_CLAUDE_INIT_PASSED')"
 `;
   const output = execFileSync(DOCKER_CHECKS_TESTING.dockerExecutable(), ['run', '--rm', '--mount', `type=bind,src=${tarball},dst=/artifact.tgz,readonly`, 'node:22-alpine', '/bin/sh', '-ec', script], {
     env: DOCKER_CHECKS_TESTING.localDockerEnvironment(), encoding: 'utf8', timeout: 240000, maxBuffer: 8 * 1024 * 1024,
   });
-  assert.match(output, /LINUX_DEFAULT_INIT_PASSED/);
+  assert.match(output, /LINUX_CLAUDE_INIT_PASSED/);
 });
 
 test('npm exec runs a local unpublished tarball outside project dependencies and Docker preparation remains portable', { skip: process.env.FLOWCAIRN_DOCKER_TESTS !== '1', timeout: 300000 }, (t) => {

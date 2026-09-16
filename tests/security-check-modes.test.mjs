@@ -7,6 +7,8 @@ import path from 'node:path';
 import { initializeProject } from '../bin/flowcairn.mjs';
 import { hasTrustedLocalChecksConsent } from '../scripts/ai-graph/lib/project.mjs';
 
+const testClaude = path.resolve(import.meta.dirname, 'fixtures/verified-claude/node_modules/@anthropic-ai/claude-code/bin/claude.exe');
+
 test('new projects do not register or run a repository script without an explicit check boundary', (t) => {
   const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'flowcairn-security-check-')));
   t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -20,7 +22,7 @@ test('new projects do not register or run a repository script without an explici
   writeFileSync(path.join(root, 'AGENTS.md'), 'Не исполнять scripts без отдельного разрешения.');
   execFileSync('/usr/bin/git', ['-C', root, 'add', '.']);
   execFileSync('/usr/bin/git', ['-C', root, 'commit', '-m', 'fixture'], { stdio: 'ignore' });
-  const installed = initializeProject(root, { provider: 'openai', model: 'fixture-model' });
+  const installed = initializeProject(root, { provider: 'claude', 'provider-path': testClaude });
   assert.deepEqual(installed.profile.checks, []);
   assert.equal(installed.profile.checkMode, 'none');
   assert.equal(existsSync(path.join(root, 'host-code-ran')), false);
@@ -36,7 +38,7 @@ test('trusted-local requires a separate consent and binds it to registered scrip
   writeFileSync(path.join(root, 'AGENTS.md'), 'Правила проекта');
   execFileSync('/usr/bin/git', ['-C', root, 'add', '.']);
   execFileSync('/usr/bin/git', ['-C', root, 'commit', '-m', 'fixture'], { stdio: 'ignore' });
-  const options = { provider: 'openai', model: 'fixture-model', checks: 'tests', 'check-mode': 'trusted-local' };
+  const options = { provider: 'claude', 'provider-path': testClaude, checks: 'tests', 'check-mode': 'trusted-local' };
   assert.throws(() => initializeProject(root, options), { code: 'CHECK_LOCAL_CONSENT' });
   assert.equal(existsSync(path.join(root, '.flowcairn.json')), false);
   const installed = initializeProject(root, { ...options, 'trusted-local-consent': true });

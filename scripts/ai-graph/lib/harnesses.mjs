@@ -42,7 +42,7 @@ export const HARNESS_DESCRIPTORS = Object.freeze({
     skills: Object.freeze(['.claude/skills/']),
     runtime: Object.freeze({
       status: 'available-after-probe',
-      execution: 'restricted-cli-adapter',
+      execution: 'safe-readonly-cli-adapter',
       reason: 'Нужны проверка точной версии CLI и отдельное согласие на передачу ограниченного контекста для каждого immutable плана.',
     }),
   }),
@@ -54,8 +54,8 @@ export const HARNESS_DESCRIPTORS = Object.freeze({
     skills: Object.freeze(['.cursor/skills/', '.agents/skills/']),
     runtime: Object.freeze({
       status: 'available-after-probe',
-      execution: 'isolated-cli-adapter',
-      reason: 'CLI запускается только в пустом private workspace с deny-политикой. Его JSON-ответ дополнительно валидируется Flowcairn; нужна точная версия и отдельное согласие.',
+      execution: 'safe-readonly-cli-adapter',
+      reason: 'CLI запускается только в пустом private workspace в sandbox и Ask mode. Его JSON-ответ дополнительно валидируется Flowcairn; нужна точная версия и отдельное согласие.',
     }),
   }),
 });

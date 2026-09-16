@@ -16,10 +16,19 @@ const worker = fileURLToPath(new URL('./lib/external-worker.mjs', import.meta.ur
 const fixtures = new Set();
 function fixture() { const directory = mkdtempSync(path.join(os.tmpdir(), 'flowcairn-external-provider-')); fixtures.add(directory); return directory; }
 test.after(() => { for (const directory of fixtures) rmSync(directory, { recursive: true, force: true }); });
-function fakeCli(directory, result = '{"summary":"ok"}', version = 'fixture-cli 1.0') {
+function fakeCli(directory, response = '{"result":"{\\"summary\\":\\"ok\\"}"}', version = 'fixture-cli 1.0', help = '--print --output-format --sandbox --mode', authenticated = true) {
   const file = path.join(directory, 'fake-provider');
-  writeFileSync(file, `#!${node}\nconst fs=require('node:fs');if (process.argv[2] === '--version') process.stdout.write(${JSON.stringify(version + '\n')}); else {fs.writeFileSync('provider-args.json',JSON.stringify(process.argv.slice(2)));process.stdout.write(JSON.stringify({result:${JSON.stringify(result)}}));}\n`);
+  writeFileSync(file, `#!${node}\nconst fs=require('node:fs'),args=process.argv.slice(2),help=${JSON.stringify(help)},authenticated=${JSON.stringify(authenticated)};if (args[0] === '--version') process.stdout.write(${JSON.stringify(version + '\n')}); else if (args[0] === 'auth' && args[1] === 'status') {process.stdout.write(JSON.stringify({loggedIn:authenticated})+'\\n');process.exitCode=authenticated?0:1;} else if (args[0] === 'status') {process.stdout.write(JSON.stringify({authenticated})+'\\n');process.exitCode=authenticated?0:1;} else if (args.includes('--help')) {if(['--setting-sources','--strict-mcp-config','--no-session-persistence','--permission-mode','--tools','--output-format','--json-schema','--print','--sandbox','--mode'].some(flag=>args.includes(flag)&&!help.includes(flag))) process.exitCode=2; else process.stdout.write(help+'\\n');} else {fs.writeFileSync('provider-args.json',JSON.stringify(args));process.stdout.write(${JSON.stringify(response)});}\n`);
   chmodSync(file, 0o700); return file;
+}
+function officialClaudeCli(directory, response = '{"result":"{\\"summary\\":\\"ok\\"}"}', packageVersion = '2.1.198', authenticated = true) {
+  const source = fakeCli(directory, response, `${packageVersion} (Claude Code)`, undefined, authenticated);
+  const packageRoot = path.join(directory, 'node_modules', '@anthropic-ai', 'claude-code');
+  mkdirSync(path.join(packageRoot, 'bin'), { recursive: true });
+  writeFileSync(path.join(packageRoot, 'package.json'), JSON.stringify({ name: '@anthropic-ai/claude-code', version: packageVersion }));
+  const executable = path.join(packageRoot, 'bin', 'claude.exe');
+  linkSync(source, executable);
+  return executable;
 }
 function input(provider, executable, version = 'fixture-cli 1.0') {
   return { version: 1, provider, executable, versionPin: version, prompt: 'synthetic fixture only', schema: { type: 'object' } };
@@ -31,17 +40,36 @@ test('external worker accepts only a pinned synthetic CLI result and never needs
   const run = spawnSync(node, [worker, source, result], { cwd: root, encoding: 'utf8', env: { PATH: '/usr/bin:/bin', HOME: root } });
   assert.equal(run.status, 0); assert.deepEqual(JSON.parse(readFileSync(result, 'utf8')), { summary: 'ok' });
   const args = JSON.parse(readFileSync(path.join(root, 'provider-args.json'), 'utf8'));
+  assert.ok(args.includes('--setting-sources')); assert.equal(args[args.indexOf('--setting-sources') + 1], ''); assert.ok(args.includes('--strict-mcp-config'));
+  assert.ok(args.includes('--permission-mode')); assert.equal(args[args.indexOf('--permission-mode') + 1], 'dontAsk');
   assert.ok(args.includes('--tools')); assert.ok(args.includes('')); assert.ok(args.includes('--json-schema'));
+  assert.equal(args.includes('--bare'), false); assert.equal(args.includes('--safe-mode'), false); assert.equal(args.includes('--permission-prompts'), false);
 });
 
-test('Cursor worker enables the documented sandbox and plan mode inside private workspace', () => {
+test('Claude worker accepts structured_output returned by --json-schema', () => {
+  const root = fixture(), executable = fakeCli(root, '{"result":"ignored text","structured_output":{"summary":"structured"}}'), source = path.join(root, 'input-claude.json'), result = path.join(root, 'result-claude.json');
+  writeFileSync(source, JSON.stringify(input('claude', executable))); writeFileSync(result, '', { mode: 0o600 });
+  const run = spawnSync(node, [worker, source, result], { cwd: root, encoding: 'utf8', env: { PATH: '/usr/bin:/bin', HOME: root } });
+  assert.equal(run.status, 0); assert.deepEqual(JSON.parse(readFileSync(result, 'utf8')), { summary: 'structured' });
+});
+
+test('external worker gives a fixed auth error instead of accepting a provider failure envelope', () => {
+  const root = fixture(), executable = fakeCli(root, '{"is_error":true,"result":"Not logged in"}'), source = path.join(root, 'input-auth.json'), result = path.join(root, 'result-auth.json');
+  writeFileSync(source, JSON.stringify(input('claude', executable))); writeFileSync(result, '', { mode: 0o600 });
+  const run = spawnSync(node, [worker, source, result], { cwd: root, encoding: 'utf8', env: { PATH: '/usr/bin:/bin', HOME: root } });
+  assert.notEqual(run.status, 0); assert.match(run.stderr, /PROVIDER_AUTH_REQUIRED/); assert.equal(readFileSync(result, 'utf8'), '');
+});
+
+test('Cursor worker enables the documented sandbox and read-only ask mode inside private workspace', () => {
   const root = fixture(), executable = fakeCli(root), source = path.join(root, 'input-cursor.json'), result = path.join(root, 'result-cursor.json');
   writeFileSync(source, JSON.stringify(input('cursor', executable))); writeFileSync(result, '', { mode: 0o600 });
   const run = spawnSync(node, [worker, source, result], { cwd: root, encoding: 'utf8', env: { PATH: '/usr/bin:/bin', HOME: root } });
   assert.equal(run.status, 0);
   const args = JSON.parse(readFileSync(path.join(root, 'provider-args.json'), 'utf8'));
-  assert.deepEqual(args.slice(0, 8), ['--print', '--output-format', 'json', '--sandbox', 'enabled', '--mode', 'plan', '--workspace']);
-  assert.equal(args[8], root);
+  assert.deepEqual(args.slice(0, 7), ['--print', '--output-format', 'json', '--sandbox', 'enabled', '--mode', 'ask']);
+  assert.equal(args.includes('--workspace'), false);
+  assert.match(args.at(-1), /JSON Schema/);
+  assert.match(args.at(-1), /"type":"object"/);
 });
 
 test('external worker rejects version drift and non-JSON provider output before a trusted patch can read it', () => {
@@ -55,10 +83,29 @@ test('external worker rejects version drift and non-JSON provider output before 
 });
 
 test('provider probe pins the exact CLI version and rejects later drift', () => {
-  const root = fixture(), executable = fakeCli(root);
+  const root = fixture(), executable = officialClaudeCli(root);
   const probe = probeExternalProvider('claude', { executable }); assert.equal(probe.available, true);
   assert.equal(providerToolchain({ provider: 'claude', providerPath: executable, providerVersion: probe.version }).version, probe.version);
   assert.throws(() => providerToolchain({ provider: 'claude', providerPath: executable, providerVersion: 'other' }), { code: 'PROVIDER_VERSION_DRIFT' });
+});
+
+test('Claude probe refuses an official CLI older than the safe non-interactive contract', () => {
+  const root = fixture(), executable = officialClaudeCli(root, undefined, '2.1.197');
+  const probe = probeExternalProvider('claude', { executable });
+  assert.equal(probe.available, false);
+});
+
+test('Cursor probe refuses a CLI without the required safe non-interactive flags', () => {
+  const root = fixture(), executable = fakeCli(root, '{"result":"{\\"summary\\":\\"ok\\"}"}', 'fixture-cli 1.0', '--output-format');
+  const probe = probeExternalProvider('cursor', { executable });
+  assert.equal(probe.available, false);
+});
+
+test('provider probe refuses a CLI without an authenticated local session', () => {
+  const root = fixture(), executable = officialClaudeCli(root, undefined, '2.1.198', false);
+  assert.deepEqual(probeExternalProvider('claude', { executable }), { available: false, reason: 'PROVIDER_AUTH_REQUIRED' });
+  const cursor = fakeCli(fixture(), undefined, 'fixture-cursor 1.0', undefined, false);
+  assert.deepEqual(probeExternalProvider('cursor', { executable: cursor }), { available: false, reason: 'PROVIDER_AUTH_REQUIRED' });
 });
 
 test('official Claude npm package may use a hard-linked native executable', () => {
@@ -66,10 +113,16 @@ test('official Claude npm package may use a hard-linked native executable', () =
   mkdirSync(path.join(packageRoot, 'bin'), { recursive: true });
   writeFileSync(path.join(packageRoot, 'package.json'), JSON.stringify({ name: '@anthropic-ai/claude-code', version: '2.1.198' }));
   const binary = path.join(packageRoot, 'bin', 'claude.exe');
-  const source = fakeCli(root, '{"summary":"ok"}', '2.1.198 (Claude Code)'); linkSync(source, binary);
+  const source = fakeCli(root, '{"result":"{\\"summary\\":\\"ok\\"}"}', '2.1.198 (Claude Code)'); linkSync(source, binary);
   const bin = path.join(root, 'bin'); mkdirSync(bin); symlinkSync(binary, path.join(bin, 'claude'));
   const probe = probeExternalProvider('claude', { env: { PATH: bin } });
   assert.equal(probe.available, true); assert.equal(probe.version, '2.1.198 (Claude Code)');
+});
+
+test('official Claude version text with parentheses is accepted by the project profile', async () => {
+  const { ProjectProfileSchema } = await import('./lib/project.mjs');
+  const root = fixture(), executable = officialClaudeCli(root);
+  assert.equal(ProjectProfileSchema.parse({ version: 1, integrationBranch: 'main', packageManager: 'npm', contextPaths: [], checks: [], outputPaths: [], manifests: ['package.json'], ai: { provider: 'claude', model: 'provider-default', providerPath: executable, providerVersion: '2.1.198 (Claude Code)' } }).ai.providerVersion, '2.1.198 (Claude Code)');
 });
 
 test('external providers receive an immutable provider-consent gate before any AI node', () => {
@@ -88,11 +141,11 @@ test('consent payload is typed and binds the CLI, plan, scope and exclusions', (
 });
 
 test('missing consent blocks the graph, then the gate stores its immutable hash in the receipt', async () => {
-  const root = fixture(), executable = fakeCli(root), hash = 'a'.repeat(64);
+  const root = fixture(), executable = officialClaudeCli(root), hash = 'a'.repeat(64);
   const skills = [...new Set(Object.values(SKILL_ROUTES).flat())].map((id) => ({ id, path: `skills/${id}/SKILL.md`, hash }));
   const task = { id: 'EXT-GATE', goal: 'synthetic', instructions: 'synthetic', scope: ['src'], contextPaths: [], forbiddenPaths: [], includeUntracked: [], acceptance: ['synthetic'], checks: [], resources: [], limits: { maxAttempts: 1, maxReplans: 0, timeoutMs: 5000 } };
   const adapters = {
-    project: { contextPaths: [], manifests: [], outputPaths: [], ai: { provider: 'claude', providerPath: executable, providerVersion: 'fixture-cli 1.0' } },
+    project: { contextPaths: [], manifests: [], outputPaths: [], ai: { provider: 'claude', providerPath: executable, providerVersion: '2.1.198 (Claude Code)' } },
     identity: () => 'b'.repeat(64), skills: () => skills, capture: () => ({ manifest: { sourceHash: hash }, bundlePath: 'synthetic' }),
     resolveSkills: (node) => node.action.id.startsWith('ai-') ? [...node.skills] : [], resolveReadPaths: (node) => node.resources.reads,
     runner: { ai: { available: true, reason: null }, checks: { available: true, reason: null } },

@@ -66,7 +66,8 @@ function fixture(t) {
   git('commit', '-m', 'fixture baseline');
   return { root, git };
 }
-const options = { provider: 'openai', model: 'configured-test-model' };
+const testClaude = path.resolve(import.meta.dirname, 'fixtures/verified-claude/node_modules/@anthropic-ai/claude-code/bin/claude.exe');
+const options = { provider: 'claude', 'provider-path': testClaude };
 
 test('init dry run has no effects; setup is repeatable and preserves owner instructions/hooks', (t) => {
   const { root, git } = fixture(t);
@@ -244,12 +245,12 @@ test('relative npm bin symlink runs version and init with observable effects', (
     });
   assert.equal(run('--version').trim(), version);
   const result = JSON.parse(
-    run('init', '--provider', 'openai', '--model', options.model, '--json'),
+    run('init', '--provider', 'claude', '--provider-path', testClaude, '--json'),
   );
   assert.equal(result.ok, true);
   assert.equal(result.result.created, true);
   const profile = JSON.parse(readFileSync(path.join(root, '.flowcairn.json'), 'utf8'));
-  assert.equal(profile.ai.model, options.model);
+  assert.equal(profile.ai.model, 'provider-default');
   assert.equal(existsSync(path.join(root, '.ai-orchestrator/flowcairn-install.json')), true);
   assert.match(readFileSync(path.join(root, '.git/info/exclude'), 'utf8'), /\.ai-orchestrator\//);
   assert.equal(git('rev-parse', 'HEAD'), head);
@@ -314,16 +315,16 @@ const firstTask = {
   checks: [],
 };
 
-test('TTY init asks for a model; non-TTY, JSON and dry-run never prompt or write without it', async (t) => {
+test('TTY init selects a verified CLI; non-TTY, JSON and dry-run never write with a missing CLI', async (t) => {
   for (const flags of [{}, { json: true }, { 'dry-run': true }]) {
     const { root } = fixture(t);
     await assert.rejects(
       initializeCommand(
         root,
-        { provider: 'openai', ...flags },
+        { provider: 'cursor', 'provider-path':path.join(root, 'missing-cursor'), ...flags },
         { input: { isTTY: false }, output: { isTTY: false } },
       ),
-      { code: 'MODEL_REQUIRED' },
+      { code: 'PROVIDER_TOOLCHAIN_INVALID' },
     );
     assert.equal(existsSync(path.join(root, '.flowcairn.json')), false);
     assert.equal(existsSync(path.join(root, '.ai-orchestrator')), false);
@@ -337,15 +338,15 @@ test('TTY init asks for a model; non-TTY, JSON and dry-run never prompt or write
     const text = bytes.toString();
     transcript += text;
     const replies = [
-      ['ID модели, например', 'configured-test-model'], ['Выбор [1]:', 'keep'], ['Режим проверок [1]:', 'none'],
+      ['Выбор [1]:', 'keep'], ['Режим проверок [1]:', 'none'],
       ['Разрешить чтение проекта', 'да'], ['Подключить Graph', 'нет'],
     ];
     for (const [marker, answer] of replies) if (text.includes(marker)) setImmediate(() => input.write(answer + '\n'));
   });
-  const pending = initializeCommand(root, { provider: 'openai' }, { input, output });
+  const pending = initializeCommand(root, options, { input, output });
   const installed = await pending;
-  assert.equal(installed.profile.ai.model, options.model);
-  assert.match(transcript, /OpenAI API требует явный ID модели/);
+  assert.equal(installed.profile.ai.model, 'provider-default');
+  assert.match(transcript, /Claude Code — использовать выбранный CLI/);
   const before = transcript;
   assert.equal((await initializeCommand(root, {}, { input, output })).created, false);
   assert.equal(transcript, before);
@@ -359,9 +360,7 @@ test('init rejects ambiguous managers, invalid model and detached HEAD without c
   writeFileSync(path.join(root, 'pnpm-lock.yaml'), 'lockfileVersion: 9');
   assert.throws(() => initializeProject(root, options), { code: 'PACKAGE_MANAGER' });
   assert.equal(existsSync(path.join(root, '.flowcairn.json')), false);
-  assert.throws(() => initializeProject(root, { ...options, model: 'sk-do-not-save-this' }), {
-    code: 'AI_CONFIG',
-  });
+  assert.throws(() => initializeProject(root, { provider: 'openai', model: 'test-model' }), { code: 'PROVIDER_UNSUPPORTED' });
   assert.equal(existsSync(path.join(root, '.ai-orchestrator')), false);
   git('checkout', '--detach');
   assert.throws(() => initializeProject(root, { ...options, 'package-manager': 'npm' }), {
@@ -560,14 +559,14 @@ test('actual npm tarball install provides executable bin and offline npx init/ta
     });
   const missing = run('init', '--provider', 'openai');
   assert.equal(missing.status, 2);
-  assert.equal(JSON.parse(missing.stderr).error.code, 'MODEL_REQUIRED');
+  assert.equal(JSON.parse(missing.stderr).error.code, 'PROVIDER_UNSUPPORTED');
   assert.equal(existsSync(path.join(root, '.flowcairn.json')), false);
   const help = run('init', '--help');
   assert.equal(help.status, 0, help.stderr);
   assert.match(help.stdout, /Быстрый старт/);
   assert.match(help.stdout, /начать настройку и открыть Graph/);
   assert.equal(existsSync(path.join(root, '.flowcairn.json')), false);
-  const installed = run('init', '--provider', 'openai', '--model', options.model, '--json');
+  const installed = run('init', '--provider', 'claude', '--provider-path', testClaude, '--json');
   assert.equal(installed.status, 0, installed.stderr);
   const reservation = createServer();
   await new Promise((resolve) => reservation.listen(0, '127.0.0.1', resolve));

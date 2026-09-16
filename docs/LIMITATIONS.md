@@ -7,15 +7,15 @@ Flowcairn из текущего `main` — локальный инструмен
 | Режим | Предпосылки | Граница подтверждения |
 | --- | --- | --- |
 | Codex adapter | macOS, Codex CLI `0.145.0` или `0.154.0`, настроенная сессия, доступная модель | Изоляция зависит от поддерживаемых CLI permissions и macOS sandbox; выбор активного чата VS Code не считывается; другие версии/ОС не обещаются |
-| OpenAI API adapter | Linux или macOS как целевые платформы, собственный API-ключ, доступная модель | Tool-free адаптер; реальный внешний AI E2E на Linux пока не подтвержден |
-| Claude Code / Cursor adapter | Linux или macOS, найденный CLI с exact version pin, настроенная provider session и per-plan consent | Synthetic transport tests не доказывают доступ аккаунта, тариф, policy организации или качество реального ответа |
+| Claude Code adapter | macOS/Linux, установленный CLI с проверенными safe-параметрами и настроенная сессия | User/project/local settings не загружаются, tools отключены; реальный AI-вызов проверяется только после отдельного consent |
+| Cursor adapter | macOS/Linux, установленный CLI с проверенными safe-параметрами и настроенная сессия | Private workspace, sandbox и Ask mode; реальный AI-вызов проверяется только после отдельного consent |
 | Checks, новый проект | Не запускаются автоматически | План и AI-этапы не подтверждают выполнение project scripts |
 | Checks, `trusted-local` | Node 22, явное согласие, npm/pnpm/Yarn 4 и существующие project scripts | Scripts запускаются с правами пользователя; режим только для известного кода |
 | Checks, усиленный режим | Docker Engine, подготовленный образ, npm/pnpm/Yarn 4 project scripts | Container/unit tests не заменяют проверку конкретного приложения и его окружения |
 | UI | Современный браузер, локальная session-ссылка | Только loopback control plane; не многопользовательский удаленный сервис |
 | Windows | WSL2 на Linux filesystem как целевая среда | Нативный Windows запрещен; реальный WSL2 acceptance пока не выполнен |
 
-Node.js поддерживается в ветке 22. Успешный `doctor` не равен успешному AI-вызову. Наличие API-ключа не означает доступ к конкретной модели; публичный model ID не доказывает доступ вашего аккаунта.
+Node.js поддерживается в ветке 22. Успешный `doctor` не равен успешному AI-вызову. Flowcairn проверяет вход CLI, но наличие локального CLI и входа не доказывает доступ аккаунта к конкретной модели.
 
 ## Что ограничено намеренно
 

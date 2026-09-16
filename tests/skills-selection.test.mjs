@@ -74,7 +74,7 @@ test('init selects a real local Skill by name, pins its existing bytes and prese
   mkdirSync(path.join(root, '.agents/skills/testing'), { recursive: true });
   const text = '---\nname: testing\ndescription: Local fixture testing rules\n---\nCheck the changed behavior.\n';
   writeFileSync(path.join(root, '.agents/skills/testing/SKILL.md'), text);
-  const options = { provider: 'openai', model: 'fixture-model', skills: 'testing', 'skill-actions': 'analyze,review', 'skill-scope': 'src', json: true };
+  const options = { provider: 'claude', 'provider-path':path.resolve(import.meta.dirname, 'fixtures/verified-claude/node_modules/@anthropic-ai/claude-code/bin/claude.exe'), skills: 'testing', 'skill-actions': 'analyze,review', 'skill-scope': 'src', json: true };
   const result = await initializeCommand(root, options);
   assert.deepEqual(result.profile.skillManifest, [{
     id: 'project-testing', path: '.agents/skills/testing/SKILL.md', hash: sha256(text),

@@ -160,6 +160,7 @@ export const PlanningEnvelopeSchema = z.strictObject({
   policyHash: Hash,
   skills: z.array(SkillManifestSchema).max(20),
   readPaths: z.array(RelativePath).max(96),
+  // Historical envelopes remain readable; new profiles can select only CLI providers.
   provider: z.enum(['codex', 'openai', 'claude', 'cursor']),
   timeoutMs: z.number().int().min(1000).max(1800000),
 });

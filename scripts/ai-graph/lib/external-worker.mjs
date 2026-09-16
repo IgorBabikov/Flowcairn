@@ -22,6 +22,9 @@ function writeResult(file, value) {
 }
 function parseResult(provider, stdout) {
   let envelope; try { envelope = JSON.parse(stdout); } catch { fail('PROVIDER_OUTPUT_INVALID', 'CLI не вернул JSON output.'); }
+  if (envelope?.is_error === true) fail('PROVIDER_AUTH_REQUIRED', `${provider === 'claude' ? 'Claude Code' : 'Cursor'} не подтвердил доступ к AI. Войдите в CLI и повторите запуск.`);
+  if (provider === 'claude' && envelope?.structured_output && typeof envelope.structured_output === 'object' && !Array.isArray(envelope.structured_output))
+    return envelope.structured_output;
   const raw = envelope?.result;
   if (typeof raw !== 'string' || Buffer.byteLength(raw) > 2 * 1024 * 1024) fail('PROVIDER_OUTPUT_INVALID', 'Provider result отсутствует или превышает лимит.');
   let result; try { result = JSON.parse(raw); } catch { fail('PROVIDER_SCHEMA_DRIFT', `${provider} вернул неструктурированный результат.`); }
@@ -32,12 +35,16 @@ function main() {
   const [inputFile, resultFile] = process.argv.slice(2);
   if (!inputFile || !resultFile) fail('PROVIDER_ARGS', 'Provider worker arguments missing.');
   const input = readInput(inputFile), scratch = path.dirname(resultFile);
-  const environment = { PATH: '/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin', HOME: process.env.HOME ?? scratch, NO_COLOR: '1', LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' };
+  const environment = { PATH: '/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin', HOME: process.env.HOME ?? scratch, NO_COLOR: '1', LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8', CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' };
   const version = spawnSync(input.executable, ['--version'], { cwd: scratch, env: environment, encoding: 'utf8', timeout: 10_000, maxBuffer: 16 * 1024, shell: false });
   if (version.error || version.status !== 0 || `${version.stdout ?? ''}`.trim() !== input.versionPin) fail('PROVIDER_VERSION_DRIFT', 'Версия provider изменилась до запуска.');
+  const schemaText = JSON.stringify(input.schema);
+  if (Buffer.byteLength(schemaText) > 64 * 1024) fail('PROVIDER_SCHEMA_LIMIT', 'Схема provider превышает лимит.');
+  const cursorPrompt = `${input.prompt}\n\nВерни ровно один JSON object, соответствующий этой JSON Schema; без markdown и пояснений:\n${schemaText}`;
+  if (Buffer.byteLength(cursorPrompt) > 192 * 1024) fail('AI_CONTEXT_LIMIT', 'Контекст Cursor превышает лимит. Сузьте approved scope.');
   const args = input.provider === 'claude'
-    ? ['--bare', '--no-session-persistence', '--permission-prompts', 'none', '--tools', '', '-p', '--max-turns', '1', '--output-format', 'json', '--json-schema', JSON.stringify(input.schema), input.prompt]
-    : ['--print', '--output-format', 'json', '--sandbox', 'enabled', '--mode', 'plan', '--workspace', scratch, input.prompt];
+    ? ['--setting-sources', '', '--strict-mcp-config', '--no-session-persistence', '--permission-mode', 'dontAsk', '--tools', '', '-p', '--output-format', 'json', '--json-schema', JSON.stringify(input.schema), input.prompt]
+    : ['--print', '--output-format', 'json', '--sandbox', 'enabled', '--mode', 'ask', cursorPrompt];
   const run = spawnSync(input.executable, args, { cwd: scratch, env: environment, encoding: 'utf8', timeout: 120_000, maxBuffer: 2 * 1024 * 1024, shell: false });
   if (run.error && Reflect.get(run.error, 'code') === 'ETIMEDOUT') fail('PROVIDER_TIMEOUT', 'Внешний provider превысил timeout.');
   if (run.error || run.status !== 0) fail('PROVIDER_FAILED', 'Внешний provider завершился без подтвержденного результата.');

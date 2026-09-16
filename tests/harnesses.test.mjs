@@ -10,8 +10,8 @@ test('harness registry keeps one native manifest and a distinct execution level 
   const values = inspectHarnesses({ env: { PATH: '' } });
   assert.deepEqual(values.map((item) => [item.id, item.detected, item.runtime.execution]), [
     ['codex', false, 'runtime-adapter'],
-    ['claude', false, 'restricted-cli-adapter'],
-    ['cursor', false, 'isolated-cli-adapter'],
+    ['claude', false, 'safe-readonly-cli-adapter'],
+    ['cursor', false, 'safe-readonly-cli-adapter'],
   ]);
 });
 
@@ -23,7 +23,7 @@ test('detection returns only an executable on PATH and never marks it as permiss
   chmodSync(claude, 0o700);
   const item = inspectHarnesses({ env: { PATH: root } }).find((value) => value.id === 'claude');
   assert.equal(item.detected, true);
-  assert.equal(item.runtime.execution, 'restricted-cli-adapter');
+  assert.equal(item.runtime.execution, 'safe-readonly-cli-adapter');
   assert.equal(item.runtime.status, 'available-after-probe');
 });
 

@@ -11,6 +11,7 @@ import { GraphError, hashObject } from './lib/io.mjs';
 import { SKILL_ROUTES } from './lib/config.mjs';
 const hash = hashObject('intake fixture');
 const skills = [...new Set(Object.values(SKILL_ROUTES).flat())].sort().map((id) => ({ id, path: `skills/${id}/SKILL.md`, hash }));
+const testClaude = path.resolve(import.meta.dirname, '../../tests/fixtures/verified-claude/node_modules/@anthropic-ai/claude-code/bin/claude.exe');
 function fixture(t) {
   const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'flowcairn-intake-')));
   t.after(() => {
@@ -24,7 +25,7 @@ function fixture(t) {
   writeFileSync(path.join(root, '.gitignore'), 'node_modules/\n');
   writeFileSync(path.join(root, 'AGENTS.md'), '# Правила проекта\n');
   git('add', '.'); git('commit', '-m', 'fixture baseline');
-  const installed = initializeProject(root, { provider: 'openai', model: 'gpt-4.1-mini', checks: 'tests', 'check-mode': 'hardened', 'package-manager': 'npm' });
+  const installed = initializeProject(root, { provider: 'claude', 'provider-path': testClaude, checks: 'tests', 'check-mode': 'hardened', 'package-manager': 'npm' });
   return { root, git, profile: installed.profile };
 }
 async function service(root, profile) {
@@ -54,7 +55,7 @@ test('first UI intake snapshots approved package/lock/rules changes and excludes
     snapshot: true, snapshotHash: preview.bootstrap.snapshotHash, includeUntracked: ['package-lock.json'] };
   const snapshot = await s.intake(body);
   assert.equal(snapshot.phase, 'planning');
-  assert.deepEqual(snapshot.gates[0].requiredPermissions, ['ai.read']);
+  assert.equal(snapshot.gates.some((gate) => gate.type === 'provider-consent'), true);
   const state = s.store.readRun(snapshot.runId), source = verifySourceBundle(state.sourceBundle);
   assert.ok(source.entries.some((entry) => entry.path === 'package-lock.json'));
   const requiredProfile = source.entries.find((entry) => entry.path === '.flowcairn.json');

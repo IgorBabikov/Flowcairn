@@ -10,7 +10,8 @@ import * as integration from '../scripts/ai-graph/lib/integration.mjs';
 import * as uninstall from '../scripts/ai-graph/lib/uninstall.mjs';
 import { acquireRuntimeLease } from '../scripts/ai-graph/lib/lifecycle.mjs';
 
-const options = { provider: 'openai', model: 'fixture-model' };
+const testClaude = path.resolve(import.meta.dirname, 'fixtures/verified-claude/node_modules/@anthropic-ai/claude-code/bin/claude.exe');
+const options = { provider: 'claude', 'provider-path': testClaude };
 function fixture(t) {
   const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'flowcairn-uninstall-cli-')));
   t.after(() => rmSync(root, { recursive: true, force: true }));

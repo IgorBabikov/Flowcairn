@@ -295,6 +295,8 @@ export async function setupCommand(input, options = {}, terminal = {}) {
   const resolved = {
     provider:current.values.provider, model:current.values.model,
     'model-mode':current.values.modelMode, 'reasoning-effort':current.values.reasoningEffort,
+    ...(current.values.providerPath ? {'provider-path':current.values.providerPath} : {}),
+    ...(current.values.providerVersion ? {'provider-version':current.values.providerVersion} : {}),
     'test-policy':current.values.testPolicy, coverage:current.values.coverage,
     ...selected,
   };
@@ -308,12 +310,12 @@ export async function setupCommand(input, options = {}, terminal = {}) {
 }
 
 function assertProviderPlatform(options) {
-  if (options.provider && !['codex', 'openai', 'claude', 'cursor'].includes(options.provider))
-    fail('PROVIDER_UNSUPPORTED', 'Выберите Codex, OpenAI API, Claude Code или Cursor.');
+  if (options.provider && !['codex', 'claude', 'cursor'].includes(options.provider))
+    fail('PROVIDER_UNSUPPORTED', 'Выберите Codex, Claude Code или Cursor. OpenAI API больше не поддерживается.');
   if (process.platform !== 'darwin' && (options.provider ?? defaultProvider()) === 'codex')
     fail(
       'PROVIDER_PLATFORM',
-      'Исполнение через Codex сейчас поддерживается только на macOS. На Linux используйте npx flowcairn init --provider openai --model MODEL_ID.',
+      'Исполнение через Codex сейчас поддерживается только на macOS. На Linux выберите установленный Claude Code или Cursor CLI.',
     );
 }
 
@@ -358,17 +360,17 @@ export function initializeProject(input, options = {}) {
     );
   if (!existingProfile) assertProviderPlatform(options);
   if (!existingProfile && selectedProvider === 'codex') {
-    const cli = inspectCodexInstallation({ codexPath: options['codex-path'] });
-    if (!cli.available)
-      fail('RUNNER_TOOLCHAIN_INVALID', 'Codex CLI не прошел проверку. Установите поддерживаемую версию 0.145.0 или 0.154.0. Настройка не сохранена.');
     if (!options.model)
       options = { ...options, model: 'provider-default', 'model-mode': 'provider' };
     if (options['model-mode'] === 'provider' || options.model === 'provider-default') codexModelSettings();
+    const cli = inspectCodexInstallation({ codexPath: options['codex-path'] });
+    if (!cli.available)
+      fail('RUNNER_TOOLCHAIN_INVALID', 'Codex CLI не прошел проверку или не авторизован. Выполните codex login и повторите. Настройка не сохранена.');
   }
   if (!existingProfile && !options.model)
     fail(
       'MODEL_REQUIRED',
-      'Нужен точный ID доступной вам модели. В терминале выполните npx flowcairn init, в скрипте — npx flowcairn init --model MODEL_ID. Для OpenAI добавьте --provider openai. Файлы не изменены.',
+      'Нужен проверенный AI CLI. Выполните npx flowcairn init и выберите Codex, Claude Code или Cursor. Файлы не изменены.',
     );
   if (
     !existingProfile &&

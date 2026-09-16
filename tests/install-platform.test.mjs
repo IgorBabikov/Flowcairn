@@ -13,7 +13,7 @@ test('native Windows and WSL1 refuse POSIX runtime, WSL2 refuses Windows FS even
   assert.throws(() => assertRuntimePlatform({ platform: 'win32', node: '22.1.0' }), { code: 'PLATFORM' });
   assert.throws(() => assertRuntimePlatform({ platform: 'linux', node: '24.0.0' }), { code: 'NODE_VERSION' });
   for (const platform of ['linux', 'darwin']) assertRuntimePlatform({ platform, node: '22.13.1' });
-  assert.equal(defaultProvider('linux'), 'openai');
+  assert.equal(defaultProvider('linux'), 'claude');
   assert.equal(defaultProvider('darwin'), 'codex');
   assert.throws(() => defaultProvider('win32'), { code: 'PLATFORM' });
   const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'flowcairn-platform-')));

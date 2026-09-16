@@ -41,8 +41,8 @@ Claude Code и Cursor не получают права из факта обна�
 
 | Assistant | Официальный non-interactive путь | Ограничения FS/network | Structured output | Что может уйти наружу | Graph Runtime |
 | --- | --- | --- | --- | --- | --- |
-| Claude Code | `claude -p --restricted --bare` | Restricted mode удаляет code/shell tools; Flowcairn запускает в private workspace, без project cwd | `--json-schema` + локальная Zod validation | Только approved scope, instructions, Skills и artifacts после отдельного consent | Работает после local version pin; tests используют synthetic CLI |
-| Cursor | `cursor-agent -p --output-format json` | Private empty workspace и project-local deny policy для Shell/Read/Write; `--force` не используется | JSON envelope + локальная строгая validation | Только approved scope, instructions, Skills и artifacts после отдельного consent | Работает после local version pin; tests используют synthetic CLI |
+| Claude Code | `claude -p --setting-sources "" --tools ""` | User/project/local settings, CLAUDE.md, Skills и hooks не загружаются; MCP отключен, tools отключены, auto-memory отключена; Flowcairn запускает в private workspace, без project cwd | `--json-schema` + локальная Zod validation | Только approved scope, instructions, Skills и artifacts после отдельного consent | Работает после local version pin и проверки актуальных safe flags; tests используют synthetic CLI |
+| Cursor | `cursor-agent -p --output-format json --sandbox enabled --mode ask` | Private empty workspace, sandbox и read-only Ask mode; `--force` не используется | JSON envelope + локальная строгая validation | Только approved scope, instructions, Skills и artifacts после отдельного consent | Работает после local version pin и проверки safe flags; tests используют synthetic CLI |
 
 Официальные источники: [Claude Code CLI](https://code.claude.com/docs/en/cli-reference), [Claude structured output](https://code.claude.com/docs/en/agent-sdk/structured-outputs), [Cursor CLI parameters](https://cursor.com/docs/cli/reference/parameters), [Cursor output format](https://cursor.com/docs/cli/reference/output-format).
 
@@ -52,7 +52,7 @@ Consent contract привязан hash-ами к plan, scope, instructions, Skil
 
 ## Модель и усиление
 
-В обычной настройке Codex Flowcairn использует модель и reasoning effort, выбранные в самом Codex. Он не передает `--model` и не переопределяет `model_reasoning_effort`.
+В обычной настройке Codex Flowcairn читает только модель и reasoning effort из конфигурации CLI и передает их явно в изолированный запуск. Выбор активного чата IDE не считывается.
 
 Автоматическое распределение между разными моделями требует отдельного согласия и проверенного списка моделей, доступных конкретному аккаунту. Flowcairn не угадывает такие модели и не включает routing молча.
 

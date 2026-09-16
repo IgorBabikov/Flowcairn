@@ -32,11 +32,18 @@ function verifiedClaudePackage(executable) {
   } catch { return null; }
 }
 
-function safeExecutable(candidate) {
+function safeProviderExecutable(candidate, provider) {
   try {
     const resolved = realpathSync(candidate), stat = statSync(resolved), uid = process.getuid?.();
-    return stat.isFile() && (stat.nlink === 1 || verifiedClaudePackage(resolved)) && (stat.mode & 0o111) !== 0 && (stat.mode & 0o022) === 0 && (uid === undefined || stat.uid === 0 || stat.uid === uid) ? resolved : null;
+    const claudePackage = provider === 'claude' ? verifiedClaudePackage(resolved) : null;
+    return stat.isFile() && (provider === 'claude' ? Boolean(claudePackage) : stat.nlink === 1) && (stat.mode & 0o111) !== 0 && (stat.mode & 0o022) === 0 && (uid === undefined || stat.uid === 0 || stat.uid === uid) ? resolved : null;
   } catch { return null; }
+}
+function supportsClaudeSafeVersion(version) {
+  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
+  if (!match) return false;
+  const [major, minor, patch] = match.slice(1).map(Number);
+  return major > 2 || (major === 2 && (minor > 1 || (minor === 1 && patch >= 198)));
 }
 function versionOf(executable) {
   const run = spawnSync(executable, ['--version'], { encoding: 'utf8', timeout: 10_000, maxBuffer: 16 * 1024, env: safeEnv, shell: false });
@@ -44,20 +51,38 @@ function versionOf(executable) {
   if (run.error || run.status !== 0 || !Version.safeParse(text).success) throw new GraphError('PROVIDER_VERSION_UNAVAILABLE', 'CLI не вернул безопасную точную версию.');
   return text;
 }
+function supportsCursorSafeExecution(executable) {
+  const run = spawnSync(executable, ['--help'], { encoding: 'utf8', timeout: 10_000, maxBuffer: 64 * 1024, env: safeEnv, shell: false });
+  const help = `${run.stdout ?? ''}`;
+  if (run.error || run.status !== 0 || !['--print', '--output-format', '--sandbox', '--mode'].every((flag) => help.includes(flag)))
+    throw new GraphError('PROVIDER_CAPABILITY_UNAVAILABLE', 'Cursor не поддерживает безопасный non-interactive режим Flowcairn.');
+}
+function hasExternalAuthentication(provider, executable) {
+  const run = spawnSync(executable, provider === 'claude' ? ['auth', 'status'] : ['status'], {
+    encoding: 'utf8', timeout: 10_000, maxBuffer: 16 * 1024,
+    env: { ...safeEnv, ...(process.env.HOME ? { HOME: process.env.HOME } : {}) }, shell: false,
+  });
+  if (run.error || run.status !== 0) return false;
+  if (provider !== 'claude') return true;
+  try { return JSON.parse(`${run.stdout ?? ''}`).loggedIn === true; } catch { return false; }
+}
 /** @param {'claude'|'cursor'} provider @param {{executable?: string, env?: NodeJS.ProcessEnv}} [options] */
 export function probeExternalProvider(provider, { executable, env = process.env } = {}) {
   const parsed = Provider.parse(provider);
   const candidates = executable ? [executable] : names[parsed].flatMap((name) => String(env.PATH ?? '').split(path.delimiter).filter(Boolean).map((dir) => path.join(dir, name)));
+  let reason = 'PROVIDER_CLI_UNAVAILABLE_OR_UNSAFE';
   for (const candidate of candidates) {
-    const resolved = safeExecutable(candidate);
+    const resolved = safeProviderExecutable(candidate, parsed);
     if (!resolved) continue;
     try {
       const version = versionOf(resolved), packageVersion = parsed === 'claude' ? verifiedClaudePackage(resolved) : null;
-      if (packageVersion && !version.startsWith(packageVersion)) continue;
+      if (parsed === 'claude' && (!packageVersion || !version.startsWith(packageVersion) || !supportsClaudeSafeVersion(packageVersion))) continue;
+      if (parsed === 'cursor') supportsCursorSafeExecution(resolved);
+      if (!hasExternalAuthentication(parsed, resolved)) { reason = 'PROVIDER_AUTH_REQUIRED'; continue; }
       return { available: true, executable: resolved, version };
     } catch { /* try next candidate */ }
   }
-  return { available: false, reason: 'PROVIDER_CLI_UNAVAILABLE_OR_UNSAFE' };
+  return { available: false, reason };
 }
 export function providerToolchain(ai) {
   const provider = Provider.safeParse(ai.provider);

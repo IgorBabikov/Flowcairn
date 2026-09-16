@@ -118,6 +118,8 @@ export const ProjectProfileSchema = z.strictObject({
     instructions: z.literal('preserve'),
   }).optional(),
   ai: z.strictObject({
+    // `openai` remains parseable only so an old local profile can be migrated
+    // through `flowcairn setup`; execution rejects it as retired.
     provider: z.enum(['codex', 'openai', 'claude', 'cursor']),
     model,
     reviewModel: model.optional(),
@@ -134,7 +136,7 @@ export const ProjectProfileSchema = z.strictObject({
       .max(1024)
       .refine((value) => path.isAbsolute(value) && !/[\0\r\n]/.test(value))
       .optional(),
-    providerVersion: z.string().min(1).max(160).regex(/^[a-zA-Z0-9][a-zA-Z0-9._ -]*$/).optional(),
+    providerVersion: z.string().min(1).max(160).regex(/^[a-zA-Z0-9][a-zA-Z0-9._ ()-]*$/).optional(),
     baseUrl: z
       .url()
       .refine((value) => {

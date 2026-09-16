@@ -108,7 +108,7 @@ pnpm exec flowcairn
 <details>
 <summary><strong>Модель, усиленный режим, Linux, Yarn и другие способы</strong></summary>
 
-На macOS по умолчанию используется Codex, на Linux — OpenAI API. Нужен ваш доступ к поддерживаемому провайдеру; ключ не вводится в поле ID модели.
+На macOS по умолчанию используется Codex, на Linux — Claude Code. Flowcairn работает только через локально настроенные Codex, Claude Code или Cursor CLI; API-ключ в поле модели не вводится.
 
 По умолчанию Flowcairn **не запускает scripts проекта**. Это безопасно для первого знакомства с неизвестным репозиторием: вы можете построить и согласовать Graph без запуска его `test`, `lint`, `typecheck` или `build`.
 
