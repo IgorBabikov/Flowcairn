@@ -47,7 +47,7 @@ import {
   disposeReviewEvidenceFile,
 } from './review-evidence.mjs';
 import { verifyToolchain } from './toolchain.mjs';
-import { hasTrustedLocalChecksConsent, loadProjectProfile, resolveProjectCheckScript } from './project.mjs';
+import { hasTrustedLocalChecksConsent, loadProjectProfile, resolveProjectCheckScript, RUNTIME_ROOT } from './project.mjs';
 import { fingerprintWorkspace } from './workspace.mjs';
 import { ExternalConsentSchema, providerToolchain } from './providers.mjs';
 import { codexModelSettings } from './codex-settings.mjs';
@@ -263,6 +263,23 @@ function regularReadable(candidate) {
   }
 }
 
+/** Runtime files may be hard-linked by a package manager or CI checkout. */
+function trustedRuntimeReadable(candidate) {
+  try {
+    const resolved = realpathSync(candidate);
+    const stat = statSync(resolved);
+    const expectedOwner = process.getuid?.();
+    return (
+      resolved.startsWith(`${RUNTIME_ROOT}${path.sep}`) &&
+      stat.isFile() &&
+      (stat.mode & 0o022) === 0 &&
+      (expectedOwner === undefined || stat.uid === 0 || stat.uid === expectedOwner)
+    );
+  } catch {
+    return false;
+  }
+}
+
 function fileDigest(candidate) {
   const resolved = realpathSync(candidate);
   const before = statSync(resolved);
@@ -354,7 +371,7 @@ function runnerToolchain(profile) {
   if (profile.ai.provider === 'openai')
     fail('PROVIDER_RETIRED', 'OpenAI API больше не поддерживается. Выполните flowcairn setup и выберите Codex, Claude Code или Cursor.');
   if (['claude', 'cursor'].includes(profile.ai.provider)) {
-    if (!['darwin', 'linux'].includes(process.platform) || !regularReadable(EXTERNAL_WORKER_FILE))
+    if (!['darwin', 'linux'].includes(process.platform) || !trustedRuntimeReadable(EXTERNAL_WORKER_FILE))
       fail('RUNNER_PLATFORM_UNSUPPORTED', 'External CLI adapter требует macOS/Linux и trusted worker.');
     const provider = providerToolchain(profile.ai);
     const identity = { nodeVersion: process.version, nodeDigest: fileDigest(NODE_BINARY), provider: provider.provider, providerPath: provider.executable, providerVersion: provider.version, providerDigest: provider.digest, workerDigest: fileDigest(EXTERNAL_WORKER_FILE) };
