@@ -1027,7 +1027,13 @@ export function App() {
       ) {
         setPending(null);
         if (operation.kind === 'control') await refreshSnapshot(operation.runId, true);
-        else await refreshRuns().catch(() => undefined);
+        else {
+          // Registration may have changed bootstrap state before failing.
+          // Refresh metadata for the next manual attempt, preserving the
+          // actual failure and the user's task text.
+          await api.project().then(context => setProject(context)).catch(() => undefined);
+          await refreshRuns().catch(() => undefined);
+        }
       }
     } finally {
       inFlightRef.current = false;

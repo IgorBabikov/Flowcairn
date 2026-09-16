@@ -5,7 +5,9 @@ import { GraphError, hashObject, sha256 } from './io.mjs';
 import { discoverProjectContext, readContextFile, safeContextPath } from './project-context.mjs';
 
 const MAX_SKILL_BYTES = 12 * 1024;
-const MAX_SKILLS_PROMPT_BYTES = 32 * 1024;
+// Four project Skills (up to 12 KiB each), plus scoped core/domain rules and
+// JSON framing, must fit without truncating owner instructions.
+const MAX_SKILLS_PROMPT_BYTES = 64 * 1024;
 const fail = (code, message) => { throw new GraphError(code, message); };
 const inside = (candidate, scope) => scope === '.' || candidate === scope || candidate.startsWith(`${scope}/`);
 const knownActions = Object.keys(CORE_SKILL_ROUTES);

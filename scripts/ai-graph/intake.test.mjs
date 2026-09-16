@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, realpathSync, rmSync, mkdirSync, readFileSync, writeFileSync, chmodSync, readdirSync, lstatSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync, mkdirSync, readFileSync, writeFileSync, chmodSync, readdirSync, lstatSync, existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { initializeProject } from '../../bin/flowcairn.mjs';
 import { WorkflowService } from './lib/service.mjs';
 import { captureSourceBundle, verifySourceBundle } from './lib/source.mjs';
-import { hashObject } from './lib/io.mjs';
+import { GraphError, hashObject } from './lib/io.mjs';
 import { SKILL_ROUTES } from './lib/config.mjs';
 const hash = hashObject('intake fixture');
 const skills = [...new Set(Object.values(SKILL_ROUTES).flat())].sort().map((id) => ({ id, path: `skills/${id}/SKILL.md`, hash }));
@@ -91,4 +91,43 @@ test('packaged capture worker returns a verified snapshot without executing AI',
     assert.equal(verifySourceBundle(source.bundlePath).sourceHash, source.manifest.sourceHash);
     assert.ok(source.manifest.entries.some(entry => entry.path === 'src/main.mjs'));
   } finally { s.close(); }
+});
+
+test('Skill preflight failure does not create a registry or stale the context; retry can succeed', async t => {
+  const f = fixture(t), s = await service(f.root, f.profile);
+  const preview = s.project();
+  const originalSkills = s.adapters.skills;
+  s.adapters.skills = () => { throw new GraphError('SKILLS_CONTEXT_TOO_LARGE', 'Skill limit'); };
+  const body = { prompt: 'Исправить значение', operationId: 'skill-preflight-retry', contextHash: preview.contextHash,
+    snapshot: true, snapshotHash: preview.bootstrap.snapshotHash, includeUntracked: [] };
+  await assert.rejects(s.intake(body), { code: 'SKILLS_CONTEXT_TOO_LARGE' });
+  assert.equal(existsSync(path.join(f.root, '.ai-orchestrator/state.json')), false);
+  assert.equal(s.project().contextHash, preview.contextHash);
+  s.adapters.skills = originalSkills;
+  assert.equal((await s.intake(body)).phase, 'planning');
+});
+
+test('unfinished old bootstrap can be resumed only with its identical snapshot', async t => {
+  const f = fixture(t), s = await service(f.root, f.profile);
+  let count = 0;
+  const originalSkills = s.adapters.skills;
+  s.adapters.skills = task => {
+    if (++count === 2) throw new GraphError('SKILLS_CONTEXT_TOO_LARGE', 'Old late Skill failure');
+    return originalSkills(task);
+  };
+  const initial = s.project();
+  await assert.rejects(s.intake({ prompt: 'Исправить значение', operationId: 'old-late-skill-failure',
+    contextHash: initial.contextHash, snapshot: true, snapshotHash: initial.bootstrap.snapshotHash, includeUntracked: [] }),
+  { code: 'SKILLS_CONTEXT_TOO_LARGE' });
+  assert.equal(existsSync(path.join(f.root, '.ai-orchestrator/state.json')), true);
+  s.adapters.skills = originalSkills;
+  const current = s.project();
+  assert.notEqual(current.contextHash, initial.contextHash);
+  const body = { prompt: 'Исправить значение', operationId: 'resume-old-bootstrap', contextHash: current.contextHash,
+    snapshot: true, snapshotHash: current.bootstrap.snapshotHash, includeUntracked: [] };
+  assert.equal((await s.intake(body)).phase, 'planning');
+  writeFileSync(path.join(f.root, 'src/main.mjs'), 'export const value = 2;\n');
+  const changed = s.project();
+  await assert.rejects(s.intake({ ...body, operationId: 'reject-changed-bootstrap', contextHash: changed.contextHash,
+    snapshotHash: changed.bootstrap.snapshotHash }), { code: 'DIRTY_ROOT' });
 });

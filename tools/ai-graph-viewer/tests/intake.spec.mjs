@@ -93,6 +93,28 @@ test('stale context requires a refresh and new request while preserving the task
   expect(requests[1].operationId).not.toBe(requests[0].operationId);
 });
 
+test('failed registration refreshes changed bootstrap metadata without hiding the original error', async ({ page }) => {
+  const options = { emptyUntilIntake: true, projectContext };
+  const fixture = await mockApi(page, snapshot(), options);
+  let first = true;
+  await page.route('**/api/intake', async route => {
+    if (!first) return route.fallback();
+    first = false;
+    options.projectContext = { ...projectContext, contextHash: 'd'.repeat(64) };
+    await route.fulfill({ status: 400, json: { error: { code: 'SKILLS_CONTEXT_TOO_LARGE', message: 'Контекст выбранных Skills слишком большой' } } });
+  });
+  await page.goto(`/#session=${token}`);
+  await page.getByLabel('Заголовок задачи', { exact: true }).fill('Исправить поиск');
+  await page.getByLabel('Полное описание задачи', { exact: true }).fill('Проверить пустой запрос');
+  await page.getByLabel('Номер задачи', { exact: true }).fill('TASK-101');
+  await page.getByRole('button', { name: 'Запустить', exact: true }).click();
+  await expect(page.locator('.dialog-error')).toContainText('Контекст выбранных Skills слишком большой');
+  await expect(page.getByLabel('Полное описание задачи', { exact: true })).toHaveValue('Проверить пустой запрос');
+  await page.getByRole('button', { name: 'Запустить', exact: true }).click();
+  await expect(page.locator('.react-flow')).toBeVisible();
+  expect(fixture.calls.find(call => call.action === 'intake').body.contextHash).toBe('d'.repeat(64));
+});
+
 
 test('approval shows only the skills and checks actually present in the backend plan', async ({page}) => {
   const current = snapshot();

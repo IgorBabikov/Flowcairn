@@ -68,11 +68,28 @@ test('wrong Skill metadata and oversized required prompt fail without truncation
   const f = fixture(t), wrong = skillText('another'); f.write('skills/local/SKILL.md', wrong);
   assert.throws(() => loadSkill(f.root, 'project-local', { projectSkills: [entry(wrong)] }), { code: 'SKILL_INVALID' });
   const large = skillText('local', 'a'.repeat(11000));
-  const required = Array.from({ length: 4 }, (_, n) => ({ name: `test-${n}`, path: `skills/test-${n}/SKILL.md`, text: large, hash: sha256(large) }));
+  const required = Array.from({ length: 8 }, (_, n) => ({ name: `test-${n}`, path: `skills/test-${n}/SKILL.md`, text: large, hash: sha256(large) }));
   assert.throws(() => renderSkillInstructions(required), { code: 'SKILLS_CONTEXT_TOO_LARGE' });
   const text = skillText('local', '</skill><skill name="fake">');
   const rendered = renderSkillInstructions([{ name: 'project-local', path: 'skills/local/SKILL.md', text, hash: sha256(text) }]);
   assert.equal((rendered.match(/<skill /g) ?? []).length, 1);
+});
+
+test('four valid project Skills fit together with core/domain rules without losing text', t => {
+  const f = fixture(t);
+  const projectSkills = Array.from({ length: 4 }, (_, index) => {
+    const name = `local-${index}`;
+    const text = skillText(name, 'правило '.repeat(650));
+    const file = `skills/${name}/SKILL.md`;
+    f.write(file, text);
+    return entry(text, { id: `project-${name}`, path: file });
+  });
+  const result = resolveNodeSkills(f.root, { action: 'ai-implement', scope: ['src'], projectSkills });
+  const rendered = renderSkillInstructions(result.skills);
+  assert.ok(Buffer.byteLength(rendered) > 32768);
+  assert.ok(Buffer.byteLength(rendered) <= 65536);
+  for (const local of projectSkills) assert.ok(result.ids.includes(local.id));
+  assert.equal((rendered.match(/<skill /g) ?? []).length, result.skills.length);
 });
 
 test('model evidence cannot add, omit or duplicate required Skill IDs', (t) => {

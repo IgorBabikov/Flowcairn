@@ -136,14 +136,28 @@ export async function createTask(input, taskInput, options = {}) {
   const firstTask = !existsNoFollow(stateFile);
   if (options.contextHash && options.service?.project().contextHash !== options.contextHash)
     fail('STALE_CONTEXT', 'Контекст проекта изменился до регистрации');
-  if (!firstTask && git(root, ['status', '--porcelain', '--untracked-files=all']))
-    fail(
-      'DIRTY_ROOT',
-      'В проекте есть незакоммиченные файлы. Сохраните изменения в Git; Flowcairn не коммитит и не прячет их автоматически. TaskSpec удобно хранить в .ai-orchestrator/.',
-    );
   const service = options.service ?? (await WorkflowService.open({ root }));
   try {
+  // Resolve and validate mandatory Skills before creating the Orchestrator
+  // registry. A failed preflight must not change firstTask/contextHash.
+  service.adapters.skills(task);
   let source;
+  if (!firstTask && git(root, ['status', '--porcelain', '--untracked-files=all'])) {
+    const existingState = JSON.parse(readRegular(stateFile, 16 * 1024 * 1024).toString('utf8'));
+    const canResumeBootstrap = options.snapshot === true && existingState.owner === ownerId &&
+      existingState.runStatus === 'active' && /^[a-f0-9]{64}$/.test(existingState.bootstrapSourceHash ?? '') &&
+      Array.isArray(existingState.tasks) && existingState.tasks.every(item =>
+        item.status === 'pending' && Array.isArray(item.attempts) && item.attempts.length === 0);
+    if (!canResumeBootstrap)
+      fail('DIRTY_ROOT', 'В проекте есть незакоммиченные файлы. Сохраните изменения в Git; Flowcairn не коммитит и не прячет их автоматически.');
+    const untracked = git(root, ['ls-files', '--others', '--exclude-standard', '-z']).split('\0').filter(Boolean);
+    task = TaskInputSchema.parse({ ...task, includeUntracked: uniqueBootstrapPaths(task.includeUntracked, ownedBootstrapFiles(root), untracked) });
+    source = await service.adapters.capture(task);
+    if (source.manifest.sourceHash !== existingState.bootstrapSourceHash)
+      fail('DIRTY_ROOT', 'Исходники отличаются от исходного снимка незавершенной регистрации. Сохраните изменения в Git перед новой задачей.');
+    if (options.contextHash && service.project().contextHash !== options.contextHash)
+      fail('STALE_CONTEXT', 'Исходники изменились во время восстановления регистрации');
+  }
   if (firstTask) {
     const untracked = git(root, ['ls-files', '--others', '--exclude-standard', '-z'])
       .split('\0')
@@ -231,4 +245,8 @@ export async function createTask(input, taskInput, options = {}) {
     ...(options.actor ? { actor: options.actor } : {}),
   });
   } finally { if (!options.service) service.close(); }
+}
+
+function uniqueBootstrapPaths(selected, owned, untracked) {
+  return [...new Set([...selected, ...owned.filter(file => untracked.includes(file.path)).map(file => file.path)])];
 }
