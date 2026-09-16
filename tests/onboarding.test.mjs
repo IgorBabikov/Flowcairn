@@ -5,6 +5,7 @@ import { mkdtempSync, realpathSync, writeFileSync, readFileSync, rmSync, existsS
 import os from 'node:os';
 import path from 'node:path';
 import { initializeProject, printInitialization } from '../bin/flowcairn.mjs';
+import { inspectCodexInstallation } from '../scripts/ai-graph/lib/runner.mjs';
 
 function fixture(t) {
   const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'flowcairn-onboarding-')));
@@ -13,6 +14,18 @@ function fixture(t) {
   writeFileSync(path.join(root, 'package.json'), JSON.stringify({name:'fixture',scripts:{test:'node --test',build:'node build.mjs'}}));
   writeFileSync(path.join(root, 'AGENTS.md'), 'Правила владельца');
   return root;
+}
+
+function requireVerifiedCodex(t) {
+  if (process.platform !== 'darwin') {
+    t.skip('Исполнение Codex ограничено macOS; Linux проверяет OpenAI API adapter.');
+    return false;
+  }
+  if (!inspectCodexInstallation().available) {
+    t.skip('Codex CLI не установлен или не прошел проверку в этой test-среде.');
+    return false;
+  }
+  return true;
 }
 const options = {provider:'openai', model:'test-model', 'model-mode':'manual', 'reasoning-effort':'high', 'test-policy':'keep', 'read-consent':true};
 
@@ -33,20 +46,14 @@ test('старый init не предоставляет разрешение н�
 });
 
 test('Codex init без ID модели сохраняет выбор из самого Codex', t => {
-  if (process.platform !== 'darwin') {
-    t.skip('Исполнение Codex ограничено macOS; Linux проверяет OpenAI API adapter.');
-    return;
-  }
+  if (!requireVerifiedCodex(t)) return;
   const result = initializeProject(fixture(t), {provider:'codex'});
   assert.equal(result.profile.ai.model, 'provider-default');
   assert.equal(result.profile.ai.modelMode, 'provider');
 });
 
 test('неинтерактивный Codex init проверяет CLI и его модель до записи профиля', async t => {
-  if (process.platform !== 'darwin') {
-    t.skip('Исполнение Codex ограничено macOS; Linux проверяет OpenAI API adapter.');
-    return;
-  }
+  if (!requireVerifiedCodex(t)) return;
   const configHome = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'flowcairn-codex-config-')));
   const previousConfigHome = process.env.CODEX_HOME;
   t.after(() => {
