@@ -613,20 +613,28 @@ test('ручной выбор сохраняет модель и усилени�
   } finally { RUNNER_TESTING.cleanupPrepared(prepared); }
 });
 
-test('режим provider не переопределяет модель и усиление, выбранные в Codex', async () => {
+test('режим provider передает только модель и усиление из настроек CLI', async () => {
   const { RUNNER_TESTING } = await import('./lib/runner.mjs');
   const contract = runnerContract();
   const outputPath = realpathSync(fixture());
+  const previousHome = process.env.CODEX_HOME;
+  process.env.CODEX_HOME = outputPath;
+  writeFileSync(path.join(outputPath, 'config.toml'), 'model="gpt-5.6-sol"\nmodel_reasoning_effort="high"\nnotify=["untrusted-command"]\n');
   const prepared = RUNNER_TESTING.makeAiCommand({ ...contract, worktree: '/private/tmp/isolated-worktree', skills: [], priorEvidence: null, outputPath,
     profile: { outputPaths: [], ai: { provider: 'codex', model: 'provider-default', modelMode: 'provider' } },
     toolchain: { node: NODE_BINARY, codexEntry: '/trusted/codex.js', digest: 'a'.repeat(64) },
     dependencyToolchain: { dependencyPaths: [], hash: 'b'.repeat(64) },
   });
   try {
-    assert.equal(prepared.command.args.includes('--model'), false);
-    assert.equal(prepared.command.args.some((value) => value.startsWith('model_reasoning_effort=')), false);
-    assert.equal(prepared.execution.model, 'provider-default');
-  } finally { RUNNER_TESTING.cleanupPrepared(prepared); }
+    assert.equal(prepared.command.args[prepared.command.args.indexOf('--model') + 1], 'gpt-5.6-sol');
+    assert.ok(prepared.command.args.includes('model_reasoning_effort="high"'));
+    assert.ok(prepared.command.args.includes('--ignore-user-config'));
+    assert.equal(prepared.execution.model, 'gpt-5.6-sol');
+    assert.equal(JSON.stringify(prepared.command.args).includes('untrusted-command'), false);
+  } finally {
+    RUNNER_TESTING.cleanupPrepared(prepared);
+    if (previousHome === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = previousHome;
+  }
 });
 
 test('большой lock исключается из AI context, его hash остается частью workspace integrity', async () => {

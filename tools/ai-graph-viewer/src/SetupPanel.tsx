@@ -20,9 +20,9 @@ export function SetupPanel({ onClose }: { onClose: () => void }) {
       <p>{setup.configured ? 'Первоначальная настройка завершена.' : 'Перед первой задачей завершите настройку.'}</p>
       <dl className="fact-list">
         <dt>AI-инструмент</dt><dd>{setup.providers.find(item => item.id === values.provider)?.label ?? values.provider}</dd>
-        <dt>Выбор модели</dt><dd>{values.modelMode === 'manual' ? 'Ручной' : 'Автоматический'}</dd>
-        <dt>Модель</dt><dd>{values.model || 'Не указана'}</dd>
-        <dt>Усиление</dt><dd>{values.reasoningEffort || 'Настройки AI-инструмента'}</dd>
+        <dt>Выбор модели</dt><dd>{values.modelMode === 'manual' ? 'Ручной' : values.modelMode === 'provider' ? 'Настройки CLI' : 'Отдельные настройки ревью'}</dd>
+        <dt>Модель</dt><dd>{values.model === 'provider-default' ? 'Не определена — настройте CLI или выберите вручную' : values.model || 'Не указана'}</dd>
+        <dt>Усиление</dt><dd>{values.modelMode === 'provider' && values.model === 'provider-default' ? 'Не определено' : values.reasoningEffort || 'Не определено'}</dd>
         <dt>Тесты</dt><dd>{values.testPolicy === 'add' ? 'Добавлять тесты по задаче' : 'Следовать правилам проекта'}</dd>
         <dt>Покрытие</dt><dd>{values.coverage ? 'Включено' : 'Не навязывается'}</dd>
         <dt>Контекст для AI</dt><dd>{values.readConsent ? 'Разрешен при настройке' : 'Требуется согласие'}</dd>

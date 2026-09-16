@@ -6,7 +6,7 @@ Flowcairn из текущего `main` — локальный инструмен
 
 | Режим | Предпосылки | Граница подтверждения |
 | --- | --- | --- |
-| Codex adapter | macOS, Codex CLI `0.145.0`, настроенная сессия, доступная модель | Изоляция зависит от поддерживаемых CLI permissions и macOS sandbox; другие версии/ОС не обещаются |
+| Codex adapter | macOS, Codex CLI `0.145.0` или `0.154.0`, настроенная сессия, доступная модель | Изоляция зависит от поддерживаемых CLI permissions и macOS sandbox; выбор активного чата VS Code не считывается; другие версии/ОС не обещаются |
 | OpenAI API adapter | Linux или macOS как целевые платформы, собственный API-ключ, доступная модель | Tool-free адаптер; реальный внешний AI E2E на Linux пока не подтвержден |
 | Claude Code / Cursor adapter | Linux или macOS, найденный CLI с exact version pin, настроенная provider session и per-plan consent | Synthetic transport tests не доказывают доступ аккаунта, тариф, policy организации или качество реального ответа |
 | Checks, новый проект | Не запускаются автоматически | План и AI-этапы не подтверждают выполнение project scripts |

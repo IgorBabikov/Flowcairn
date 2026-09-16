@@ -36,7 +36,8 @@ import {
 import { TaskInputSchema } from '../scripts/ai-graph/lib/schemas.mjs';
 import { WorkflowService, sanitizeText } from '../scripts/ai-graph/lib/service.mjs';
 import { runCli } from '../scripts/ai-graph/cli.mjs';
-import { probeRunner, probeLocalChecks } from '../scripts/ai-graph/lib/runner.mjs';
+import { probeRunner, probeLocalChecks, inspectCodexInstallation } from '../scripts/ai-graph/lib/runner.mjs';
+import { codexModelSettings } from '../scripts/ai-graph/lib/codex-settings.mjs';
 import { probeChecks, prepareCheckImage } from '../scripts/ai-graph/lib/docker-checks.mjs';
 import { startViewer } from '../tools/ai-graph-viewer/server.mjs';
 import { discoverWorkspaceManifests } from './workspaces.mjs';
@@ -328,8 +329,6 @@ export function initializeProject(input, options = {}) {
     if (!probe.available) fail('PROVIDER_TOOLCHAIN_INVALID', 'Claude Code/Cursor не найден или не прошел безопасную проверку версии.');
     options = { ...options, model: 'provider-default', 'model-mode': 'provider', 'provider-path': probe.executable, 'provider-version': probe.version };
   }
-  if (!existingProfile && !options.model && selectedProvider === 'codex')
-    options = { ...options, model: 'provider-default', 'model-mode': 'provider' };
   if (existingProfile && options.skills !== undefined &&
       JSON.stringify([...new Set(csv(options.skills))].sort()) !== JSON.stringify((existingProfile.skillManifest ?? []).map((entry) => entry.id.slice('project-'.length)).sort()))
     fail('SKILL_PROFILE_EXISTS', 'Профиль уже настроен. Позднее изменение выбранных Skills пока не поддерживается; текущий профиль сохранен.');
@@ -358,6 +357,14 @@ export function initializeProject(input, options = {}) {
       'В проекте уже есть .ai-orchestrator. Сначала проверьте существующую систему; ее состояние не перезаписывается.',
     );
   if (!existingProfile) assertProviderPlatform(options);
+  if (!existingProfile && selectedProvider === 'codex') {
+    const cli = inspectCodexInstallation({ codexPath: options['codex-path'] });
+    if (!cli.available)
+      fail('RUNNER_TOOLCHAIN_INVALID', 'Codex CLI не прошел проверку. Установите поддерживаемую версию 0.145.0 или 0.154.0. Настройка не сохранена.');
+    if (!options.model)
+      options = { ...options, model: 'provider-default', 'model-mode': 'provider' };
+    if (options['model-mode'] === 'provider' || options.model === 'provider-default') codexModelSettings();
+  }
   if (!existingProfile && !options.model)
     fail(
       'MODEL_REQUIRED',

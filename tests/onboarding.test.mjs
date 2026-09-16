@@ -42,6 +42,43 @@ test('Codex init без ID модели сохраняет выбор из са�
   assert.equal(result.profile.ai.modelMode, 'provider');
 });
 
+test('неинтерактивный Codex init проверяет CLI и его модель до записи профиля', async t => {
+  if (process.platform !== 'darwin') {
+    t.skip('Исполнение Codex ограничено macOS; Linux проверяет OpenAI API adapter.');
+    return;
+  }
+  const configHome = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'flowcairn-codex-config-')));
+  const previousConfigHome = process.env.CODEX_HOME;
+  t.after(() => {
+    if (previousConfigHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previousConfigHome;
+    rmSync(configHome, { recursive: true, force: true });
+  });
+  process.env.CODEX_HOME = configHome;
+  writeFileSync(path.join(configHome, 'config.toml'), 'model = "gpt-5.6-sol"\nmodel_reasoning_effort = "high"\n');
+  const configuredRoot = fixture(t);
+  const configured = initializeProject(configuredRoot, {provider:'codex'});
+  assert.equal(configured.profile.ai.modelMode, 'provider');
+  const { inspectOnboarding } = await import('../bin/onboarding.mjs');
+  assert.deepEqual(
+    ((inspectOnboarding(configuredRoot).values)),
+    {
+      provider: 'codex', model: 'gpt-5.6-sol', modelMode: 'provider', reasoningEffort: 'high',
+      testPolicy: 'keep', coverage: false, readConsent: false,
+    },
+  );
+
+  writeFileSync(path.join(configHome, 'config.toml'), 'model = "gpt-5.6-sol"\n');
+  const blocked = fixture(t);
+  assert.throws(() => initializeProject(blocked, {provider:'codex'}), {code:'CODEX_MODEL_SETTINGS_REQUIRED'});
+  assert.equal(existsSync(path.join(blocked,'.flowcairn.json')), false);
+  assert.equal(existsSync(path.join(blocked,'.ai-orchestrator')), false);
+
+  const unavailable = fixture(t);
+  assert.throws(() => initializeProject(unavailable, {provider:'codex','codex-path':path.join(unavailable,'missing-codex')}), {code:'RUNNER_TOOLCHAIN_INVALID'});
+  assert.equal(existsSync(path.join(unavailable,'.flowcairn.json')), false);
+});
+
 test('итог первого запуска говорит о следующем шаге без технической сводки', () => {
   let text = '';
   const original = process.stdout.write;
@@ -62,14 +99,18 @@ test('итог первого запуска говорит о следующе�
 
 test('непроверенный provider и противоречивый ручной режим не создают профиль', t => {
   const root = fixture(t);
-  for (const provider of ['claude','cursor']) assert.throws(() => initializeProject(root,{...options,provider}), {code:'PROVIDER_TOOLCHAIN_INVALID'});
+  for (const provider of ['claude','cursor']) assert.throws(() => initializeProject(root,{...options,provider,'provider-path':path.join(root,'missing-cli')}), {code:'PROVIDER_TOOLCHAIN_INVALID'});
   assert.throws(() => initializeProject(root,{...options,'review-model':'other-model'}), {code:'AI_CONFIG'});
   assert.equal(existsSync(path.join(root,'.flowcairn.json')),false);
 });
 
 test('Claude и Cursor доступны только после local capability probe', async t => {
   const { inspectOnboarding } = await import('../bin/onboarding.mjs');
-  const status = inspectOnboarding(fixture(t));
+  const previousPath = process.env.PATH;
+  process.env.PATH = '';
+  let status;
+  try { status = inspectOnboarding(fixture(t)); }
+  finally { process.env.PATH = previousPath; }
   for (const id of ['claude', 'cursor']) {
     const provider = status.providers.find((item) => item.id === id);
     assert.equal(provider.supported, false);

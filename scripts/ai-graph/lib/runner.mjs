@@ -50,10 +50,12 @@ import { verifyToolchain } from './toolchain.mjs';
 import { hasTrustedLocalChecksConsent, loadProjectProfile, resolveProjectCheckScript } from './project.mjs';
 import { fingerprintWorkspace } from './workspace.mjs';
 import { ExternalConsentSchema, providerToolchain } from './providers.mjs';
+import { codexModelSettings } from './codex-settings.mjs';
 
 const NODE_BINARY = realpathSync(process.execPath);
 const NODE_BIN = path.dirname(NODE_BINARY);
-const CODEX_VERSION = 'codex-cli 0.145.0';
+const CODEX_VERSIONS = ['0.145.0', '0.154.0'];
+const CODEX_VERSION = 'codex-cli 0.154.0';
 const PNPM_VERSION = '11.8.0';
 const SANDBOX_EXEC = '/usr/bin/sandbox-exec';
 const OPENAI_WORKER_FILE = fileURLToPath(new URL('./openai-worker.mjs', import.meta.url));
@@ -333,15 +335,17 @@ function discoverCodex(ai) {
       const entry = realpathSync(candidate);
       if (path.basename(entry) !== 'codex.js') continue;
       const root = path.resolve(path.dirname(entry), '..');
-      const manifest = packageVersion(root, '@openai/codex', '0.145.0');
-      return { root, entry, manifest };
+      for (const version of CODEX_VERSIONS) {
+        try { return { root, entry, manifest: packageVersion(root, '@openai/codex', version) }; }
+        catch { /* Try the next explicit compatible release. */ }
+      }
     } catch {
       /* Only a verified pinned installation is eligible. */
     }
   }
   fail(
     'RUNNER_TOOLCHAIN_INVALID',
-    'Укажите ai.codexPath для проверенной установки @openai/codex@0.145.0',
+    'Укажите ai.codexPath для проверенной установки @openai/codex версии 0.145.0 или 0.154.0',
   );
 }
 
@@ -378,7 +382,7 @@ function runnerToolchain(profile) {
   const platformName = process.arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64';
   const triple = process.arch === 'arm64' ? 'aarch64-apple-darwin' : 'x86_64-apple-darwin';
   const nativeRoot = path.join(codex.root, 'node_modules', '@openai', `codex-${platformName}`);
-  const nativeManifest = packageVersion(nativeRoot, '@openai/codex', `0.145.0-${platformName}`);
+  const nativeManifest = packageVersion(nativeRoot, '@openai/codex', `${codex.manifest.version}-${platformName}`);
   const native = path.join(nativeRoot, 'vendor', triple, 'bin', 'codex');
   if (!regularExecutable(native))
     fail('RUNNER_TOOLCHAIN_INVALID', 'Codex native binary небезопасен');
@@ -607,6 +611,8 @@ function makeAiCommand({
       ? (profile.ai.reviewModel ?? profile.ai.model)
       : profile.ai.model;
     const providerManaged = Reflect.get(profile.ai, 'modelMode') === 'provider' || selectedModel === 'provider-default';
+    const inherited = providerManaged ? codexModelSettings() : null;
+    const effectiveModel = inherited?.model ?? selectedModel;
     const args = [
       'exec',
       '--ignore-user-config',
@@ -635,14 +641,14 @@ function makeAiCommand({
       `shell_environment_policy.set={PATH=${tomlString(TRUSTED_PATH)},NO_COLOR="1",OPENSSL_CONF="/dev/null"}`,
       '-',
     ];
-    if (!providerManaged) {
+    {
       const firstConfig = args.indexOf('--config');
-      args.splice(firstConfig, 0, '--model', selectedModel);
-      const effort = Reflect.get(profile.ai, 'modelMode') === 'manual'
+      args.splice(firstConfig, 0, '--model', effectiveModel);
+      const effort = inherited?.reasoningEffort ?? (Reflect.get(profile.ai, 'modelMode') === 'manual'
         ? (Reflect.get(profile.ai, 'reasoningEffort') ?? 'medium')
         : node.action.id === 'ai-review'
           ? (Reflect.get(profile.ai, 'reviewReasoningEffort') ?? Reflect.get(profile.ai, 'reasoningEffort') ?? 'high')
-          : (Reflect.get(profile.ai, 'reasoningEffort') ?? 'medium');
+          : (Reflect.get(profile.ai, 'reasoningEffort') ?? 'medium'));
       args.splice(firstConfig + 4, 0, '--config', `model_reasoning_effort="${effort}"`);
     }
     const prompt = buildPrompt({
@@ -673,8 +679,8 @@ function makeAiCommand({
       maxOutputBytes: MAX_AI_PROCESS_OUTPUT,
       execution: Object.freeze({
         provider: 'codex',
-        cliVersion: CODEX_VERSION,
-        model: providerManaged ? 'provider-default' : selectedModel,
+        cliVersion: toolchain.identity?.codexVersion ? `codex-cli ${toolchain.identity.codexVersion}` : CODEX_VERSION,
+        model: effectiveModel,
         sandboxDigest: sha256(
           canonicalJson({
             profileName,
@@ -1450,6 +1456,7 @@ export async function probeRunner({ root }) {
   let toolchain;
   try {
     toolchain = runnerToolchain(profile);
+    if (profile.ai.modelMode === 'provider' || profile.ai.model === 'provider-default') codexModelSettings();
     details.toolchainDigest = toolchain.digest;
   } catch (error) {
     const reason = errorReason(error, 'RUNNER_TOOLCHAIN_INVALID');
@@ -1504,7 +1511,7 @@ export async function probeRunner({ root }) {
     sandboxHelp.error === undefined &&
     regularExecutable(SANDBOX_EXEC) &&
     details.node.actual === process.version &&
-    details.codex.actual === CODEX_VERSION &&
+    details.codex.actual === `codex-cli ${Reflect.get(toolchain.identity, 'codexVersion')}` &&
     execFlagsReady &&
     details.sandbox.permissionProfiles;
   return {
@@ -1532,3 +1539,12 @@ export const RUNNER_TESTING = Object.freeze({
   discoverCodex,
   cleanupPrepared,
 });
+
+export function inspectCodexInstallation(ai = {}) {
+  try {
+    const toolchain = runnerToolchain({ ai: { ...ai, provider: 'codex' } });
+    return { available: true, reason: null, version: Reflect.get(toolchain.identity, 'codexVersion') };
+  } catch (error) {
+    return { available: false, reason: errorReason(error, 'RUNNER_TOOLCHAIN_INVALID'), version: null };
+  }
+}

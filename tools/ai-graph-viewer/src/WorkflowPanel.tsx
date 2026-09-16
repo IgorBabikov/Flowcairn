@@ -20,7 +20,7 @@ export function WorkflowPanel({ snapshot, plan, busy, onApprove, onRevise, onSta
   const readyWithoutGate = snapshot.status === 'ready' && !gate;
   const waitingToStart = snapshot.phase === 'planning' && readyWithoutGate;
   const unavailableReason = readyWithoutGate && snapshot.capabilities.run?.allowed === false
-    ? humanText(snapshot.capabilities.run.reason || snapshot.runner?.ai.reason) || 'Исполнитель сейчас недоступен.'
+    ? humanText(snapshot.runner?.ai.available === false ? snapshot.runner.ai.reason : snapshot.capabilities.run.reason) || 'Исполнитель сейчас недоступен.'
     : null;
   const blocked = Boolean(snapshot.failureReason || unavailableReason) || ['failed', 'uncertain', 'stale'].includes(snapshot.status) || !snapshot.integrity.valid;
   const current = snapshot.nodes.find(node => node.id === snapshot.activeNodeId) ?? snapshot.nodes.find(node => ['failed', 'uncertain', 'running'].includes(node.status));

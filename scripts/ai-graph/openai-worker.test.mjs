@@ -221,6 +221,8 @@ test('Codex path discovery does not assume Node and CLI share install prefix', (
   writeFileSync(entry, '// test fixture only');
   chmodSync(entry, 0o644);
   assert.equal(RUNNER_TESTING.discoverCodex({ codexPath: entry }).entry, entry);
+  writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: '@openai/codex', version: '0.154.0' }));
+  assert.equal(RUNNER_TESTING.discoverCodex({ codexPath: entry }).manifest.version, '0.154.0');
   writeFileSync(
     path.join(root, 'package.json'),
     JSON.stringify({ name: '@openai/codex', version: '0.1.0' }),

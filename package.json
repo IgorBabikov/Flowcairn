@@ -1,6 +1,6 @@
 {
   "name": "flowcairn",
-  "version": "0.2.19",
+  "version": "0.2.20",
   "description": "AI-разработка по проверяемому плану: задачи, Graph, React Flow и Skills вашего проекта",
   "type": "module",
   "license": "MIT",
@@ -48,6 +48,7 @@
   },
   "dependencies": {
     "picomatch": "4.0.7",
+    "smol-toml": "1.8.0",
     "yaml": "2.9.1",
     "zod": "4.4.3"
   },

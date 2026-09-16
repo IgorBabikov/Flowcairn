@@ -68,6 +68,7 @@ const reasons: Record<string, string> = {
   USE_DOCKER_PROBE: 'Требуется проверка среды Docker',
   UNSUPPORTED_PLATFORM: 'Эта платформа не поддерживается',
   RUNNER_TOOLCHAIN_INVALID: 'Инструменты исполнителя не прошли проверку',
+  CODEX_MODEL_SETTINGS_REQUIRED: 'Модель и усиление CLI не определены. Задайте их в настройках Flowcairn или конфигурации Codex CLI.',
   PROJECT_PROFILE_INVALID: 'Настройки проекта не прошли проверку',
   LOCAL_OPENAI_WORKER_READY_REAL_AI_UNVERIFIED:
     'Исполнитель настроен; реальный запуск AI еще не проверен',

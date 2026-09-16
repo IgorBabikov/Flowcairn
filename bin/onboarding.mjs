@@ -10,6 +10,8 @@ import { readIntegrationTarget, replaceIntegrationFile } from '../scripts/ai-gra
 import { migrateProjectProfile } from '../scripts/ai-orchestrator.mjs';
 import { inspectHarnesses } from '../scripts/ai-graph/lib/harnesses.mjs';
 import { probeExternalProvider } from '../scripts/ai-graph/lib/providers.mjs';
+import { codexModelSettings } from '../scripts/ai-graph/lib/codex-settings.mjs';
+import { inspectCodexInstallation } from '../scripts/ai-graph/lib/runner.mjs';
 
 const effort = z.enum(['low', 'medium', 'high', 'xhigh']);
 const SetupSchema = z.strictObject({
@@ -35,6 +37,10 @@ export function inspectOnboarding(root) {
   try { profile = loadProjectProfile(root); }
   catch (error) { if (error.code !== 'PROJECT_PROFILE_MISSING') throw error; }
   const harnesses = new Map(inspectHarnesses().map((item) => [item.id, item]));
+  let inherited = null;
+  if (profile?.ai.provider === 'codex' && (profile.ai.modelMode === 'provider' || profile.ai.model === 'provider-default')) {
+    try { inherited = codexModelSettings(); } catch { /* Missing defaults stay explicit in UI. */ }
+  }
   const externalProvider = (id) => {
     const harness = harnesses.get(id);
     const probe = probeExternalProvider(id, { executable: harness?.executable });
@@ -51,14 +57,15 @@ export function inspectOnboarding(root) {
     configured: Boolean(profile && hasOnboardingConsent(root, profile)),
     profileHash: profile ? projectProfileHash(root) : null,
     providers: [
-      { id: 'codex', label: 'Codex', supported: process.platform === 'darwin', state: process.platform === 'darwin' ? 'available' : 'unsupported-platform', reason: process.platform === 'darwin' ? null : 'Изолированный исполнитель Codex проверен только на macOS.' },
+      (() => { const cli = inspectCodexInstallation(profile?.ai ?? {}); return { id: 'codex', label: 'Codex', supported: cli.available, state: cli.available ? 'available' : 'not-detected', reason: cli.reason }; })(),
       { id: 'openai', label: 'OpenAI API', supported: true, state: 'available', reason: null },
       externalProvider('claude'),
       externalProvider('cursor'),
     ],
     values: {
       provider: profile?.ai.provider ?? defaultProvider(), model: profile?.ai.model ?? '',
-      modelMode: profile?.ai.modelMode ?? 'manual', reasoningEffort: profile?.ai.reasoningEffort ?? 'medium',
+      modelMode: profile?.ai.modelMode ?? 'manual', reasoningEffort: inherited?.reasoningEffort ?? profile?.ai.reasoningEffort ?? 'medium',
+      ...(inherited ? { model: inherited.model } : {}),
       ...(profile?.ai.reviewModel ? { reviewModel: profile.ai.reviewModel } : {}),
       ...(profile?.ai.reviewReasoningEffort ? { reviewReasoningEffort: profile.ai.reviewReasoningEffort } : {}),
       testPolicy: profile?.onboarding?.testPolicy ?? 'keep', coverage: profile?.onboarding?.coverage ?? false,
@@ -67,7 +74,7 @@ export function inspectOnboarding(root) {
       ...(profile?.ai.providerVersion ? { providerVersion: profile.ai.providerVersion } : {}),
     },
     limitations: [
-      'Для Codex обычный режим наследует выбранную в Codex модель и усиление. OpenAI API требует явную модель.',
+      'Codex: модель и усиление считываются из конфигурации CLI. Настройки активного чата VS Code не считываются. Можно выбрать модель вручную в Flowcairn.',
       'Обычные проверки запускаются в отдельной worktree без Docker. Это не контейнерная песочница: доверяйте коду проекта и зависимостям.',
       'Docker остается дополнительным усиленным режимом проверок и не нужен для первого запуска.',
       'Поддержка исполнения: Node.js 22, macOS и Linux; native Windows не поддерживается. WSL2 требует Linux-файловую систему.',
@@ -106,11 +113,15 @@ export async function collectOnboarding(root, options = {}, terminal = {}) {
     if (['claude', 'cursor'].includes(provider) && !external?.available)
       fail('PROVIDER_TOOLCHAIN_INVALID', `${provider === 'claude' ? 'Claude Code' : 'Cursor Agent'} не найден или не прошел проверку версии. Установите официальный CLI и повторите.`);
     if (provider === 'codex' && process.platform !== 'darwin') fail('PROVIDER_PLATFORM', 'Исполнение Codex пока доступно только на macOS.');
+    if (provider === 'codex') {
+      const cli = inspectCodexInstallation();
+      if (!cli.available) fail('RUNNER_TOOLCHAIN_INVALID', 'Codex CLI не прошел проверку. Установите поддерживаемую версию 0.145.0 или 0.154.0. Настройка не сохранена.');
+    }
     const advanced = options.advanced === true;
     step(output, 2, 'Как выбирать модель');
     const providerManaged = ['codex', 'claude', 'cursor'].includes(provider) && !advanced && options['model-mode'] === undefined;
     if (providerManaged)
-      output.write(`${paint(output, '38;5;245', 'Flowcairn использует модель и усиление, выбранные в вашем Codex. ID модели вводить не нужно.')}\n`);
+      output.write(`${paint(output, '38;5;245', 'Flowcairn использует настройки отдельного CLI. Выбор активного чата в VS Code не наследуется.')}\n`);
     else if (['codex', 'claude', 'cursor'].includes(provider))
       output.write(`${paint(output, '38;5;245', 'Укажите модель и усиление, только если хотите переопределить настройки Codex для Flowcairn.')}\n`);
     else
@@ -119,6 +130,10 @@ export async function collectOnboarding(root, options = {}, terminal = {}) {
       ? await choice('model-mode', 'Режим: provider — настройки Codex, manual — одна модель, auto — отдельные настройки ревью [Enter — manual]: ', ['provider','manual','auto'], 'manual')
       : options['model-mode'] ?? 'manual';
     if (mode === 'provider' && !['codex', 'claude', 'cursor'].includes(provider)) fail('ONBOARDING_CHOICE', 'Этот провайдер требует явный ID модели.');
+    if (provider === 'codex' && mode === 'provider') {
+      const settings = codexModelSettings();
+      output.write(`Модель CLI: ${settings.model}; усиление: ${settings.reasoningEffort}.\n`);
+    }
     const model = mode === 'provider' ? 'provider-default' : options.model ?? await ask('ID модели, например gpt-5.6-terra: ', '');
     if (!model) fail('MODEL_REQUIRED', 'Нужен ID модели. Файлы не изменены.');
     const reasoning = mode === 'provider' ? undefined : advanced ? await choice('reasoning-effort', 'Усиление: low, medium, high или xhigh [Enter — medium]: ', ['low','medium','high','xhigh'], 'medium') : options['reasoning-effort'] ?? 'medium';
