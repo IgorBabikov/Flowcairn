@@ -88,22 +88,24 @@ function assertSafePath(value) {
 
 function isSensitiveSourcePath(relativePath) {
   const parts = relativePath.toLowerCase().split('/');
-  const name = parts.at(-1);
-  const allowedTemplate = /^\.env(?:\.[^/]+)*\.(?:example|sample|template)$/.test(name);
-  return (
-    (!allowedTemplate && (name === '.env' || name.startsWith('.env.'))) ||
-    [
-      '.npmrc',
-      '.pypirc',
-      '.netrc',
-      'credentials',
-      'credentials.json',
-      'id_rsa',
-      'id_ed25519',
-    ].includes(name) ||
-    /(?:^|[._-])secrets?(?:[._-](?:json|ya?ml|toml|txt))?$/.test(name) ||
-    /\.(?:key|pem|p12|pfx)$/.test(name)
-  );
+  return parts.some((name, index) => {
+    const allowedTemplate =
+      index === parts.length - 1 && /^\.env(?:\.[^/]+)*\.(?:example|sample|template)$/.test(name);
+    return (
+      (!allowedTemplate && (name === '.env' || name.startsWith('.env.'))) ||
+      [
+        '.npmrc',
+        '.pypirc',
+        '.netrc',
+        'credentials',
+        'credentials.json',
+        'id_rsa',
+        'id_ed25519',
+      ].includes(name) ||
+      /(?:^|[._-])secrets?(?:[._-](?:json|ya?ml|toml|txt))?$/.test(name) ||
+      /\.(?:key|pem|p12|pfx)$/.test(name)
+    );
+  });
 }
 
 function assertNotSensitivePath(relativePath) {

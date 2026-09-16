@@ -153,17 +153,22 @@ test('rejects ignored, sensitive and traversal paths from allowedUntracked', () 
 test('withholds tracked sensitive paths without copying their bytes into the bundle', () => {
   const root = repository();
   writeFileSync(path.join(root, '.npmrc'), '//registry.example.test/:_authToken=private-token\n');
-  git(root, ['add', '.npmrc']);
+  mkdirSync(path.join(root, 'secrets'));
+  writeFileSync(path.join(root, 'secrets', 'api.txt'), 'private-api-value\n');
+  git(root, ['add', '.npmrc', 'secrets/api.txt']);
   writeFileSync(path.join(root, '.npmrc'), '//registry.example.test/:_authToken=changed-private-token\n');
 
   const captured = captureSourceBundle(root, storage());
-  assert.deepEqual(captured.manifest.withheldPaths, ['.npmrc']);
+  assert.deepEqual(captured.manifest.withheldPaths, ['.npmrc', 'secrets/api.txt']);
   assert.equal(captured.manifest.entries.some((entry) => entry.path === '.npmrc'), false);
+  assert.equal(captured.manifest.entries.some((entry) => entry.path === 'secrets/api.txt'), false);
   assert.equal(JSON.stringify(captured.manifest).includes('private-token'), false);
+  assert.equal(JSON.stringify(captured.manifest).includes('private-api-value'), false);
 
   const target = path.join(realpathSync(path.dirname(storage())), 'materialized-withheld');
   materializeSourceBundle(captured.bundlePath, target);
   assert.equal(existsSync(path.join(target, '.npmrc')), false);
+  assert.equal(existsSync(path.join(target, 'secrets', 'api.txt')), false);
 });
 
 test('ignores inherited Git routing variables and uses the requested repository', () => {
