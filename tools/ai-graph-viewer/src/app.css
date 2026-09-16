@@ -1253,6 +1253,10 @@ dialog::backdrop {
 .task-composer textarea { min-height: 150px; width: 100%; resize: vertical; border: 1px solid var(--border-strong); border-radius: 12px; padding: 16px; background: var(--surface); line-height: 1.55; caret-color: var(--plum); }
 .task-composer textarea::placeholder { color: var(--muted); }
 .task-composer textarea:disabled { opacity: 0.75; }
+.intake-progress { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: .9rem; }
+.intake-progress::before { content: ''; width: 14px; height: 14px; border: 2px solid var(--border-strong); border-top-color: var(--plum); border-radius: 50%; animation: intake-spin .75s linear infinite; }
+@keyframes intake-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .intake-progress::before { animation: none; } }
 .task-prompt-label { font-size: 0.85rem; font-weight: 600; margin-bottom: -8px; }
 .intake-context { display: flex; flex-wrap: wrap; gap: 10px 24px; font-size: 0.85rem; align-items: baseline; }
 .intake-context details { flex: 1; min-width: 180px; }

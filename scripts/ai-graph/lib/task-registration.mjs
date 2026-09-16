@@ -1,6 +1,6 @@
 // Shared domain registration for CLI and local UI. No browser or CLI dependencies.
 import { randomUUID } from 'node:crypto';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { GraphError, hashObject } from './io.mjs';
@@ -8,16 +8,21 @@ import { loadProjectProfile, RUNTIME_ROOT } from './project.mjs';
 import { Id, TaskInputSchema } from './schemas.mjs';
 import { WorkflowService, sanitizeText } from './service.mjs';
 import { ownedBootstrapFiles } from './bootstrap.mjs';
+import { boundedProcess } from './bounded-process.mjs';
 const OWNER_FILE = '.ai-orchestrator/flowcairn-install.json';
 const PROFILE = '.flowcairn.json';
 const CHECKS = ['typecheck', 'lint', 'tests', 'build'];
+const ORCHESTRATOR_TIMEOUT_MS = 20_000;
 function fail(code, message) {
   throw new GraphError(code, message);
 }
 function git(root, args) {
-  return execFileSync('/usr/bin/git', ['-C', root, ...args], {
+  return execFileSync('/usr/bin/git', ['-C', root, '-c', 'core.fsmonitor=false', ...args], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: 10_000,
+    maxBuffer: 2 * 1024 * 1024,
+    env: { PATH: '/usr/bin:/bin', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_OPTIONAL_LOCKS: '0' },
   }).trim();
 }
 
@@ -89,15 +94,15 @@ function owner(root) {
     fail('INSTALL_CONFLICT', 'Некорректная локальная установка.');
   return value.owner;
 }
-function orchestrator(root, command, args) {
-  const result = spawnSync(
+async function orchestrator(root, command, args) {
+  const result = await boundedProcess(
     process.execPath,
     [path.join(RUNTIME_ROOT, 'scripts/ai-orchestrator.mjs'), command, '--root', root, ...args],
-    { cwd: root, encoding: 'utf8', maxBuffer: 1024 * 1024, timeout: 120000 },
+    { cwd: root, timeoutMs: ORCHESTRATOR_TIMEOUT_MS, timeoutCode: 'ORCHESTRATOR_TIMEOUT' },
   );
   let value;
   try {
-    value = JSON.parse(result.status === 0 ? result.stdout : result.stderr);
+    value = JSON.parse(result.status === 0 ? result.stdout : result.stderr || result.stdout);
   } catch {
     fail('ORCHESTRATOR_ERROR', 'Orchestrator не вернул корректный ответ.');
   }
@@ -164,7 +169,7 @@ export async function createTask(input, taskInput, options = {}) {
     source = await service.adapters.capture(task);
     if (options.contextHash && service.project().contextHash !== options.contextHash)
       fail('STALE_CONTEXT', 'Исходники изменились во время сохранения snapshot');
-    orchestrator(root, 'init', [
+    await orchestrator(root, 'init', [
       '--owner',
       ownerId,
       '--goal',
@@ -205,7 +210,7 @@ export async function createTask(input, taskInput, options = {}) {
     };
     const file = path.join(root, '.ai-orchestrator', `task-${randomUUID()}.json`);
     writeNew(file, JSON.stringify(descriptor, null, 2) + '\n');
-    orchestrator(root, 'add', ['--owner', ownerId, '--spec', file]);
+    await orchestrator(root, 'add', ['--owner', ownerId, '--spec', file]);
   } else if (
     existing.outcome !== task.goal ||
     hashObject(existing.scope) !== hashObject(task.scope) ||

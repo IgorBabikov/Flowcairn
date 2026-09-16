@@ -35,6 +35,7 @@ const TASK_ID = /^[A-Z][A-Z0-9-]{2,40}$/;
 const RESOURCE_ID = /^[a-z0-9][a-z0-9:-]{0,80}$/;
 const GRAPH_RUN_ID = /^[a-z0-9][a-z0-9-]{2,79}$/;
 const SOURCE_HASH = /^[a-f0-9]{64}$/;
+const GIT_TIMEOUT_MS = 15_000;
 
 class CliError extends Error {
   constructor(code, message, details = undefined) {
@@ -116,14 +117,27 @@ function run(command, args, { cwd, timeout = 120_000, allowFailure = false, env 
     stdout: result.stdout ?? '',
     stderr: result.stderr ?? '',
   };
-  if (!allowFailure && (result.error || result.status !== 0)) {
+  if (!allowFailure && result.error) {
+    const errorCode = typeof result.error === 'object' && 'code' in result.error
+      ? result.error.code
+      : null;
+    throw new CliError(
+      errorCode === 'ETIMEDOUT' && command === '/usr/bin/git' ? 'GIT_TIMEOUT' : 'COMMAND_FAILED',
+      errorCode === 'ETIMEDOUT' && command === '/usr/bin/git' ? 'Git не ответил за отведенное время.' : `${command} failed`,
+      output,
+    );
+  }
+  if (!allowFailure && result.status !== 0) {
     throw new CliError('COMMAND_FAILED', `${command} failed`, output);
   }
   return output;
 }
 
 function git(root, args, options = {}) {
-  return run('git', ['-C', root, ...args], options);
+  return run('/usr/bin/git', ['-C', root, '-c', 'core.fsmonitor=false', ...args], {
+    ...options,
+    timeout: options.timeout ?? GIT_TIMEOUT_MS,
+  });
 }
 
 function gitText(root, args) {

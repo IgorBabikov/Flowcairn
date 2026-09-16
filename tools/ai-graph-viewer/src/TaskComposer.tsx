@@ -40,6 +40,7 @@ export function TaskComposer({ capability, busy, pending, error, onSubmit, onRet
         {error && <div className="dialog-error" role="alert"><p>{error.message}</p>
           <button type="button" className="button" disabled={busy} onClick={onRetry}>{pending ? 'Повторить тот же запрос' : 'Обновить контекст'}</button>
         </div>}
+        {busy && pending && <p className="intake-progress" role="status">Подготавливаем снимок проекта и граф задачи. Для большого проекта это может занять до двух минут.</p>}
         <footer>
           <button className="button primary" type="submit" disabled={busy || pending || !allowed || !valid}>
             {busy ? 'Запускаем…' : 'Запустить'}

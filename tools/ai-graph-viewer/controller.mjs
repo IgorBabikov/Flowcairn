@@ -44,6 +44,8 @@ export function sendError(response, error) {
     ? 404
     : ['REVISION_CONFLICT', 'CAS_CONFLICT', 'PLAN_CONFLICT', 'IDEMPOTENCY_CONFLICT', 'STALE_CONTEXT', 'INTAKE_BUSY'].includes(code)
       ? 409
+      : ['ORCHESTRATOR_TIMEOUT', 'GIT_TIMEOUT', 'SOURCE_CAPTURE_TIMEOUT'].includes(code)
+        ? 504
       : code === 'BODY_LIMIT'
         ? 413
         : 400;

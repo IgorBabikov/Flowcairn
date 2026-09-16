@@ -1,6 +1,31 @@
 import { expect, test } from '@playwright/test';
 import { mockApi, snapshot, projectContext, allowed, allDenied, graphNode, token } from './fixtures.mjs';
 
+test('pending intake shows progress and a timeout preserves the same request for retry', async ({ page }) => {
+  await mockApi(page, snapshot(), { emptyUntilIntake: true });
+  let release;
+  const held = new Promise(resolve => { release = resolve; });
+  const requests = [];
+  await page.route('**/api/intake', async route => {
+    requests.push(route.request().postDataJSON());
+    await held;
+    await route.fulfill({ status: 504, json: { error: { code: 'SOURCE_CAPTURE_TIMEOUT', message: 'Подготовка задачи превысила допустимое время.' } } });
+  });
+  await page.goto(`/#session=${token}`);
+  await page.getByLabel('Заголовок задачи', { exact: true }).fill('Исправить поиск');
+  await page.getByLabel('Полное описание задачи', { exact: true }).fill('Проверить пустой запрос');
+  await page.getByLabel('Номер задачи', { exact: true }).fill('TASK-101');
+  await page.getByRole('button', { name: 'Запустить', exact: true }).click();
+  await expect(page.locator('.intake-progress')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Запускаем…', exact: true })).toBeDisabled();
+  release();
+  await expect(page.locator('.dialog-error')).toContainText('Подготовка задачи превысила допустимое время.');
+  await expect(page.locator('.intake-progress')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Повторить тот же запрос', exact: true }).click();
+  await expect.poll(() => requests.length).toBe(2);
+  expect(requests[1]).toEqual(requests[0]);
+});
+
 test('unavailable planner stays fail-closed with a visible reason', async ({ page }) => {
   await mockApi(page, snapshot(), { emptyUntilIntake: true, projectContext: {
     ...projectContext, capabilities: {intake: {allowed: false, reason: 'Подключите планировщик проекта'}},

@@ -82,3 +82,13 @@ test('modified installer profile loses required ownership and is shown as an opt
   assert.equal(preview.bootstrap.requiredUntracked.some((item) => item.path === '.flowcairn.json'), false);
   assert.equal(preview.bootstrap.untrackedCandidates.includes('.flowcairn.json'), true);
 });
+
+test('packaged capture worker returns a verified snapshot without executing AI', async (t) => {
+  const f = fixture(t);
+  const s = await WorkflowService.open({ root: f.root });
+  try {
+    const source = await s.adapters.capture({ includeUntracked: [] });
+    assert.equal(verifySourceBundle(source.bundlePath).sourceHash, source.manifest.sourceHash);
+    assert.ok(source.manifest.entries.some(entry => entry.path === 'src/main.mjs'));
+  } finally { s.close(); }
+});

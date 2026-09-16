@@ -31,7 +31,8 @@ import {
 import { compilePlan, validatePlan, assertPlanHash } from './validator.mjs';
 import { POLICY_HASH, REGISTRY_HASH, resolveAction, pathAllowed, overlaps } from './registry.mjs';
 import { initialNodes, reconcile, calculateCapabilities } from './state.mjs';
-import { captureSourceBundle, verifySourceBundle } from './source.mjs';
+import { verifySourceBundle } from './source.mjs';
+import { boundedProcess } from './bounded-process.mjs';
 import { captureBeforeContents, buildAttemptDiff } from './artifacts.mjs';
 import { buildHistoricalReviewEvidence, buildReviewEvidence, MAX_HISTORICAL_EXECUTIONS } from './review-evidence.mjs';
 import { applyProposedEdits } from './patch.mjs';
@@ -230,7 +231,7 @@ async function defaultAdapters(root) {
     skillContextPaths: (task) => resolveContext
       ? ['ai-plan', 'ai-analyze', 'ai-implement', 'ai-review'].flatMap((action) => contextual(action, task.scope).context.evidence).filter((file) => file.hash).map((file) => file.path)
       : [],
-    capture: (task, context = {}) => {
+    capture: async (task, context = {}) => {
       const control = privateDirectory(root, '.ai-orchestrator');
       const graph = privateDirectory(control, 'graph');
       const sources = privateDirectory(graph, 'sources');
@@ -263,7 +264,17 @@ async function defaultAdapters(root) {
         )
           fail('SOURCE_SCOPE', 'Новый source содержит untracked вне scope');
       }
-      return captureSourceBundle(sourceRoot, sources, { allowedUntracked });
+      const result = await boundedProcess(process.execPath, [path.join(RUNTIME_ROOT, 'scripts/ai-graph/lib/source-worker.mjs')], {
+        cwd: sourceRoot, timeoutMs: 120_000, maxBytes: 9 * 1024 * 1024, timeoutCode: 'SOURCE_CAPTURE_TIMEOUT',
+        input: JSON.stringify({ root: sourceRoot, storage: sources, allowedUntracked }),
+      });
+      const output = JSON.parse(result.stdout);
+      if (result.status !== 0 || output.error) fail(output.error?.code ?? 'SOURCE_CAPTURE', 'Не удалось сохранить snapshot проекта.');
+      const manifest = output.manifest;
+      if (!manifest || !/^[a-f0-9]{64}$/.test(manifest.sourceHash) ||
+          output.bundlePath !== path.join(sources, manifest.sourceHash) || !Array.isArray(manifest.entries))
+        fail('SOURCE_CAPTURE', 'Сборщик вернул некорректный snapshot.');
+      return { bundlePath: output.bundlePath, manifest };
     },
     readiness: (task) => orchestrator.graphExecutionContext({ root, task }),
     allocate: (options) => {
@@ -857,7 +868,9 @@ export class WorkflowService {
       intakeHash,
       createOperationId: operationId,
     });
-    return this.snapshot(runId);
+    // The fixed capture worker has just verified this source. Avoid repeating
+    // the whole source scan in the HTTP response; public reads still verify it.
+    return this.#snapshot(runId, false);
   }
 
   #read(runId, { current = true, verifySource = true, verifyBinding = true } = {}) {
@@ -1165,10 +1178,14 @@ export class WorkflowService {
   }
 
   snapshot(runId) {
+    return this.#snapshot(runId, true);
+  }
+
+  #snapshot(runId, verifySource) {
     let loaded,
       driftReason = null;
     try {
-      loaded = this.#read(runId);
+      loaded = this.#read(runId, { verifySource });
     } catch (error) {
       if (['RUN_NOT_FOUND', 'STORE_NOT_FOUND', 'INVALID_RUN_ID'].includes(error.code)) throw error;
       if (
@@ -1182,7 +1199,7 @@ export class WorkflowService {
         ].includes(error.code)
       ) {
         try {
-          loaded = this.#read(runId, { current: false });
+          loaded = this.#read(runId, { current: false, verifySource });
           driftReason = safeReason(error);
         } catch {
           /* Corruption still fails closed below. */
