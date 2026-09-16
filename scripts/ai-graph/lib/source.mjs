@@ -23,7 +23,7 @@ import { TextDecoder } from 'node:util';
 import { GraphError, canonicalJson, sha256 } from './io.mjs';
 
 const GIT_EXECUTABLE = '/usr/bin/git';
-const SOURCE_BUNDLE_VERSION = 1;
+const SOURCE_BUNDLE_VERSION = 2;
 const MAX_ENTRIES = 20_000;
 const MAX_PATH_BYTES = 4_096;
 const MAX_SYMLINK_BYTES = 4_096;
@@ -86,11 +86,11 @@ function assertSafePath(value) {
   return value;
 }
 
-function assertNotSensitivePath(relativePath) {
+function isSensitiveSourcePath(relativePath) {
   const parts = relativePath.toLowerCase().split('/');
   const name = parts.at(-1);
   const allowedTemplate = /^\.env(?:\.[^/]+)*\.(?:example|sample|template)$/.test(name);
-  const sensitive =
+  return (
     (!allowedTemplate && (name === '.env' || name.startsWith('.env.'))) ||
     [
       '.npmrc',
@@ -102,8 +102,12 @@ function assertNotSensitivePath(relativePath) {
       'id_ed25519',
     ].includes(name) ||
     /(?:^|[._-])secrets?(?:[._-](?:json|ya?ml|toml|txt))?$/.test(name) ||
-    /\.(?:key|pem|p12|pfx)$/.test(name);
-  if (sensitive)
+    /\.(?:key|pem|p12|pfx)$/.test(name)
+  );
+}
+
+function assertNotSensitivePath(relativePath) {
+  if (isSensitiveSourcePath(relativePath))
     fail('SENSITIVE_SOURCE_PATH', `Source bundle отклоняет чувствительный path: ${relativePath}`);
 }
 
@@ -227,7 +231,6 @@ function readHeadEntries(root, head) {
       fail('UNSUPPORTED_SOURCE_ENTRY', 'Source bundle поддерживает только Git files и symlinks');
     }
     const relativePath = decodePath(record.subarray(tab + 1));
-    assertNotSensitivePath(relativePath);
     entries.set(relativePath, { mode: match[1], gitOid: match[3] });
   }
   return entries;
@@ -248,7 +251,6 @@ function readIndex(root) {
       fail('UNSUPPORTED_SOURCE_ENTRY', 'Index содержит неподдерживаемую запись');
     }
     const relativePath = decodePath(record.subarray(tab + 1));
-    assertNotSensitivePath(relativePath);
     if (entries.has(relativePath)) fail('UNMERGED_INDEX', 'Index содержит повторяющийся path');
     entries.set(relativePath, { mode: match[1], gitOid: match[2] });
   }
@@ -533,8 +535,18 @@ export function captureSourceBundle(root, outputRoot, { allowedUntracked = [] } 
     }
   }
 
+  // Tracked credentials/configuration can be required locally, but must never be
+  // copied into the isolated Graph worktree or included in the source bundle.
+  const withheldPaths = [
+    ...new Set([...headEntries.keys(), ...initialIndex.entries.keys()].filter(isSensitiveSourcePath)),
+  ].sort(comparePath);
   const allPaths = [
-    ...new Set([...headEntries.keys(), ...initialIndex.entries.keys(), ...allowed]),
+    ...new Set([
+      ...[...headEntries.keys(), ...initialIndex.entries.keys()].filter(
+        (entry) => !isSensitiveSourcePath(entry),
+      ),
+      ...allowed,
+    ]),
   ].sort(comparePath);
   if (allPaths.length > MAX_ENTRIES)
     fail('SOURCE_LIMIT_EXCEEDED', 'Source bundle содержит слишком много paths');
@@ -639,6 +651,7 @@ export function captureSourceBundle(root, outputRoot, { allowedUntracked = [] } 
     version: SOURCE_BUNDLE_VERSION,
     sourceHash: '',
     source: { head: initialHead, indexIdentity: indexIdentity(entries) },
+    withheldPaths,
     entries,
   };
   manifest.sourceHash = sourceHash(manifest);
@@ -771,10 +784,16 @@ function loadVerifiedBundle(bundlePath) {
   } finally {
     if (manifestHandle !== undefined) closeSync(manifestHandle);
   }
-  exactKeys(manifest, ['entries', 'source', 'sourceHash', 'version'], 'manifest');
-  if (manifest.version !== SOURCE_BUNDLE_VERSION || !HASH_PATTERN.test(manifest.sourceHash)) {
+  if (![1, SOURCE_BUNDLE_VERSION].includes(manifest.version) || !HASH_PATTERN.test(manifest.sourceHash)) {
     fail('INVALID_SOURCE_BUNDLE', 'Manifest version/hash недопустим');
   }
+  exactKeys(
+    manifest,
+    manifest.version === 1
+      ? ['entries', 'source', 'sourceHash', 'version']
+      : ['entries', 'source', 'sourceHash', 'version', 'withheldPaths'],
+    'manifest',
+  );
   if (path.basename(root) !== manifest.sourceHash || sourceHash(manifest) !== manifest.sourceHash) {
     fail('SOURCE_BUNDLE_TAMPERED', 'Manifest content address не совпадает');
   }
@@ -787,6 +806,9 @@ function loadVerifiedBundle(bundlePath) {
   if (!Array.isArray(manifest.entries) || manifest.entries.length > MAX_ENTRIES) {
     fail('INVALID_SOURCE_BUNDLE', 'Manifest entries превышает лимит');
   }
+  const withheldPaths = manifest.version === 1 ? [] : manifest.withheldPaths;
+  if (!Array.isArray(withheldPaths) || withheldPaths.length > MAX_ENTRIES)
+    fail('INVALID_SOURCE_BUNDLE', 'Manifest withheld paths превышает лимит');
   const objectsDirectory = path.join(root, 'objects');
   const objectDirectoryStat = lstatSync(objectsDirectory);
   if (!objectDirectoryStat.isDirectory() || objectDirectoryStat.isSymbolicLink()) {
@@ -833,6 +855,19 @@ function loadVerifiedBundle(bundlePath) {
         fail('INVALID_SOURCE_BUNDLE', 'Один hash имеет разные sizes');
       expectedObjects.set(value.sha256, value);
     }
+  }
+  let priorWithheldPath = null;
+  for (const withheldPath of withheldPaths) {
+    const relativePath = assertSafePath(withheldPath);
+    if (!isSensitiveSourcePath(relativePath))
+      fail('INVALID_SOURCE_BUNDLE', 'Withheld path должен быть чувствительным');
+    if (priorWithheldPath !== null && comparePath(priorWithheldPath, relativePath) >= 0)
+      fail('INVALID_SOURCE_BUNDLE', 'Withheld paths должны быть unique и sorted');
+    priorWithheldPath = relativePath;
+    const canonical = relativePath.normalize('NFC').toLowerCase();
+    if (canonicalPaths.has(canonical))
+      fail('INVALID_SOURCE_BUNDLE', 'Withheld path пересекается с source entry');
+    canonicalPaths.add(canonical);
   }
   if (manifest.source.head === null && manifest.entries.some((entry) => entry.head !== null)) {
     fail('INVALID_SOURCE_BUNDLE', 'Unborn HEAD не может иметь entries');

@@ -79,6 +79,7 @@ function fixture(t, { initialize = true, integrationBranch = 'develop' } = {}) {
   git(root, 'config', 'user.name', 'Graph Bridge Test');
   git(root, 'config', 'user.email', 'graph-bridge@example.test');
   writeFileSync(path.join(root, '.gitignore'), '.ai-orchestrator/\n');
+  writeFileSync(path.join(root, '.npmrc'), '//registry.example.test/:_authToken=private-token\n');
   writeFileSync(
     path.join(root, '.flowcairn.json'),
     JSON.stringify({
@@ -178,6 +179,7 @@ test('allocates one source-bound Orchestrator worktree and keeps Graph acceptanc
 
   const binding = allocateGraphWorkspace(request);
   assert.equal(binding.taskId, 'GW01');
+  assert.equal(existsSync(path.join(binding.worktree, '.npmrc')), false);
   assert.equal(binding.attemptId, 1);
   assert.equal(binding.runId, 'run-001');
   assert.equal(binding.owner, OWNER);

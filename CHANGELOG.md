@@ -1,5 +1,9 @@
 # Изменения
 
+## 0.2.12
+
+- Исправил запуск в проектах с отслеживаемым `.npmrc`: файл не попадает в source bundle и изолированный Graph worktree.
+
 ## 0.2.9 — готовится к публикации
 
 - Добавил реальные Claude Code и Cursor adapters: проверенный CLI, strict structured output, отдельное consent на передачу ограниченного контекста, immutable plan и receipt.

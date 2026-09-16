@@ -223,11 +223,11 @@ function assertSafeAncestors(root, relativePath) {
 }
 
 function removeManifestPaths(worktree, manifest) {
-  const entries = [...manifest.entries].sort(
-    (left, right) => right.path.split('/').length - left.path.split('/').length,
+  const paths = [...manifest.entries.map((entry) => entry.path), ...(manifest.withheldPaths ?? [])].sort(
+    (left, right) => right.split('/').length - left.split('/').length,
   );
-  for (const entry of entries) {
-    const destination = path.join(worktree, ...entry.path.split('/'));
+  for (const entryPath of paths) {
+    const destination = path.join(worktree, ...entryPath.split('/'));
     if (existsSync(destination) || lstatExists(destination))
       rmSync(destination, { recursive: true });
   }

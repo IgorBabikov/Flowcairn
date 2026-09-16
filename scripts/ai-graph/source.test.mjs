@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import childProcess, { execFileSync } from 'node:child_process';
 import fs, {
   chmodSync,
+  existsSync,
   linkSync,
   lstatSync,
   mkdirSync,
@@ -78,7 +79,7 @@ test('captures index, unstaged bytes, binary data, modes, safe links and allowed
   assert.equal(second.manifest.sourceHash, first.manifest.sourceHash);
 
   const manifest = verifySourceBundle(first.bundlePath);
-  assert.equal(manifest.version, 1);
+  assert.equal(manifest.version, 2);
   assert.equal(manifest.source.head, null);
   assert.match(manifest.source.indexIdentity, /^[a-f0-9]{64}$/);
   assert.equal(JSON.stringify(manifest).includes(root), false);
@@ -147,6 +148,22 @@ test('rejects ignored, sensitive and traversal paths from allowedUntracked', () 
     () => captureSourceBundle(root, storage(), { allowedUntracked: ['../outside.txt'] }),
     (error) => error.code === 'UNSAFE_SOURCE_PATH',
   );
+});
+
+test('withholds tracked sensitive paths without copying their bytes into the bundle', () => {
+  const root = repository();
+  writeFileSync(path.join(root, '.npmrc'), '//registry.example.test/:_authToken=private-token\n');
+  git(root, ['add', '.npmrc']);
+  writeFileSync(path.join(root, '.npmrc'), '//registry.example.test/:_authToken=changed-private-token\n');
+
+  const captured = captureSourceBundle(root, storage());
+  assert.deepEqual(captured.manifest.withheldPaths, ['.npmrc']);
+  assert.equal(captured.manifest.entries.some((entry) => entry.path === '.npmrc'), false);
+  assert.equal(JSON.stringify(captured.manifest).includes('private-token'), false);
+
+  const target = path.join(realpathSync(path.dirname(storage())), 'materialized-withheld');
+  materializeSourceBundle(captured.bundlePath, target);
+  assert.equal(existsSync(path.join(target, '.npmrc')), false);
 });
 
 test('ignores inherited Git routing variables and uses the requested repository', () => {
