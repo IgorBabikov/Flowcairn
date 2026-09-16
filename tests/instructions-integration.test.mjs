@@ -130,6 +130,19 @@ test('managed edits and duplicate markers refuse without deletion; exact orphan 
   assert.match(f.read('AGENTS.md').toString(), /^owner/);
   assert.doesNotMatch(f.read('AGENTS.md').toString(), /FLOWCAIRN:WORKFLOW/);
 });
+test('orphan override integration is adopted while the base AGENTS file stays untouched', (t) => {
+  const f = fixture(t);
+  f.write('AGENTS.md', 'base rules\n');
+  f.write('AGENTS.override.md', 'personal override\n');
+  f.activate();
+  const baseBefore = f.read('AGENTS.md');
+  rmSync(path.join(f.root, INTEGRATION_JOURNAL));
+  const adopted = f.activate();
+  assert.equal(adopted.status, 'active');
+  assert.equal(adopted.adopted, true);
+  assert.deepEqual(f.read('AGENTS.md'), baseBefore);
+  assert.match(f.read('AGENTS.override.md').toString(), /^personal override/);
+});
 test('symlink files, parents and hardlinks are not read or overwritten', (t) => {
   const f = fixture(t), outside = fixture(t); outside.write('AGENTS.md', 'outside');
   symlinkSync(path.join(outside.root, 'AGENTS.md'), path.join(f.root, 'AGENTS.md'));
