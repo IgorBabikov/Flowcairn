@@ -129,10 +129,15 @@ function parseNulRecords(buffer) {
   return records.filter((record) => record.length > 0);
 }
 
+/**
+ * @param {string} root
+ * @param {string[]} args
+ * @param {{allowFailure?: boolean, maxBuffer?: number, input?: string}} options
+ */
 function runGit(
   root,
   args,
-  { allowFailure = false, maxBuffer = MAX_TOTAL_BYTES + MAX_MANIFEST_BYTES } = {},
+  { allowFailure = false, maxBuffer = MAX_TOTAL_BYTES + MAX_MANIFEST_BYTES, input } = {},
 ) {
   const environment = {};
   for (const key of [
@@ -166,6 +171,7 @@ function runGit(
     {
       cwd: root,
       encoding: 'buffer',
+      input: input === undefined ? undefined : Buffer.from(input),
       shell: false,
       timeout: 120_000,
       maxBuffer,
@@ -264,18 +270,51 @@ function readUntracked(root) {
   return new Set(parseNulRecords(raw).map((record) => decodePath(record, 'Untracked path')));
 }
 
-function gitObject(root, gitEntry) {
-  const sizeResult = runGit(root, ['cat-file', '-s', gitEntry.gitOid], { maxBuffer: 1024 });
-  const size = Number(sizeResult.stdout.toString('ascii').trim());
-  if (!Number.isSafeInteger(size) || size < 0)
-    fail('GIT_FAILED', 'Git object имеет недопустимый size');
-  if (size > MAX_OBJECT_BYTES) fail('SOURCE_LIMIT_EXCEEDED', 'Git object превышает лимит размера');
-  const result = runGit(root, ['cat-file', 'blob', gitEntry.gitOid], {
-    maxBuffer: MAX_OBJECT_BYTES + 1024,
+function gitObjectsBatch(root, entries) {
+  const ids = [...new Set(entries.filter(Boolean).map(entry => entry.gitOid))];
+  const objects = new Map();
+  if (!ids.length) return objects;
+  const input = ids.join('\n') + '\n';
+  const info = runGit(root, ['cat-file', '--batch-check'], {
+    input, maxBuffer: ids.length * 100 + 1024,
+  }).stdout.toString('ascii').split('\n');
+  if (info.pop() !== '' || info.length !== ids.length)
+    fail('GIT_FAILED', 'Git batch inventory имеет недопустимый формат');
+  const sizes = info.map((line, index) => {
+    const match = /^([a-f0-9]{40}|[a-f0-9]{64}) blob ([0-9]+)$/.exec(line);
+    const size = match ? Number(match[2]) : NaN;
+    if (!match || match[1] !== ids[index] || !Number.isSafeInteger(size) || size < 0)
+      fail('GIT_FAILED', 'Git batch object имеет недопустимый тип или размер');
+    if (size > MAX_OBJECT_BYTES) fail('SOURCE_LIMIT_EXCEEDED', 'Git object превышает лимит размера');
+    return size;
   });
-  if (result.stdout.length !== size)
-    fail('SOURCE_CHANGED', 'Git object size изменился во время capture');
-  return result.stdout;
+  if (sizes.reduce((sum, size) => sum + size, 0) > MAX_TOTAL_BYTES)
+    fail('SOURCE_LIMIT_EXCEEDED', 'Git objects превышают общий лимит размера');
+  // Bound each response, while avoiding thousands of per-file Git processes.
+  for (let start = 0; start < ids.length;) {
+    let end = start, bytes = 0;
+    do { bytes += sizes[end] + 100; end++; }
+    while (end < ids.length && bytes + sizes[end] + 100 <= 16 * 1024 * 1024);
+    const output = runGit(root, ['cat-file', '--batch'], {
+      input: ids.slice(start, end).join('\n') + '\n', maxBuffer: bytes + 1024,
+    }).stdout;
+    let cursor = 0;
+    for (let index = start; index < end; index++) {
+      const newline = output.indexOf(10, cursor);
+      const header = output.subarray(cursor, newline).toString('ascii');
+      if (newline < cursor || header !== `${ids[index]} blob ${sizes[index]}`)
+        fail('GIT_FAILED', 'Git batch header не соответствует inventory');
+      cursor = newline + 1;
+      const finish = cursor + sizes[index];
+      if (finish >= output.length || output[finish] !== 10)
+        fail('SOURCE_CHANGED', 'Git batch content имеет неполный размер');
+      objects.set(ids[index], output.subarray(cursor, finish));
+      cursor = finish + 1;
+    }
+    if (cursor !== output.length) fail('GIT_FAILED', 'Git batch содержит лишние данные');
+    start = end;
+  }
+  return objects;
 }
 
 function statIdentity(stat) {
@@ -554,7 +593,7 @@ export function captureSourceBundle(root, outputRoot, { allowedUntracked = [] } 
     fail('SOURCE_LIMIT_EXCEEDED', 'Source bundle содержит слишком много paths');
   const entries = [];
   const objects = new Map();
-  const gitObjects = new Map();
+  const gitObjects = gitObjectsBatch(repository, allPaths.flatMap(file => [headEntries.get(file), initialIndex.entries.get(file)]));
   const worktreeStats = new Map();
   let totalBytes = 0;
   let worktreeLogicalBytes = 0;
@@ -571,9 +610,6 @@ export function captureSourceBundle(root, outputRoot, { allowedUntracked = [] } 
     return hash;
   };
   const readGitObject = (gitEntry) => {
-    if (!gitObjects.has(gitEntry.gitOid)) {
-      gitObjects.set(gitEntry.gitOid, gitObject(repository, gitEntry));
-    }
     return gitObjects.get(gitEntry.gitOid);
   };
   const addWorktreeBytes = (data) => {

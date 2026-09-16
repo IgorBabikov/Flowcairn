@@ -410,7 +410,7 @@ test('caches equal Git blobs by object id', (context) => {
   const originalSpawn = childProcess.spawnSync;
   let blobReads = 0;
   context.mock.method(childProcess, 'spawnSync', (...args) => {
-    if (args[1].includes('cat-file') && args[1].includes('blob')) blobReads += 1;
+    if (args[1].includes('cat-file') && args[1].includes('--batch')) blobReads += 1;
     return originalSpawn(...args);
   });
   syncBuiltinESMExports();
@@ -422,6 +422,48 @@ test('caches equal Git blobs by object id', (context) => {
     syncBuiltinESMExports();
   }
 });
+
+test('hundreds of distinct files are captured with two batched Git object reads', context => {
+  const root = repository();
+  for (let index = 0; index < 300; index++)
+    writeFileSync(path.join(root, 'src', `batch-${index}.txt`), `unique ${index}\n`);
+  git(root, ['add', 'src']);
+  const originalSpawn = childProcess.spawnSync;
+  let reads = 0;
+  context.mock.method(childProcess, 'spawnSync', (...args) => {
+    if (args[1].includes('cat-file')) reads++;
+    return originalSpawn(...args);
+  });
+  syncBuiltinESMExports();
+  try {
+    const result = captureSourceBundle(root, storage());
+    assert.equal(reads, 2);
+    assert.equal(result.manifest.entries.filter(entry => entry.path.startsWith('src/batch-')).length, 300);
+  } finally { context.mock.restoreAll(); syncBuiltinESMExports(); }
+});
+
+for (const corruption of ['header', 'truncated', 'extra', 'oversize']) {
+  test(`rejects ${corruption} batch responses`, context => {
+    const root = repository();
+    const originalSpawn = childProcess.spawnSync;
+    context.mock.method(childProcess, 'spawnSync', (...args) => {
+      const result = originalSpawn(...args);
+      if (corruption === 'oversize' && args[1].includes('--batch-check'))
+        result.stdout = Buffer.from(result.stdout.toString('ascii').replace(/blob [0-9]+/, 'blob 999999999'));
+      if (args[1].includes('--batch')) {
+        if (corruption === 'header') result.stdout[0] = 120;
+        if (corruption === 'truncated') result.stdout = result.stdout.subarray(0, result.stdout.length - 2);
+        if (corruption === 'extra') result.stdout = Buffer.concat([result.stdout, Buffer.from('x')]);
+      }
+      return result;
+    });
+    syncBuiltinESMExports();
+    try {
+      assert.throws(() => captureSourceBundle(root, storage()), error =>
+        ['GIT_FAILED', 'SOURCE_CHANGED', 'SOURCE_LIMIT_EXCEEDED'].includes(error.code));
+    } finally { context.mock.restoreAll(); syncBuiltinESMExports(); }
+  });
+}
 
 test('detects a tracked path appearing during capture', (context) => {
   const root = mkdtempSync(path.join(TEST_TMP_ROOT, 'flowcairn-source-race-'));

@@ -1,6 +1,6 @@
 {
   "name": "flowcairn",
-  "version": "0.2.16",
+  "version": "0.2.17",
   "description": "AI-разработка по проверяемому плану: задачи, Graph, React Flow и Skills вашего проекта",
   "type": "module",
   "license": "MIT",
