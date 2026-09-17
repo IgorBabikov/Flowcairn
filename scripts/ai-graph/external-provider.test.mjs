@@ -60,6 +60,22 @@ test('external worker gives a fixed auth error instead of accepting a provider f
   assert.notEqual(run.status, 0); assert.match(run.stderr, /PROVIDER_AUTH_REQUIRED/); assert.equal(readFileSync(result, 'utf8'), '');
 });
 
+test('Claude worker exports only reported numeric usage metadata to the supervisor', () => {
+  const root = fixture(), executable = fakeCli(root, JSON.stringify({ result: '{"summary":"ok"}',
+    usage: { input_tokens: 10, cache_creation_input_tokens: 20, cache_read_input_tokens: 30, output_tokens: 4 },
+    total_cost_usd: 0.001, session_id: 'private-session-id' }));
+  const source = path.join(root, 'input-usage.json'), result = path.join(root, 'result-usage.json');
+  writeFileSync(source, JSON.stringify(input('claude', executable))); writeFileSync(result, '', { mode: 0o600 });
+  const run = spawnSync(node, [worker, source, result], { cwd: root, encoding: 'utf8', env: { PATH: '/usr/bin:/bin', HOME: root } });
+  assert.equal(run.status, 0);
+  const event = JSON.parse(run.stdout);
+  assert.equal(event.type, 'flowcairn.provider-usage');
+  assert.equal(event.usage.totalTokens, 64);
+  assert.equal(event.usage.costUsd, 0.001);
+  assert.equal(run.stdout.includes('private-session-id'), false);
+  assert.deepEqual(JSON.parse(readFileSync(result, 'utf8')), { summary: 'ok' });
+});
+
 test('Cursor worker enables the documented sandbox and read-only ask mode inside private workspace', () => {
   const root = fixture(), executable = fakeCli(root), source = path.join(root, 'input-cursor.json'), result = path.join(root, 'result-cursor.json');
   writeFileSync(source, JSON.stringify(input('cursor', executable))); writeFileSync(result, '', { mode: 0o600 });

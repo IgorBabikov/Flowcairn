@@ -21,6 +21,9 @@ const SetupSchema = z.strictObject({
   providerPath: z.string().max(1024).optional(), providerVersion: z.string().max(160).optional(),
   reviewModel: ProjectProfileSchema.shape.ai.shape.model.optional(), reviewReasoningEffort: effort.optional(),
   testPolicy: z.enum(['keep', 'add']), coverage: z.boolean(), readConsent: z.boolean(),
+  checkMode: z.enum(['none', 'trusted-local', 'hardened']).optional(),
+  checks: ProjectProfileSchema.shape.checks.optional(),
+  trustedLocalConsent: z.boolean().optional(),
 });
 const fail = (code, message) => { throw new GraphError(code, message); };
 
@@ -76,7 +79,7 @@ export function inspectOnboarding(root) {
     },
     limitations: [
       'Codex: модель и усиление считываются из конфигурации CLI. Настройки активного чата VS Code не считываются. Можно выбрать модель вручную в Flowcairn.',
-      'Обычные проверки запускаются в отдельной worktree без Docker. Это не контейнерная песочница: доверяйте коду проекта и зависимостям.',
+      'По умолчанию scripts проекта выключены. Trusted-local запускает их в отдельной worktree с правами пользователя и требует явного согласия.',
       'Docker остается дополнительным усиленным режимом проверок и не нужен для первого запуска.',
       'Поддержка исполнения: Node.js 22, macOS и Linux; native Windows не поддерживается. WSL2 требует Linux-файловую систему.',
       'Изменение настроек: закройте UI и выполните npx flowcairn setup. Старые планы сохранят прежний профиль и потребуют перепланирования.',
@@ -192,12 +195,29 @@ export function onboardingInput(options, profileHash) {
     ...(options['review-model'] ? { reviewModel: options['review-model'] } : {}),
     ...(options['review-reasoning-effort'] ? { reviewReasoningEffort: options['review-reasoning-effort'] } : {}),
     testPolicy: options['test-policy'] ?? 'keep', coverage: options.coverage === true, readConsent: options['read-consent'] === true,
+    ...(options['check-mode'] !== undefined ? { checkMode: options['check-mode'] } : {}),
+    ...(options.checks !== undefined ? { checks: String(options.checks).split(',').map((item) => item.trim()).filter(Boolean) } : {}),
+    ...(options['trusted-local-consent'] !== undefined ? { trustedLocalConsent: options['trusted-local-consent'] === true } : {}),
   });
 }
 
-function configuredProfile(previous, value) {
+function configuredProfile(root, previous, value) {
   const { model: _model, reviewModel: _review, modelMode: _mode, reasoningEffort: _effort, reviewReasoningEffort: _reviewEffort, provider: _provider, providerPath: _providerPath, providerVersion: _providerVersion, ...extraAi } = previous.ai;
+  let checkSettings = {};
+  if (value.checkMode !== undefined || value.checks !== undefined) {
+    const checkMode = value.checkMode ?? previous.checkMode;
+    const checks = value.checks ?? (checkMode === 'none' ? [] : previous.checks);
+    if (checkMode === 'none' && checks.length) fail('CHECK_MODE', 'Выберите режим исполнения для настроенных проверок.');
+    if (checkMode === 'trusted-local' && checks.length && value.trustedLocalConsent !== true)
+      fail('CHECK_LOCAL_CONSENT', 'Запуск scripts с правами пользователя требует явного trusted-local-consent.');
+    const manifest = readIntegrationTarget(root, 'package.json', 1024 * 1024);
+    if (!manifest) fail('PACKAGE_JSON', 'Нужен package.json проекта.');
+    const available = discoverProjectChecks(JSON.parse(manifest.bytes.toString('utf8')));
+    if (checks.some((id) => !available.checks.includes(id))) fail('CHECK_SCRIPT_MISSING', 'Выбранная проверка не имеет существующего script package.json.');
+    checkSettings = { checkMode, checks, checkScripts: Object.fromEntries(checks.map((id) => [id, available.checkScripts[id]])) };
+  }
   return ProjectProfileSchema.parse({ ...previous,
+      ...checkSettings,
       ai: { ...extraAi, provider:value.provider, model:value.model, modelMode:value.modelMode, reasoningEffort:value.reasoningEffort,
         ...(value.reviewModel ? {reviewModel:value.reviewModel} : {}), ...(value.reviewReasoningEffort ? {reviewReasoningEffort:value.reviewReasoningEffort} : {}),
         ...(value.providerPath ? {providerPath:value.providerPath} : {}), ...(value.providerVersion ? {providerVersion:value.providerVersion} : {}),
@@ -207,8 +227,8 @@ function configuredProfile(previous, value) {
 }
 
 function sameProfileStructure(previous, next) {
-  const { ai: _previousAi, onboarding: _previousOnboarding, ...previousStructure } = previous;
-  const { ai: _nextAi, onboarding: _nextOnboarding, ...nextStructure } = next;
+  const { ai: _previousAi, onboarding: _previousOnboarding, checkMode: _previousMode, checks: _previousChecks, checkScripts: _previousScripts, ...previousStructure } = previous;
+  const { ai: _nextAi, onboarding: _nextOnboarding, checkMode: _nextMode, checks: _nextChecks, checkScripts: _nextScripts, ...nextStructure } = next;
   return hashObject(previousStructure) === hashObject(nextStructure);
 }
 
@@ -230,7 +250,7 @@ export async function saveOnboarding(root, input, { dryRun = false } = {}) {
   if (/^(?:sk-|sess-)/i.test(value.model) || /^(?:sk-|sess-)/i.test(value.reviewModel ?? '')) fail('AI_CONFIG', 'Укажите ID модели, не ключ.');
   if (value.modelMode === 'manual' && ((value.reviewModel && value.reviewModel !== value.model) || (value.reviewReasoningEffort && value.reviewReasoningEffort !== value.reasoningEffort))) fail('AI_CONFIG', 'Ручной режим закрепляет одну модель и усиление.');
   if (value.profileHash !== projectProfileHash(root)) fail('ONBOARDING_STALE', 'Профиль изменился. Повторите настройку.');
-  if (dryRun) return {created:false,dryRun:true,root,profile:configuredProfile(loadProjectProfile(root),value),changes:['.flowcairn.json','.ai-orchestrator/flowcairn-install.json']};
+  if (dryRun) return {created:false,dryRun:true,root,profile:configuredProfile(root,loadProjectProfile(root),value),changes:['.flowcairn.json','.ai-orchestrator/flowcairn-install.json']};
   const guard = await acquireUninstallGuard({ root });
   try {
     const verifyStoppedGraph = () => ({ ...guard.processProbe(), bindings: guard.graphBindings });
@@ -241,9 +261,9 @@ export async function saveOnboarding(root, input, { dryRun = false } = {}) {
     const owner = JSON.parse(ownerBefore.bytes.toString('utf8'));
     if (owner.tool !== 'flowcairn' || !/^flowcairn-[a-f0-9-]+$/.test(owner.owner ?? '')) fail('INSTALL_CONFLICT', 'Владелец установки не подтвержден.');
     const previous = loadProjectProfile(root);
-    const profile = configuredProfile(previous, value);
+    const profile = configuredProfile(root, previous, value);
     if (!sameProfileStructure(previous, profile))
-      fail('PROFILE_MIGRATION_SCOPE', 'Настройка может менять только AI и onboarding; структурные поля проекта сохранены.');
+      fail('PROFILE_MIGRATION_SCOPE', 'Настройка может менять только AI, проверки и onboarding; остальные структурные поля проекта сохранены.');
     const bytes = Buffer.from(JSON.stringify(profile,null,2)+'\n');
     let profileAfter, ownerAfter;
     try {

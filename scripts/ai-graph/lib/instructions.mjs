@@ -132,6 +132,19 @@ export function inspectInstructions({ projectRoot, limits = {} }) {
     limits: cap };
 }
 
+/** Codex selects one AGENTS file per directory. Other client chains remain independent. */
+export function effectiveInstructionFiles(manifest, { provider = null, scope = null } = {}) {
+  const overrides = new Set(manifest.files.filter((file) => file.path.endsWith('AGENTS.override.md'))
+    .map((file) => file.path.replace(/AGENTS\.override\.md$/, 'AGENTS.md')));
+  const inside = (file, directory) => file === directory || file.startsWith(`${directory}/`);
+  return manifest.files.filter((file) => file.kind !== 'project-skill' &&
+    !(provider === 'codex' && overrides.has(file.path)) &&
+    (!scope || file.scope === '.' || scope.some((entry) => {
+      const selected = entry.replace(/\/$/, '');
+      return inside(selected, file.scope) || inside(file.scope, selected);
+    })));
+}
+
 /** Explicit content read for the trusted runtime after its context/egress consent check.
  * Scoped metadata is retained; this does not pretend to evaluate client glob semantics.
  */

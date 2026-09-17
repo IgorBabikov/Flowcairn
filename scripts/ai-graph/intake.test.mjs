@@ -75,6 +75,27 @@ test('snapshot consent is rejected when the actual bytes change at the same path
   assert.equal(s.store.listRunIds().length, 0);
 });
 
+test('modified private registry configuration stays local and does not block a safe source snapshot', async (t) => {
+  const f = fixture(t);
+  const config = path.join(f.root, '.npmrc');
+  writeFileSync(config, 'registry=https://example.invalid/old\n');
+  f.git('add', '.npmrc'); f.git('commit', '-m', 'private config fixture');
+  const localBytes = Buffer.from('registry=https://example.invalid/current\n');
+  writeFileSync(config, localBytes);
+  const s = await service(f.root, f.profile);
+  const project = s.project();
+  assert.equal(project.capabilities.intake.allowed, true);
+  assert.equal(project.bootstrap.changedPaths.includes('.npmrc'), false);
+  assert.equal(project.scopeCandidates.includes('.npmrc'), false);
+  const snapshot = await s.intake({ prompt: 'Изменить значение в src/main.mjs', operationId: 'intake-private-config',
+    contextHash: project.contextHash, snapshot: true, snapshotHash: project.bootstrap.snapshotHash });
+  const state = s.store.readRun(snapshot.runId);
+  const captured = verifySourceBundle(state.sourceBundle);
+  assert.ok(captured.withheldPaths.includes('.npmrc'));
+  assert.equal(captured.entries.some((entry) => entry.path === '.npmrc'), false);
+  assert.deepEqual(readFileSync(config), localBytes);
+});
+
 test('modified installer profile loses required ownership and is shown as an optional candidate', async (t) => {
   const f = fixture(t), s = await service(f.root, f.profile);
   const file = path.join(f.root, '.flowcairn.json');

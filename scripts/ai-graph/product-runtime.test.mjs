@@ -5,7 +5,7 @@ import { compilePlanningPlan, compileTaskProposal } from './lib/planning.mjs';
 import { validatePlan } from './lib/validator.mjs';
 import { validateReviewEvidence } from './lib/review-evidence.mjs';
 import { SKILL_ROUTES } from './lib/config.mjs';
-import { hashObject } from './lib/io.mjs';
+import { GraphError, hashObject } from './lib/io.mjs';
 const hash = hashObject('product-runtime-fixture');
 const skills = [...new Set(Object.values(SKILL_ROUTES).flat())].map(id => ({id,path:`skills/${id}/SKILL.md`,hash}));
 const context = {runtimeHash:hash,skills,workflow:'autonomous'};
@@ -35,12 +35,12 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 const request=(s,extra={})=>({operationId:`op-${randomUUID()}`,expectedRevision:s.revision,planHash:s.planHash,...extra});
 const analysis={requirements:['Валидация email'],constraints:['Сохранить интерфейс'],projectFacts:[{path:'src/form.mjs',fact:'Форма уже существует'}],acceptance:['Неверный email отклонен'],risks:[]};
-async function fixture(t,{consent=true,reviewFails=0,checkFails=0,uncertain=false,plannerUncertain=0,steps=output.steps,maxReplans=2,scopeCandidates=['src']}={}) {
+async function fixture(t,{consent=true,reviewFails=0,checkFails=0,uncertain=false,plannerUncertain=0,plannerFailures=0,steps=output.steps,maxReplans=2,scopeCandidates=['src']}={}) {
  const root=mkdtempSync(path.join(os.tmpdir(),'flowcairn-product-'));
  t.after(()=>rmSync(root,{recursive:true,force:true}));
  const worktree=path.join(root,'.ai-orchestrator','worktrees','fixture-1');
  mkdirSync(worktree,{recursive:true,mode:0o700});
- const calls=[]; let reviews=0,checks=0,remainingPlannerUncertainty=plannerUncertain;
+ const calls=[]; let reviews=0,checks=0,remainingPlannerUncertainty=plannerUncertain,remainingPlannerFailures=plannerFailures;
  let runtimeHash=hash;
  const fingerprint=()=>({hash,files:[],git:{head:'a'.repeat(40),indexHash:hash}});
  const adapters={identity:()=>runtimeHash,skills:()=>skills,hasReadConsent:()=>consent,
@@ -53,6 +53,7 @@ async function fixture(t,{consent=true,reviewFails=0,checkFails=0,uncertain=fals
  registerTask:async(_root,input,options)=>options.service.create({...input,limits:{...input.limits,maxReplans}},{runId:options.run,operationId:options.operation,stage:options.stage,workflow:options.workflow,naturalIntakeHash:options.naturalIntakeHash}),
  execute:async({node,onStart,priorEvidence,reviewEvidence,task,plan})=>{
   calls.push({nodeId:node.id,action:node.action.id,priorEvidence,reviewEvidence,task,planVersion:plan.version});await onStart({ticket:'fixture',pid:process.pid});
+  if(node.action.id==='ai-plan'&&remainingPlannerFailures-- > 0)return {exitCode:1,stopped:true,uncertain:false,failureReason:'AI_INVALID_SCHEMA'};
   if(node.action.id==='check-tests')return {exitCode:checks++<checkFails?1:0,stopped:true,uncertain:false};
   const fail=node.action.id==='ai-review' && reviews++<reviewFails;
   const plannerIsUncertain=node.action.id==='ai-plan'&&remainingPlannerUncertainty>0;
@@ -186,6 +187,65 @@ test('semantic planner uncertainty retries planning from saved analysis without 
  s=await f.settle(await f.service.command(s.runId,'replan',request(s)));
  assert.equal(s.status,'waiting-for-human');assert.equal(s.phase,'execution');
  assert.deepEqual(f.calls.map(c=>c.action),['ai-analyze','ai-plan','ai-plan']);
+});
+
+test('technical planner failure preserves the verified analysis after a runtime fix',async(t)=>{
+ const f=await fixture(t,{plannerFailures:1});let s=await f.settle(await f.intake());
+ assert.equal(s.status,'failed');assert.equal(s.nodes.find(n=>n.id==='plan-task').reason,'AI_INVALID_SCHEMA');
+ f.setRuntimeHash(hashObject('fixed provider output schema'));
+ s=await f.settle(await f.service.command(s.runId,'replan',request(s)));
+ assert.equal(s.status,'waiting-for-human');
+ assert.deepEqual(f.calls.map(c=>c.action),['ai-analyze','ai-plan','ai-plan']);
+ assert.deepEqual(f.calls.at(-1).priorEvidence.analysis.result.analysis,analysis);
+});
+
+test('unapproved plan can be revised after runtime changes without transferring write permission',async(t)=>{
+ const f=await fixture(t);let s=await f.settle(await f.intake());
+ assert.equal(s.phase,'execution');assert.equal(s.status,'waiting-for-human');
+ f.setRuntimeHash(hashObject('corrected contract compiler'));
+ s=await f.settle(await f.service.command(s.runId,'revise-plan',request(s,{feedback:'Уточнить будущую проверку требования'})));
+ assert.equal(s.phase,'execution');assert.equal(s.status,'waiting-for-human');
+ assert.deepEqual(f.service.store.readRun(s.runId).permissions,[]);
+ assert.equal(f.calls.filter(c=>c.action==='ai-analyze').length,1);
+ assert.equal(f.calls.filter(c=>c.action==='ai-implement').length,0);
+});
+
+test('a prompt limit before process start is a known failure and requires no fictitious recovery',async(t)=>{
+ const f=await fixture(t), execute=f.service.adapters.execute;
+ f.service.adapters.execute=async args=>{
+  if(args.node.action.id==='ai-plan')throw new GraphError('RUNNER_PROMPT_LIMIT','Контекст слишком большой');
+  return execute(args);
+ };
+ const s=await f.settle(await f.intake());
+ assert.equal(s.status,'failed');
+ const receipt=f.service.store.readObject('receipts',s.nodes.find(n=>n.id==='plan-task').receiptIds.at(-1));
+ assert.equal(receipt.termination.stopped,true);
+ assert.equal(receipt.termination.execution.processStarted,false);
+ assert.equal(s.capabilities.recover.allowed,false);
+});
+
+test('an error after process start cannot fabricate proof that no process ran',async(t)=>{
+ const f=await fixture(t), execute=f.service.adapters.execute;
+ f.service.adapters.execute=async args=>{
+  if(args.node.action.id==='ai-plan'){
+   await args.onStart({ticket:'fixture',pid:process.pid});
+   throw new GraphError('RUNNER_PROMPT_LIMIT','Сбой после начала');
+  }
+  return execute(args);
+ };
+ const s=await f.settle(await f.intake());
+ assert.equal(s.status,'uncertain');
+ const receipt=f.service.store.readObject('receipts',s.nodes.find(n=>n.id==='plan-task').receiptIds.at(-1));
+ assert.equal(receipt.termination,null);
+});
+
+test('planner retry analyzes again when the previously observed workspace changed',async(t)=>{
+ const f=await fixture(t,{plannerFailures:1});let s=await f.settle(await f.intake());
+ const before=f.service.adapters.fingerprint();
+ f.service.adapters.fingerprint=()=>({...before,hash:hashObject('changed source after analysis')});
+ s=await f.settle(await f.service.command(s.runId,'replan',request(s)));
+ assert.equal(s.status,'waiting-for-human');
+ assert.deepEqual(f.calls.map(c=>c.action),['ai-analyze','ai-plan','ai-analyze','ai-plan']);
 });
 
 test('истекший общий срок не запускает implementation даже после согласования',async(t)=>{
@@ -392,4 +452,81 @@ test('готовое read-only планирование восстанавлив
  s=await f.service.command(s.runId,'replan',request(s));s=await f.settle(s);
  assert.equal(s.status,'waiting-for-human');assert.equal(f.service.plan(s.runId).runtimeHash,nextRuntime);
  assert.equal(f.service.plan(created.runId).runtimeHash,hash);assert.equal(f.calls.some(call=>call.action==='ai-implement'),false);
+});
+
+
+test('recovered preflight uncertainty retains unchanged saved analysis without a second analyzer',async(t)=>{
+ const f=await fixture(t);let s=await f.settle(await f.intake());
+ assert.equal(s.phase,'execution');assert.equal(s.status,'waiting-for-human');
+ const execute=f.service.adapters.execute;let failed=false;
+ f.service.adapters.execute=async args=>{
+  if(args.node.action.id==='ai-plan'&&!failed){failed=true;throw new GraphError('LEGACY_PREFLIGHT_UNCERTAIN','Synthetic preflight without a process result');}
+  return execute(args);
+ };
+ s=await f.settle(await f.service.command(s.runId,'revise-plan',request(s,{feedback:'Clarify the planned verification'})));
+ assert.equal(s.phase,'planning');assert.equal(s.status,'uncertain');
+ const retained=f.service.plan(s.runId).analysisArtifact;
+ assert.ok(retained);assert.equal(f.calls.filter(c=>c.action==='ai-analyze').length,1);
+ assert.equal(s.capabilities.recover.allowed,true);
+ await assert.rejects(f.service.command(s.runId,'replan',request(s)),{code:'RECOVERY_REQUIRED'});
+ s=await f.service.command(s.runId,'recover',request(s));
+ assert.equal(f.service.store.readRun(s.runId).recovered,true);
+ const planner=s.nodes.find(n=>n.id==='plan-task');
+ assert.equal(f.service.receipt(s.runId,planner.receiptIds.at(-1)).phase,'recovery');
+ s=await f.settle(await f.service.command(s.runId,'replan',request(s)));
+ assert.equal(s.phase,'execution');assert.equal(s.status,'waiting-for-human');
+ assert.equal(f.calls.filter(c=>c.action==='ai-analyze').length,1);
+ assert.deepEqual(f.calls.at(-1).priorEvidence.analysis.result.analysis,analysis);
+ assert.equal(f.calls.filter(c=>c.action==='ai-implement').length,0);
+});
+
+test('recovered preflight uncertainty reanalyzes when the saved analysis source changed',async(t)=>{
+ const f=await fixture(t);let s=await f.settle(await f.intake());
+ assert.equal(s.phase,'execution');assert.equal(s.status,'waiting-for-human');
+ const execute=f.service.adapters.execute;let failed=false;
+ f.service.adapters.execute=async args=>{
+  if(args.node.action.id==='ai-plan'&&!failed){failed=true;throw new GraphError('LEGACY_PREFLIGHT_UNCERTAIN','Synthetic preflight without a process result');}
+  return execute(args);
+ };
+ s=await f.settle(await f.service.command(s.runId,'revise-plan',request(s,{feedback:'Clarify the planned verification'})));
+ assert.equal(s.phase,'planning');assert.equal(s.status,'uncertain');
+ const retained=f.service.plan(s.runId).analysisArtifact;
+ assert.ok(retained);assert.equal(f.calls.filter(c=>c.action==='ai-analyze').length,1);
+ assert.equal(s.capabilities.recover.allowed,true);
+ await assert.rejects(f.service.command(s.runId,'replan',request(s)),{code:'RECOVERY_REQUIRED'});
+ s=await f.service.command(s.runId,'recover',request(s));
+ assert.equal(f.service.store.readRun(s.runId).recovered,true);
+ const planner=s.nodes.find(n=>n.id==='plan-task');
+ assert.equal(f.service.receipt(s.runId,planner.receiptIds.at(-1)).phase,'recovery');
+ const before=f.service.adapters.fingerprint();
+ f.service.adapters.fingerprint=()=>({...before,hash:hashObject('changed source after recovered preflight')});
+ s=await f.settle(await f.service.command(s.runId,'replan',request(s)));
+ assert.equal(s.phase,'execution');assert.equal(s.status,'waiting-for-human');
+ assert.equal(f.calls.filter(c=>c.action==='ai-analyze').length,2);
+ assert.deepEqual(f.calls.at(-1).priorEvidence.analysis.result.analysis,analysis);
+ assert.equal(f.calls.filter(c=>c.action==='ai-implement').length,0);
+});
+
+
+test('new source analysis reaches planner and final contract ahead of retained older facts',async(t)=>{
+ const f=await fixture(t,{plannerFailures:1}),execute=f.service.adapters.execute;
+ let generation=0;
+ f.service.adapters.execute=async args=>{
+  const result=await execute(args);
+  if(args.node.action.id==='ai-analyze'){
+   generation++;
+   result.output.analysis={...analysis,constraints:[generation===1?'Old enduring constraint':'Fresh enduring constraint'],
+    projectFacts:[{path:'src/form.mjs',fact:generation===1?'Old source fact':'Fresh source fact'}]};
+  }
+  return result;
+ };
+ let s=await f.settle(await f.intake());
+ assert.equal(s.status,'failed');
+ const before=f.service.adapters.fingerprint();
+ f.service.adapters.fingerprint=()=>({...before,hash:hashObject('source changed before fresh analysis')});
+ s=await f.settle(await f.service.command(s.runId,'replan',request(s)));
+ assert.equal(s.phase,'execution');assert.equal(s.status,'waiting-for-human');
+ assert.equal(f.calls.filter(c=>c.action==='ai-analyze').length,2);
+ assert.equal(f.calls.at(-1).priorEvidence.analysis.result.analysis.projectFacts[0].fact,'Fresh source fact');
+ assert.deepEqual(f.service.plan(s.runId).taskContract.constraints,['Fresh enduring constraint']);
 });

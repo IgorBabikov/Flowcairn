@@ -22,7 +22,8 @@ const required = [
   'bin/flowcairn.mjs',
   'docs/INSTALLATION.md',
   'docs/FIRST-TASK.md',
-  'docs/GRAPH-REACTFLOW-STANDARD.md',
+  'docs/HOW-FLOWCAIRN-WORKS.md',
+  'docs/ARCHITECTURE.md',
 ];
 for (const file of required) assert.ok(existsSync(path.join(root, file)), `Отсутствует ${file}`);
 const files = [];

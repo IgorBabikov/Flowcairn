@@ -294,13 +294,15 @@ export function projectProfileHash(root) {
 }
 
 export function projectContextPaths(root, profile = loadProjectProfile(root)) {
-  return [
+  const context = [
     ...new Set([
-      ...['AGENTS.md', 'AGENT.md', 'README.md'].filter((name) => existsSync(path.join(root, name))),
+      ...['AGENTS.md', ...(profile.ai.provider === 'codex' ? ['AGENTS.override.md'] : []), 'AGENT.md', 'README.md'].filter((name) => existsSync(path.join(root, name))),
       ...profile.contextPaths,
       ...profile.manifests.filter((file) => /(?:^|\/)package\.json$/.test(file)),
     ]),
   ];
+  return context.filter((file) => !(profile.ai.provider === 'codex' && path.posix.basename(file) === 'AGENTS.md' &&
+    existsSync(path.join(root, path.posix.dirname(file), 'AGENTS.override.md'))));
 }
 
 /** Разрешение хранится локально и связано с точным профилем и корнем проекта. */

@@ -1,45 +1,61 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="480" viewBox="0 0 1280 480" role="img" aria-labelledby="title desc">
-  <title id="title">Flowcairn — большая задача становится управляемой работой</title>
-  <desc id="desc">Graph проводит задачу через анализ проекта, план, изменения, проверки и приемку результата.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="440" viewBox="0 0 1280 440" role="img" aria-labelledby="title desc">
+  <title id="title">Flowcairn — от задачи к проверенному результату</title>
+  <desc id="desc">Иллюстрация задачи с отдельными требованиями: для каждого видны выполненная работа и статус проверки.</desc>
   <defs>
-    <linearGradient id="surface" x1="0" y1="0" x2="1" y2="1">
-      <stop stop-color="#f7f8fc"/>
-      <stop offset="1" stop-color="#edf0fb"/>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#f6f7ff"/>
+      <stop offset="1" stop-color="#ecf7f5"/>
     </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop stop-color="#6255dd"/>
+      <stop offset="1" stop-color="#319b96"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="14" stdDeviation="17" flood-color="#39416f" flood-opacity=".12"/>
+    </filter>
   </defs>
-  <rect width="1280" height="480" rx="28" fill="url(#surface)"/>
-  <rect x="32" y="32" width="1216" height="416" rx="20" fill="#ffffff"/>
-  <g font-family="Arial, Helvetica, sans-serif">
-    <text x="72" y="91" fill="#1d2940" font-size="36" font-weight="700" letter-spacing="-1.1">Flowcairn</text>
-    <path d="M72 111H246" fill="none" stroke="#465ee8" stroke-width="3" stroke-linecap="round"/>
-    <text x="72" y="182" fill="#18243a" font-size="46" font-weight="700" letter-spacing="-1.5">Большая задача</text>
-    <text x="72" y="238" fill="#465ee8" font-size="46" font-weight="700" letter-spacing="-1.5">становится управляемой.</text>
-    <text x="72" y="286" fill="#59677e" font-size="19">Graph разбивает работу на шаги, связывает зависимости</text>
-    <text x="72" y="314" fill="#59677e" font-size="19">и сохраняет доказательства каждого результата.</text>
-    <g transform="translate(630 72)">
-      <path d="M153 79H201M353 79H401V201H259M259 245V293H507" fill="none" stroke="#aeb8ca" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-      <path d="M259 245V293H105" fill="none" stroke="#465ee8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-      <path d="M259 245V293" fill="none" stroke="#465ee8" stroke-width="3" stroke-dasharray="7 7" stroke-linecap="round"/>
-      <rect x="0" y="38" width="153" height="82" rx="14" fill="#f8f9fd" stroke="#cdd5e5" stroke-width="2"/>
-      <text x="18" y="70" fill="#64728a" font-size="13" font-weight="700" letter-spacing="1">ЗАДАЧА</text>
-      <text x="18" y="100" fill="#1c2940" font-size="18" font-weight="700">Суть задачи</text>
-      <rect x="201" y="38" width="152" height="82" rx="14" fill="#f8f9fd" stroke="#cdd5e5" stroke-width="2"/>
-      <text x="219" y="70" fill="#64728a" font-size="13" font-weight="700" letter-spacing="1">АНАЛИЗ</text>
-      <text x="219" y="100" fill="#1c2940" font-size="18" font-weight="700">Контекст</text>
-      <rect x="105" y="163" width="154" height="82" rx="14" fill="#eef0ff" stroke="#465ee8" stroke-width="2"/>
-      <circle cx="127" cy="190" r="5" fill="#465ee8"/>
-      <text x="143" y="195" fill="#465ee8" font-size="13" font-weight="700" letter-spacing="1">ПЛАН</text>
-      <text x="123" y="225" fill="#1c2940" font-size="19" font-weight="700">План готов</text>
-      <rect x="401" y="163" width="212" height="82" rx="14" fill="#1d2a42"/>
-      <circle cx="423" cy="190" r="5" fill="#75d5cf"/>
-      <text x="439" y="195" fill="#9ae7e0" font-size="13" font-weight="700" letter-spacing="1">ВЫПОЛНЕНИЕ</text>
-      <text x="419" y="225" fill="#ffffff" font-size="19" font-weight="700">Изменения в коде</text>
-      <rect x="0" y="293" width="210" height="70" rx="14" fill="#f8f9fd" stroke="#cdd5e5" stroke-width="2"/>
-      <text x="20" y="322" fill="#64728a" font-size="13" font-weight="700" letter-spacing="1">ПРОВЕРКИ</text>
-      <text x="20" y="349" fill="#1c2940" font-size="18" font-weight="700">Тесты и ревью</text>
-      <rect x="351" y="293" width="156" height="70" rx="14" fill="#eef8f5" stroke="#79bda8" stroke-width="2"/>
-      <text x="371" y="322" fill="#41826e" font-size="13" font-weight="700" letter-spacing="1">РЕЗУЛЬТАТ</text>
-      <text x="371" y="349" fill="#1c2940" font-size="18" font-weight="700">Приемка вами</text>
+  <rect width="1280" height="440" rx="28" fill="url(#background)"/>
+  <circle cx="1160" cy="58" r="188" fill="#e4e4fc" opacity=".42"/>
+  <circle cx="95" cy="421" r="145" fill="#d8f0ea" opacity=".52"/>
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif">
+    <g transform="translate(64 53)">
+      <rect width="38" height="38" rx="12" fill="#6255dd"/>
+      <path d="M11 22l7-8 7 8 6-8" fill="none" stroke="white" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="54" y="29" fill="#202744" font-size="25" font-weight="750" letter-spacing="-.7">Flowcairn</text>
+      <text x="0" y="118" fill="#202744" font-size="46" font-weight="750" letter-spacing="-1.8">Дайте задачу.</text>
+      <text x="0" y="171" fill="#202744" font-size="46" font-weight="750" letter-spacing="-1.8">Увидьте результат.</text>
+      <rect x="0" y="193" width="420" height="5" rx="2.5" fill="url(#accent)"/>
+      <text x="0" y="245" fill="#48536d" font-size="21">План, исполнение и проверки</text>
+      <text x="0" y="276" fill="#48536d" font-size="21">для каждого обязательного требования.</text>
+      <g transform="translate(0 320)">
+        <rect width="245" height="38" rx="19" fill="#e9e7fd"/>
+        <circle cx="20" cy="19" r="5" fill="#6255dd"/>
+        <text x="35" y="25" fill="#4c40b4" font-size="16" font-weight="650">От цели до проверки</text>
+      </g>
+    </g>
+    <g transform="translate(655 47)" filter="url(#shadow)">
+      <rect width="563" height="346" rx="22" fill="white" stroke="#dbe0ef"/>
+      <rect x="25" y="23" width="80" height="28" rx="14" fill="#e9e7fd"/>
+      <text x="42" y="43" fill="#5548c8" font-size="13" font-weight="700">ЗАДАЧА</text>
+      <text x="25" y="88" fill="#202744" font-size="25" font-weight="700">Форма регистрации</text>
+      <text x="25" y="117" fill="#69738b" font-size="15">2 из 3 требований подтверждены</text>
+      <rect x="25" y="136" width="513" height="7" rx="3.5" fill="#edf0f7"/>
+      <rect x="25" y="136" width="342" height="7" rx="3.5" fill="url(#accent)"/>
+      <g font-size="16">
+        <circle cx="40" cy="180" r="12" fill="#e0f5ee"/><path d="M35 180l4 4 7-8" fill="none" stroke="#158363" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <text x="63" y="186" fill="#28344e" font-weight="600">Проверка email</text>
+        <text x="430" y="186" fill="#158363" font-size="13" font-weight="650">Проверено</text>
+        <path d="M25 202h513" stroke="#edf0f5"/>
+        <circle cx="40" cy="227" r="12" fill="#e0f5ee"/><path d="M35 227l4 4 7-8" fill="none" stroke="#158363" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <text x="63" y="233" fill="#28344e" font-weight="600">Ошибки рядом с полями</text>
+        <text x="430" y="233" fill="#158363" font-size="13" font-weight="650">Проверено</text>
+        <path d="M25 249h513" stroke="#edf0f5"/>
+        <circle cx="40" cy="274" r="12" fill="#fff0d6"/><path d="M40 268v7m0 4h.01" fill="none" stroke="#a97820" stroke-width="2.5" stroke-linecap="round"/>
+        <text x="63" y="280" fill="#28344e" font-weight="600">Повторная отправка</text>
+        <text x="399" y="280" fill="#a97820" font-size="13" font-weight="650">Нужна проверка</text>
+      </g>
+      <rect x="25" y="302" width="513" height="1" fill="#edf0f5"/>
+      <text x="25" y="327" fill="#758098" font-size="13">Статус задачи зависит от всех требований</text>
     </g>
   </g>
 </svg>

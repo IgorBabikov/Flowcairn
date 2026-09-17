@@ -777,6 +777,8 @@ test('actual service fixture smoke', async ({ page }, testInfo) => {
     }),
   ).toBeVisible();
   await expect(page.locator('.operator-layout')).toBeVisible();
+  const advancedGraph = page.getByRole('button', { name: 'Граф · детали исполнения', exact: true });
+  if (await advancedGraph.isVisible()) await advancedGraph.click();
   await expect(page.locator('.graph-node').first()).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath('actual-workflow.png'), fullPage: true });
 });

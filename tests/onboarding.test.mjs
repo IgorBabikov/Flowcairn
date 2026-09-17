@@ -232,6 +232,26 @@ test('повторная настройка требует свежий fingerpr
   assert.equal(api.inspectOnboarding(root).configured,true);
 });
 
+test('setup сохраняет выбранные проверки и требует отдельное согласие trusted-local', async t => {
+  const root = fixture(t);
+  const { onboardingInput, inspectOnboarding, saveOnboarding } = await import('../bin/onboarding.mjs');
+  initializeProject(root, options);
+  const choice = { ...options, model: 'provider-default', 'provider-version': '2.1.198 (Claude Code)',
+    'check-mode': 'trusted-local', checks: 'tests,build' };
+  const input = onboardingInput(choice, inspectOnboarding(root).profileHash);
+  assert.equal(input.checkMode, 'trusted-local');
+  await assert.rejects(saveOnboarding(root, input), { code: 'CHECK_LOCAL_CONSENT' });
+  const enabled = await saveOnboarding(root, { ...input, trustedLocalConsent: true });
+  assert.equal(enabled.profile.checkMode, 'trusted-local');
+  assert.deepEqual(enabled.profile.checks, ['tests', 'build']);
+  assert.deepEqual(enabled.profile.checkScripts, { tests: 'test', build: 'build' });
+  const disabled = await saveOnboarding(root, { ...input, profileHash: inspectOnboarding(root).profileHash, checkMode: 'none', checks: [] });
+  assert.equal(disabled.profile.checkMode, 'none');
+  assert.deepEqual(disabled.profile.checks, []);
+  assert.deepEqual(disabled.profile.checkScripts, {});
+  await assert.rejects(saveOnboarding(root, { ...input, profileHash: inspectOnboarding(root).profileHash, checkMode: 'hardened', checks: ['lint'] }), { code: 'CHECK_SCRIPT_MISSING' });
+});
+
 test('явная активация добавляет Graph-блок и сохраняет пользовательские инструкции', async t => {
   const root=fixture(t);
   const {initializeCommand}=await import('../bin/flowcairn.mjs');

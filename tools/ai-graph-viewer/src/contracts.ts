@@ -1,3 +1,5 @@
+import type { TaskProof } from './proof-contracts';
+
 export type RunStatus =
   | 'idle'
   | 'waiting'
@@ -108,6 +110,7 @@ export interface WorkflowProgress {
   artifacts: ArtifactSummary[];
 }
 export interface Snapshot {
+  proof?: TaskProof;
   failureReason?: string | null;
   workflowProgress?: WorkflowProgress[];
   phase?: 'planning' | 'execution';
@@ -257,6 +260,8 @@ export interface ControlRequest {
   draft?: { nodes: unknown[] };
   reason?: string;
   feedback?: string;
+  requirementId?: string;
+  resultHash?: string;
 }
 
 export interface TaskInput {

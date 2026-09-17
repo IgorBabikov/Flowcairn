@@ -11,6 +11,8 @@ import path from 'node:path';
 import { GraphError, sha256 } from './io.mjs';
 import { isWithin } from './registry.mjs';
 import { compareWorkspaces } from './workspace.mjs';
+import { MAX_DIFF_BYTES, unifiedDiff } from './unified-diff.mjs';
+import { CHANGE_EVIDENCE_FORMAT, STRUCTURAL_FILE_BYTES, deletionEvidence, encodeChangeEvidence, fileVersion, jsonEntryEvidence } from './change-evidence.mjs';
 
 const MAX_BYTES = 32 * 1024 * 1024;
 function content(root, entry) {
@@ -66,56 +68,73 @@ function sensitive(value) {
     value,
   );
 }
-function lines(value, prefix) {
-  if (!value) return '';
-  const split = value.split('\n'),
-    newline = split.at(-1) === '';
-  if (newline) split.pop();
-  return (
-    split.map((line) => `${prefix}${line}\n`).join('') +
-    (newline ? '' : '\\ No newline at end of file\n')
-  );
-}
-const count = (value) => (value ? value.split('\n').length - (value.endsWith('\n') ? 1 : 0) : 0);
+const incomplete = (reason) => ({ content: `${reason}\n`, complete: false, mediaType: 'text/x-diff' });
 
-/** Complete bounded unified diff against bytes captured before this exact attempt, not Git HEAD. */
+/** Exact attempt operations. Structural records are deterministic evidence, never an AI summary. */
 export function buildAttemptDiff(worktree, before, after, beforeContents) {
-  const root = realpathSync(worktree),
-    old = new Map(before.files.map((e) => [e.path, e])),
-    next = new Map(after.files.map((e) => [e.path, e]));
-  const patches = [];
-  let size = 0,
-    complete = true;
-  for (const file of compareWorkspaces(before, after)) {
-    if (file.startsWith('@git/')) {
-      complete = false;
-      patches.push(`Git metadata changed: ${file}\n`);
+  const root = realpathSync(worktree);
+  const old = new Map(before.files.map((entry) => [entry.path, entry]));
+  const next = new Map(after.files.map((entry) => [entry.path, entry]));
+  const changedPaths = compareWorkspaces(before, after);
+  if (changedPaths.some((file) => file.startsWith('@git/')))
+    return incomplete('Git metadata changed: attempt evidence is incomplete');
+  const records = [];
+  let bytesRead = 0;
+  for (const file of changedPaths) {
+    const previous = old.get(file), current = next.get(file);
+    const oldBytes = previous ? beforeContents.get(file) : Buffer.alloc(0);
+    const newBytes = current ? content(root, current) : Buffer.alloc(0);
+    if (!oldBytes || previous && (oldBytes.length !== previous.size || sha256(oldBytes) !== previous.hash))
+      throw new GraphError('DIFF_BEFORE_MISSING', 'Отсутствуют проверенные bytes начала попытки');
+    bytesRead += newBytes.length;
+    if (bytesRead > MAX_BYTES) throw new GraphError('ARTIFACT_SCOPE_LIMIT', 'Измененный результат превышает 32 MiB');
+    // Scan raw bytes before move/JSON/delete optimization, including binary files.
+    if (sensitive(oldBytes.toString('utf8')) || sensitive(newBytes.toString('utf8')))
+      return incomplete('Content withheld: sensitive marker; attempt evidence is incomplete');
+    records.push({ file, previous, current, oldBytes, newBytes });
+  }
+  const operations = [], consumed = new Set();
+  for (const removed of records.filter((record) => record.previous && !record.current)) {
+    const added = records.find((record) => !consumed.has(record.file) && !record.previous && record.current &&
+      record.current.hash === removed.previous.hash && record.current.size === removed.previous.size &&
+      record.current.mode === removed.previous.mode && record.newBytes.equals(removed.oldBytes));
+    if (!added) continue;
+    consumed.add(removed.file); consumed.add(added.file);
+    operations.push({ kind: 'move', from: removed.file, to: added.file,
+      before: fileVersion(removed.previous), after: fileVersion(added.current), byteIdentical: true });
+  }
+  for (const record of records) {
+    const { file, previous, current, oldBytes, newBytes } = record;
+    if (consumed.has(file)) continue;
+    if (!current && previous.size >= STRUCTURAL_FILE_BYTES) {
+      operations.push(deletionEvidence(file, previous, oldBytes));
       continue;
     }
-    const previous = old.get(file),
-      current = next.get(file),
-      oldBytes = previous ? beforeContents.get(file) : Buffer.alloc(0),
-      newBytes = current ? content(root, current) : Buffer.alloc(0);
-    if (!oldBytes || (previous && sha256(oldBytes) !== previous.hash))
-      throw new GraphError('DIFF_BEFORE_MISSING', 'Отсутствуют проверенные bytes начала попытки');
-    const a = text(oldBytes),
-      b = text(newBytes),
-      header = `diff --git ${JSON.stringify(`a/${file}`)} ${JSON.stringify(`b/${file}`)}\n${!previous ? `new file mode ${current.mode}\n` : !current ? `deleted file mode ${previous.mode}\n` : previous.mode !== current.mode ? `old mode ${previous.mode}\nnew mode ${current.mode}\n` : ''}`;
-    let patch;
-    if (a === null || b === null)
-      patch = `${header}Binary evidence: ${previous?.hash ?? 'absent'} -> ${current?.hash ?? 'absent'}; sizes ${oldBytes.length} -> ${newBytes.length}\n`;
-    else if (sensitive(a) || sensitive(b)) {
-      patch = `${header}Content withheld: sensitive marker; hashes ${previous?.hash ?? 'absent'} -> ${current?.hash ?? 'absent'}\n`;
-      complete = false;
-    } else
-      patch = `${header}--- ${previous ? JSON.stringify(`a/${file}`) : '/dev/null'}\n+++ ${current ? JSON.stringify(`b/${file}`) : '/dev/null'}\n@@ -${count(a) ? 1 : 0},${count(a)} +${count(b) ? 1 : 0},${count(b)} @@\n${lines(a, '-')}${lines(b, '+')}`;
-    size += Buffer.byteLength(patch);
-    if (size > 3 * 1024 * 1024) {
-      patches.push('Diff exceeds 3 MiB; split this task.\n');
-      complete = false;
-      break;
+    const json = jsonEntryEvidence(file, previous, current, oldBytes, newBytes);
+    if (json) { operations.push(json); continue; }
+    if (text(oldBytes) === null || text(newBytes) === null)
+      return incomplete('Binary evidence: changed binary content requires a dedicated verifier');
+    try {
+      operations.push({ kind: 'text', path: file, before: fileVersion(previous), after: fileVersion(current),
+        patch: unifiedDiff(file, previous, current, oldBytes, newBytes) });
+    } catch (error) {
+      if (error instanceof GraphError && error.code === 'DIFF_UNAVAILABLE')
+        return incomplete('Diff exceeds available time or output budget; exact hunks unavailable');
+      throw error;
     }
-    patches.push(patch);
   }
-  return { content: patches.join(''), complete };
+  const structural = operations.some((operation) => operation.kind !== 'text');
+  if (!structural) {
+    const patch = operations.map((operation) => 'patch' in operation ? operation.patch : '').join('');
+    return Buffer.byteLength(patch) <= MAX_DIFF_BYTES ? { content: patch, complete: true, mediaType: 'text/x-diff' }
+      : incomplete('Diff exceeds 3 MiB; split this task');
+  }
+  try {
+    return { content: encodeChangeEvidence(before, after, changedPaths, operations), complete: true,
+      mediaType: 'application/json', format: CHANGE_EVIDENCE_FORMAT };
+  } catch (error) {
+    if (error instanceof GraphError && error.code === 'REVIEW_EVIDENCE_INVALID')
+      return incomplete('Diff exceeds structural evidence limits or contains unsupported operations');
+    throw error;
+  }
 }

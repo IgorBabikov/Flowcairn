@@ -11,6 +11,7 @@ import {
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createUsageCollector } from './usage.mjs';
 
 const MAX_TICKET_BYTES = 64 * 1024;
 const MAX_CONTROL_BYTES = 256 * 1024;
@@ -168,6 +169,7 @@ export async function supervise(ticketPath) {
   let diagnostic = Buffer.alloc(0);
   const stdoutHash = createHash('sha256');
   const stderrHash = createHash('sha256');
+  const usageCollector = createUsageCollector();
 
   const finish = (exitCode, signal, failureReason = null) => {
     if (terminal) return;
@@ -183,6 +185,7 @@ export async function supervise(ticketPath) {
       stderrBytes,
       stdoutDigest: stdoutHash.digest('hex'),
       stderrDigest: stderrHash.digest('hex'),
+      usage: initial.actionId?.startsWith('ai-') ? usageCollector.finish() : null,
     };
     writeTicket(ticketPath, final);
     sendControl({ type: 'finished', ...final });
@@ -273,8 +276,10 @@ export async function supervise(ticketPath) {
     const collect = (stream, digest, isStdout) => {
       stream.on('data', (data) => {
         digest.update(data);
-        if (isStdout && initial.actionId?.startsWith('ai-'))
+        if (isStdout && initial.actionId?.startsWith('ai-')) {
           diagnostic = Buffer.concat([diagnostic, data]).subarray(-65536);
+          usageCollector.push(data);
+        }
         if (isStdout) stdoutBytes += data.length;
         else stderrBytes += data.length;
         const total = stdoutBytes + stderrBytes;

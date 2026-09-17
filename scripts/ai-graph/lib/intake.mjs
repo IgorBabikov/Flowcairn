@@ -6,6 +6,7 @@ import { RelativePath } from './schemas.mjs';
 import { isSensitivePath, isInstructionPath, overlaps } from './registry.mjs';
 import { projectContextPaths } from './project.mjs';
 import { ownedBootstrapFiles } from './bootstrap.mjs';
+import { isSensitiveSourcePath } from './source.mjs';
 
 function git(root, args) {
   const result = spawnSync('/usr/bin/git', ['-c', 'core.fsmonitor=false', ...args], {
@@ -54,7 +55,10 @@ export function projectSummary(service) {
   if (scopeCandidates.length > 256) throw new GraphError('INTAKE_SCOPE_LIMIT', 'Inventory превышает 256 корневых областей; требуется более узкий проект');
   const contextPaths = [...new Set([...projectContextPaths(service.root, profile), ...(service.adapters.instructionPaths?.() ?? [])])].sort();
   const contextHash = hashObject({ runtimeHash: service.adapters.identity(), files, contextPaths, scopeCandidates, profile, snapshotHash: bootstrap.snapshotHash });
-  const unsafeChanges = changed.length !== changedPaths.length;
+  // The source snapshot withholds these files entirely; their local edits are not AI inputs.
+  // Other unsafe names remain a blocker. Never read private configuration to build the preview.
+  const unsafeChanges = changed.some((file) => !safe(file) &&
+    !(RelativePath.safeParse(file).success && isSensitiveSourcePath(file)));
   return { schemaVersion: 2, name: path.basename(service.root), contextHash, contextPaths, scopeCandidates, bootstrap,
     checks: profile.checks, ai: { provider: profile.ai.provider, model: profile.ai.model },
     capabilities: { intake: { allowed: scopeCandidates.length > 0 && !unsafeChanges,

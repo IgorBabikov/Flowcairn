@@ -79,6 +79,42 @@ export const ArtifactKind = z.enum([
   'handoff',
 ]);
 export const SkillManifestSchema = z.strictObject({ id: Id, path: RelativePath, hash: Hash });
+export const RequirementVerificationSchema = z.strictObject({
+  method: z.enum(['check', 'source-review', 'human']),
+  checkIds: z.array(Id).max(6),
+  criterion: Text,
+  paths: z.array(RelativePath).max(64),
+});
+export const RequirementSchema = z.strictObject({
+  id: Id,
+  title: Text,
+  mandatory: z.boolean(),
+  origin: z.enum(['acceptance', 'analysis']),
+  verification: RequirementVerificationSchema,
+  workIds: z.array(Id).max(64),
+});
+export const TaskContractSchema = z.strictObject({
+  version: z.literal(1),
+  goal: Text,
+  instructionsHash: Hash,
+  requirements: z.array(RequirementSchema).min(1).max(40),
+  optionalImprovements: z.array(Text).max(20),
+  constraints: z.array(Text).max(32),
+  assumptions: z.array(Text).max(20),
+  unknowns: z.array(Text).max(32),
+  scope: z.array(RelativePath).min(1).max(64),
+  forbiddenPaths: z.array(RelativePath).max(32),
+  rigor: z.strictObject({ level: z.enum(['light', 'standard', 'high']), reasons: z.array(Text).min(1).max(12) }),
+});
+export const TaskContractProposalSchema = z.strictObject({
+  requirements: z.array(z.strictObject({
+    id: Id, title: Text, mandatory: z.boolean(), verification: RequirementVerificationSchema,
+  })).min(1).max(40),
+  optionalImprovements: z.array(Text).max(20),
+  constraints: z.array(Text).max(20),
+  assumptions: z.array(Text).max(20),
+  unknowns: z.array(Text).max(20),
+});
 export const TaskInputSchema = z.strictObject({
   id: z.string().regex(/^[A-Z][A-Z0-9-]{2,40}$/),
   goal: Text,
@@ -138,6 +174,7 @@ export const GraphPlanSchema = z.strictObject({
   stage: z.enum(['planning', 'execution']).optional(),
   workflow: z.literal('autonomous').optional(),
   analysisArtifact: Hash.optional(),
+  taskContract: TaskContractSchema.optional(),
   autonomy: z.strictObject({ maxRepairCycles: z.literal(2), maxDurationMs: z.literal(1800000) }).optional(),
   contextHash: Hash.optional(),
   schemaVersion: z.literal(2),
@@ -163,6 +200,13 @@ export const PlanningEnvelopeSchema = z.strictObject({
   // Historical envelopes remain readable; new profiles can select only CLI providers.
   provider: z.enum(['codex', 'openai', 'claude', 'cursor']),
   timeoutMs: z.number().int().min(1000).max(1800000),
+});
+export const JsonTransferSchema = z.strictObject({
+  from: RelativePath,
+  to: RelativePath,
+  previousHash: Hash,
+  targetPreviousHash: Hash.nullable(),
+  keys: z.array(z.string().min(1).max(1024).refine((key) => !key.includes('\0'))).min(1).max(1000),
 });
 export const AIResultSchema = z.strictObject({
   summary: z.string().min(1).max(3000),
@@ -203,9 +247,23 @@ export const AIResultSchema = z.strictObject({
     )
     .max(100)
     .default([]),
+  jsonTransfers: z.array(JsonTransferSchema).max(100).default([]),
   plan: z.array(z.strictObject({ outcome: Text, paths: z.array(RelativePath).max(32) })).max(20),
 });
-export const AIReviewResultSchema = AIResultSchema.extend({ reviewEvidenceHash: Hash });
+export const RequirementAssessmentSchema = z.strictObject({
+  requirementId: Id,
+  verdict: z.enum(['pass', 'fail', 'uncertain']),
+  criterion: Text,
+  checkIds: z.array(Id).max(6),
+  citations: z.array(z.strictObject({
+    path: RelativePath, startLine: z.number().int().min(1), quote: z.string().min(1).max(4000),
+  })).max(20),
+  reason: Text,
+});
+export const AIReviewResultSchema = AIResultSchema.extend({
+  reviewEvidenceHash: Hash,
+  requirementAssessments: z.array(RequirementAssessmentSchema).max(40).optional(),
+});
 export const CheckResultSchema = z.strictObject({
   id: Id,
   passed: z.boolean(),
@@ -273,6 +331,13 @@ export const ReceiptSchema = z.strictObject({
   previousReceipt: Hash.nullable(),
   providerConsentHash: Hash.nullable().optional(),
 });
+export const RequirementAcceptanceReceiptSchema = z.strictObject({
+  schemaVersion: z.literal(2), phase: z.literal('requirement'), runId: Id,
+  planHash: Hash, taskHash: Hash, contractHash: Hash, requirementId: Id,
+  decision: z.literal('accept'), actor: z.string().min(1).max(120), acceptedAt: z.iso.datetime(),
+  resultHash: Hash, reason: Text, operationId: Id, previousReceipt: Hash.nullable(),
+  artifacts: z.array(Hash).max(0),
+});
 const FingerprintSchema = z.strictObject({
   hash: Hash,
   files: z
@@ -307,6 +372,7 @@ export const RunStateSchema = z.strictObject({
   runId: Id,
   revision: z.number().int().min(0),
   taskHash: Hash,
+  requirementReceipts: z.array(Hash).max(100).optional(),
   planHash: Hash,
   envelopeHash: Hash,
   sourceHash: Hash,
@@ -382,6 +448,8 @@ export const RunStateSchema = z.strictObject({
   failureReason: z.string().max(12000).optional(),
 });
 export const ControlRequestSchema = z.strictObject({
+  requirementId: Id.optional(),
+  resultHash: Hash.optional(),
   operationId: Id,
   expectedRevision: z.number().int().min(0),
   planHash: Hash,
@@ -409,9 +477,12 @@ export const PlanningStepSchema = z.strictObject({
   outcome: Text,
   needs: z.array(Id).max(12),
   paths: z.array(RelativePath).min(1).max(32),
+  readPaths: z.array(RelativePath).max(32).optional(),
+  requirementIds: z.array(Id).max(40).optional(),
 });
 export const AIPlanningResultSchema = AIResultSchema.extend({
   steps: z.array(PlanningStepSchema).max(12),
+  contractProposal: TaskContractProposalSchema.optional(),
 });
 export const LegacyIntakeSchema = z.strictObject({
   prompt: z.string().trim().min(3).max(16000),

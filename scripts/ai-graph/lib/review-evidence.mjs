@@ -16,6 +16,7 @@ import { z } from 'zod';
 import { ArtifactSchema, Hash, Id, ReceiptSchema, TaskSpecSchema, GraphPlanSchema, assertJsonBounds } from './schemas.mjs';
 import { GraphError, canonicalJson, hashObject, sha256 } from './io.mjs';
 import { isWithin, pathAllowed } from './registry.mjs';
+import { CHANGE_EVIDENCE_FORMAT, validateChangeEvidence } from './change-evidence.mjs';
 
 // Separate from the 32 KiB prior-evidence / 128 KiB prompt budgets; never truncate a diff.
 export const MAX_REVIEW_EVIDENCE_BYTES = 512 * 1024;
@@ -90,7 +91,7 @@ function validateCompletedImplementation(entry, definition, evidence, task, plan
       fail('Artifact hash не совпадает с implementation receipt');
   if (
     diff.artifact.kind !== 'diff' ||
-    diff.artifact.mediaType !== 'text/x-diff' ||
+    !['text/x-diff', 'application/json'].includes(diff.artifact.mediaType) ||
     changedFiles.artifact.kind !== 'changed-files' ||
     changedFiles.artifact.mediaType !== 'application/json'
   )
@@ -119,7 +120,13 @@ function validateCompletedImplementation(entry, definition, evidence, task, plan
     (receipt.changedFiles.length === 0) !== (receipt.beforeFingerprint === receipt.afterFingerprint)
   )
     fail('No-op/diff не совпадает с fingerprint');
-  if (/^Binary evidence:|^Content withheld:|^Diff exceeds |^Git metadata changed:/m.test(diff.artifact.content))
+  if (diff.artifact.mediaType === 'application/json') {
+    if (changes.format !== CHANGE_EVIDENCE_FORMAT) fail('Неизвестный формат структурного evidence');
+    validateChangeEvidence(diff.artifact.content, { changedFiles: receipt.changedFiles,
+      beforeFingerprint: receipt.beforeFingerprint, afterFingerprint: receipt.afterFingerprint });
+  } else if (changes.format && changes.format !== 'unified-diff') {
+    fail('Формат diff не соответствует artifact media type');
+  } else if (/^Binary evidence:|^Content withheld:|^Diff exceeds |^Git metadata changed:/m.test(diff.artifact.content))
     fail('Diff не содержит полного проверяемого текста');
 }
 

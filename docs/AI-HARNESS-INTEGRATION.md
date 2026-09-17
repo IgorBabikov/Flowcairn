@@ -1,63 +1,39 @@
-# Интеграция с AI coding assistants
+# AI-клиенты и границы исполнения
 
-Flowcairn разделяет **интеграцию клиента** и **исполнение Graph Runtime**. Наличие Claude Code или Cursor на компьютере не означает, что они получили право менять файлы через Flowcairn.
+Flowcairn использует AI CLI для анализа, планирования, предложений изменений и ревью. Executor сохраняет владение файлами, разрешениями, состоянием и критериями PROVEN. Наличие клиента на компьютере не является разрешением передать ему проект.
 
-## Что взято из зрелых проектов
+## Адаптеры
 
-| Референс | Практика | Решение Flowcairn |
+| Клиент | Что проверяет текущий адаптер | Как ограничен вызов |
 | --- | --- | --- |
-| [Superpowers](https://github.com/obra/superpowers) | Общие Skills, но нативная установка отдельно для каждого harness | Один каталог `skills/`, отдельные manifests Codex, Claude Code и Cursor |
-| [GSD Core](https://github.com/open-gsd/gsd-core) | Typed capability/layout descriptors и преобразования только там, где они нужны | Явный registry harnesses и отдельный уровень исполнения |
-| [AI Rules Sync](https://github.com/lbb00/ai-rules-sync) | Матрица поддерживаемых файлов и клиентов, preview/update/install | `doctor` показывает обнаруженные assistants и не смешивает их с runtime capability |
+| Codex | macOS; CLI версии `0.145.0` или `0.154.0`; установка и локальная авторизация | Отдельный запуск с явной моделью, ограниченными файловыми permissions, без наследования пользовательских правил и произвольных инструментов |
+| Claude Code | Проверяемый пакет `@anthropic-ai/claude-code`, допустимая версия от `2.1.198`, статус авторизации; точная версия закреплена в профиле | Private workspace; пользовательские/project settings, tools, MCP и сохранение сессии отключены |
+| Cursor | Безопасный executable, поддержка необходимых CLI-параметров, статус клиента; точная версия закреплена в профиле | Пустой private workspace, включенный sandbox, Ask mode, структурированный ответ |
 
-Не берем symlink-установку в пользовательские настройки: Flowcairn не должен ломаться после clone, зависеть от абсолютных путей или переписывать чужие правила.
+Это условия допуска реализации, а не отчет о проверке каждого клиента на каждой ОС. Реальный вызов, доступ к модели и успешное выполнение задачи подтверждаются отдельно. [Фактически выполненные проверки](VERIFICATION.md).
 
-## Один источник, три native manifests
+`npx flowcairn doctor` проверяет локальные предпосылки и обнаруженные клиенты, не отправляя задачу AI. Неавторизованный или неподходящий клиент не получает разрешение на исполнение. После обновления закрепленной версии Claude Code/Cursor повторите `setup`.
 
-Все общие Skills лежат в `skills/`. В пакет включены:
+## Что передается AI
 
-| Клиент | Manifest | Нативные поверхности |
-| --- | --- | --- |
-| Codex | `.codex-plugin/plugin.json` | `AGENTS.md`/`AGENTS.override.md`, `.agents/skills/` |
-| Claude Code | `.claude-plugin/plugin.json` | `CLAUDE.md`, `.claude/rules/`, `.claude/skills/` |
-| Cursor | `.cursor-plugin/plugin.json` | `.cursor/rules/`, `.cursor/skills/`, `.agents/skills/` |
+Контекст собирается под конкретное действие: цель, релевантные требования, разрешенные исходники, инструкции, Skills и нужные artifacts. Полная история задачи не добавляется в каждый вызов. Review получает отдельный проверенный bundle и должен вернуть связанные assessments.
 
-Manifests ссылаются на один каталог Skills пакета. Они не создают копии Skills в пользовательском репозитории и не меняют существующие `AGENTS.md`, `CLAUDE.md`, `.cursor/rules` или `.cursorrules`. Marketplace-публикация этих manifests — отдельный следующий этап; `npx flowcairn` не меняет настройки Claude Code или Cursor сам.
+Claude Code/Cursor требуют отдельного согласия на передачу для конкретного плана. Согласие связано с plan, scope, instructions, Skills, artifacts и точной CLI-версией. Интерфейс показывает границы передачи и отмену. Измененный план не наследует старое согласие.
 
-## Уровни поддержки
+Внешнему worker передается ограниченный serialized prompt; неподходящий размер отклоняется до запуска. `.env`, secrets, Git history, неутвержденные файлы и shell проекта не становятся допустимым контекстом по просьбе модели.
 
-| Уровень | Codex | Claude Code | Cursor |
-| --- | --- | --- | --- |
-| Обнаружение локального CLI | Да | Да | Да |
-| Нативный manifest в пакете | Да | Да | Да |
-| Правила и Skills Flowcairn | Да | Да | Да |
-| Безопасное выполнение AI-node Graph Runtime | Да | Да, после version probe и per-plan consent | Да, после version probe и per-plan consent |
+## Настройки модели и usage
 
-`npx flowcairn doctor` показывает только фактически найденные CLI. `detected` не является разрешением на запуск AI-node.
+Codex получает модель и усиление согласно [профилю](CONFIGURATION.md). В режиме `provider` Flowcairn читает только эти параметры отдельного CLI, а не настройки активного чата IDE. Claude Code/Cursor используют модель, выбранную в своем клиенте.
 
-Claude Code и Cursor не получают права из факта обнаружения CLI. Для каждого immutable плана требуется отдельное consent владельца; затем executor проверяет version pin, scope/instruction/Skills/artifacts hashes, structured output и receipt. Изменение версии, scope или plan снова блокирует egress.
+Числа расхода берутся только из фактического provider output. Codex и Claude имеют нормализаторы usage; для Cursor такой телеметрии пока нет. Недоступные counters и стоимость остаются неизвестными.
 
-## Проверенная матрица CLI (15 сентября 2026)
+## Skills и клиентские manifests
 
-| Assistant | Официальный non-interactive путь | Ограничения FS/network | Structured output | Что может уйти наружу | Graph Runtime |
-| --- | --- | --- | --- | --- | --- |
-| Claude Code | `claude -p --setting-sources "" --tools ""` | User/project/local settings, CLAUDE.md, Skills и hooks не загружаются; MCP отключен, tools отключены, auto-memory отключена; Flowcairn запускает в private workspace, без project cwd | `--json-schema` + локальная Zod validation | Только approved scope, instructions, Skills и artifacts после отдельного consent | Работает после local version pin и проверки актуальных safe flags; tests используют synthetic CLI |
-| Cursor | `cursor-agent -p --output-format json --sandbox enabled --mode ask` | Private empty workspace, sandbox и read-only Ask mode; `--force` не используется | JSON envelope + локальная строгая validation | Только approved scope, instructions, Skills и artifacts после отдельного consent | Работает после local version pin и проверки safe flags; tests используют synthetic CLI |
+Пакет содержит общий каталог `skills/` и manifests `.codex-plugin/plugin.json`, `.claude-plugin/plugin.json`, `.cursor-plugin/plugin.json`. Наличие manifest не означает установку плагина в приложение или публикацию в его marketplace.
 
-Официальные источники: [Claude Code CLI](https://code.claude.com/docs/en/cli-reference), [Claude structured output](https://code.claude.com/docs/en/agent-sdk/structured-outputs), [Cursor CLI parameters](https://cursor.com/docs/cli/reference/parameters), [Cursor output format](https://cursor.com/docs/cli/reference/output-format).
+Runtime обнаруживает проектные инструкции и использует только выбранные применимые Skills. Он не копирует пакетные Skills в проект и не переписывает пользовательские настройки клиентов. Подключение управляемых правил требует отдельного согласия; неизвестные инструкции не выдают полномочий.
 
-Consent contract привязан hash-ами к plan, scope, instructions, Skills и artifacts; раскрывает, что передается, и явно исключает secrets, `.env`, Git history, неутвержденные файлы и shell project host. Его hash сохраняется в immutable store рядом с plan и в receipt. Отмена gate не запускает provider.
+Установка, локальная авторизация CLI и подключение плагина — разные действия. Для начала работы нужен [обычный запуск Flowcairn](INSTALLATION.md), а не ручное создание агентов или графа.
 
-Контекст для CLI ограничен 128 KiB после serialization. При превышении Flowcairn отказывает до запуска provider: сузьте approved scope, а не увеличивайте лимит.
-
-## Модель и усиление
-
-В обычной настройке Codex Flowcairn читает только модель и reasoning effort из конфигурации CLI и передает их явно в изолированный запуск. Выбор активного чата IDE не считывается.
-
-Автоматическое распределение между разными моделями требует отдельного согласия и проверенного списка моделей, доступных конкретному аккаунту. Flowcairn не угадывает такие модели и не включает routing молча.
-
-## Проверка и удаление
-
-Перед использованием выполните `npx flowcairn doctor`. Он не вызывает AI и не отправляет код.
-
-`npx flowcairn uninstall` удаляет только неизмененные Flowcairn-owned integration blocks. Результаты, worktrees и измененные файлы остаются, если их нельзя безопасно снять. Native manifests являются частью npm-пакета и удаляются вместе с зависимостью обычной командой менеджера пакетов.
+Исходники адаптеров: [runner-ai-command](../scripts/ai-graph/lib/runner-ai-command.mjs), [providers](../scripts/ai-graph/lib/providers.mjs), [external-worker](../scripts/ai-graph/lib/external-worker.mjs).

@@ -86,7 +86,7 @@ function assertSafePath(value) {
   return value;
 }
 
-function isSensitiveSourcePath(relativePath) {
+export function isSensitiveSourcePath(relativePath) {
   const parts = relativePath.toLowerCase().split('/');
   return parts.some((name, index) => {
     const allowedTemplate =

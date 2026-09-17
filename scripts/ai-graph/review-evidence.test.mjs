@@ -17,6 +17,7 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 import { hashObject } from './lib/io.mjs';
+import { CHANGE_EVIDENCE_FORMAT } from './lib/change-evidence.mjs';
 import {
   buildReviewEvidence,
   validateReviewEvidence,
@@ -30,6 +31,7 @@ function fixture({
   diff = '--- a/src/old.txt\n+++ /dev/null\n-deleted tail\n',
   noop = false,
   count = 1,
+  paths = ['src/old.txt'],
 } = {}) {
   const hash = hashObject('fixture');
   const node = { id: 'review', action: { id: 'ai-review' }, resources: { reads: ['src'] } };
@@ -63,7 +65,8 @@ function fixture({
   for (const [i, definition] of implementations.entries()) {
     const before = hashObject(`before-${i}`),
       after = noop ? before : hashObject(`after-${i}`);
-    const changedFiles = noop ? [] : ['src/old.txt'];
+    const changedFiles = noop ? [] : paths;
+    const payload = typeof diff === 'function' ? diff({ before, after, changedFiles }) : { content: diff, mediaType: 'text/x-diff' };
     const receipt = {
       schemaVersion: 2,
       runId: state.runId,
@@ -98,10 +101,10 @@ function fixture({
       verdict: 'pass',
       checks: [],
       artifacts: [
-        artifact('diff', noop ? '' : diff, 'text/x-diff'),
+        artifact('diff', noop ? '' : payload.content, payload.mediaType),
         artifact(
           'changed-files',
-          JSON.stringify({ changedFiles, before, after, complete: true }),
+          JSON.stringify({ changedFiles, before, after, complete: true, ...(payload.format ? { format: payload.format } : {}) }),
           'application/json',
         ),
       ],
@@ -128,6 +131,48 @@ function fixture({
   };
   return { options, objects, build: () => buildReviewEvidence(options) };
 }
+
+function structuralFixture(mutate = (report) => report) {
+  const version = { hash: hashObject('unchanged megabyte bytes'), size: 1500000, mode: '100644' };
+  return fixture({ paths: ['src/old.txt', 'src/new.txt', 'src/removed.json', 'src/dictionary.json'],
+    diff: ({ before, after, changedFiles }) => ({ mediaType: 'application/json', format: CHANGE_EVIDENCE_FORMAT,
+      content: JSON.stringify(mutate({ format: CHANGE_EVIDENCE_FORMAT, version: 1, beforeFingerprint: before, afterFingerprint: after,
+        changedPaths: changedFiles,
+        operations: [
+          { kind: 'move', from: 'src/old.txt', to: 'src/new.txt', before: version, after: version, byteIdentical: true },
+          { kind: 'delete', path: 'src/removed.json', before: version, after: null, contentIncluded: false, jsonEntryCount: 5000 },
+          { kind: 'json-entries', path: 'src/dictionary.json', before: version, after: { ...version, hash: hashObject('JSON after'), size: 1499900 },
+            layout: 'outer-whitespace-and-member-order-not-reproduced', values: 'exact-raw-json', beforeEntryCount: 5000, afterEntryCount: 4999,
+            unchangedEntryCount: 4999, unchangedEntriesHash: hashObject('equal unchanged values'), removed: [{ key: 'removed', value: '9007199254740993' }], added: [], replaced: [] },
+        ] })) }),
+  });
+}
+
+test('compact structural operation evidence fits review without claiming removed file text', () => {
+  const bundle = structuralFixture().build();
+  const diff = bundle.evidence.implementations[0].diff.artifact;
+  assert.equal(diff.mediaType, 'application/json'); assert.ok(bundle.bytes < 16 * 1024);
+  const report = JSON.parse(diff.content);
+  assert.equal(report.operations[1].contentIncluded, false);
+  assert.equal(report.operations[2].removed[0].value, '9007199254740993');
+});
+
+test('rehashed structural reports with incomplete path coverage or inconsistent states fail closed', () => {
+  for (const mutate of [
+    (report) => ({ ...report, beforeFingerprint: hashObject('wrong attempt') }),
+    (report) => ({ ...report, afterFingerprint: hashObject('wrong result') }),
+    (report) => ({ ...report, changedPaths: report.changedPaths.slice(1) }),
+    (report) => ({ ...report, operations: report.operations.slice(1) }),
+    (report) => ({ ...report, operations: [...report.operations, report.operations[1]] }),
+    (report) => { report.operations[0].after = { ...report.operations[0].after, hash: hashObject('different bytes') }; return report; },
+    (report) => { report.operations[0].after = { ...report.operations[0].after, mode: '100755' }; return report; },
+    (report) => { report.operations[1].contentIncluded = true; return report; },
+    (report) => { report.operations[2].afterEntryCount += 1; return report; },
+    (report) => { report.operations[2].after = { ...report.operations[2].before }; return report; },
+    (report) => { report.operations[2].removed[0].value = '{"duplicate":1,"duplicate":2}'; return report; },
+    (report) => { report.operations[2].removed.push(report.operations[2].removed[0]); report.operations[2].beforeEntryCount += 1; return report; },
+  ]) assert.throws(() => structuralFixture(mutate).build(), { code: 'REVIEW_EVIDENCE_INVALID' });
+});
 
 // ASCII limit tests here; real Graph follow-up adds the separate exact UTF-8 boundary regression.
 test('complete >32 KiB evidence retains tail after 1500 chars and every deletion/implementation', () => {

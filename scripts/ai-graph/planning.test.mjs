@@ -87,6 +87,39 @@ test('planner proposals cannot select actions, Skills, permissions, broaden scop
   assert.throws(() => validatePlan(stage, task, context), (e) => e.code === 'PERMISSION_MISMATCH');
 });
 
+test('a bounded text correction skips redundant analysis but keeps planning and all execution checks', () => {
+  const small = TaskSpecSchema.parse({ ...task, goal: 'Исправить опечатку', instructions: 'Исправить опечатку в README', scope: ['README.md'],
+    acceptance: ['В README исправлена опечатка'] });
+  const planning = compilePlanningPlan(small, { ...context, workflow: 'autonomous' }).plan;
+  assert.equal(planning.taskContract.rigor.level, 'light');
+  assert.equal(planning.nodes.some((node) => node.action.id === 'ai-analyze'), false);
+  assert.equal(planning.nodes.some((node) => node.action.id === 'ai-plan'), true);
+  const executable = compileTaskProposal(small, proposal([{ id: 'fix-word', title: 'Исправить текст', outcome: small.goal, needs: [], paths: ['README.md'] }]), { ...context, workflow: 'autonomous' }).plan;
+  assert.ok(executable.nodes.some((node) => node.action.id === 'check-tests'));
+  assert.ok(executable.nodes.some((node) => node.action.id === 'ai-review'));
+});
+
+test('implementation read context includes explicit imports and dependency closure, without all task scope', () => {
+  const scoped = compileTaskProposal(task, proposal([
+    { ...steps[0], readPaths: ['src/types.mjs'] },
+    { ...steps[1], readPaths: ['src/config.mjs'] },
+  ]), context).plan;
+  assert.deepEqual(scoped.nodes.find((node) => node.id === 'step-format').resources.reads, ['src/format.mjs', 'src/types.mjs', 'AGENTS.md']);
+  assert.deepEqual(scoped.nodes.find((node) => node.id === 'step-export').resources.reads,
+    ['src/export.mjs', 'src/config.mjs', 'src/format.mjs', 'src/types.mjs', 'AGENTS.md']);
+  assert.throws(() => compileTaskProposal(task, proposal([{ ...steps[0], readPaths: ['private/data'] }]), context), { code: 'PLANNING_READ_SCOPE' });
+});
+
+test('trusted repair preserves expanded read context without expanding the AI proposal schema', () => {
+  const expandedReads = Array.from({ length: 64 }, (_, index) => `src/dependency-${index}.mjs`);
+  const repaired = compileTaskProposal(task, proposal([steps[0]]), { ...context, repairReadPaths: { format: expandedReads } }).plan;
+  const reads = repaired.nodes.find((node) => node.id === 'step-format').resources.reads;
+  for (const file of expandedReads) assert.ok(reads.includes(file));
+  assert.throws(() => compileTaskProposal(task, proposal([{ ...steps[0], readPaths: expandedReads }]), context), { code: 'PLANNING_SCHEMA' });
+  assert.throws(() => compileTaskProposal(task, proposal([steps[0]]), { ...context, repairReadPaths: { format: ['outside/private'] } }), { code: 'PLANNING_READ_SCOPE' });
+  assert.throws(() => compileTaskProposal(task, { ...proposal([steps[0]]), repairReadPaths: { format: expandedReads } }, context), { code: 'PLANNING_SCHEMA' });
+});
+
 test('planning needs exact AI read consent; promotion creates immutable separately approved execution', async (t) => {
   const f = await fixture(t, { maxReplans: 0 });
   const original = f.snapshot;
@@ -164,7 +197,9 @@ for (const verdict of ['fail', 'uncertain']) test(`planning ${verdict} never pro
 
 
 test('review failure creates a bounded new fix version with full findings, fresh checks and approval', async (t) => {
-  const f = await fixture(t, { maxReplans: 1 });
+  const scopedSteps = steps.map((step, index) => ({ ...step,
+    readPaths: Array.from({ length: 32 }, (_, file) => `src/context-${index}-${file}.mjs`) }));
+  const f = await fixture(t, { maxReplans: 1, output: proposal(scopedSteps) });
   let s = await f.approve(f.snapshot);
   s = await f.service.command(s.runId, 'run', request(s));
   s = await f.service.command(s.runId, 'replan', request(s));
@@ -174,12 +209,17 @@ test('review failure creates a bounded new fix version with full findings, fresh
   s = await f.service.command(s.runId, 'run', request(s));
   assert.equal(s.nodes.find((n) => n.action.id === 'ai-review').status, 'failed');
   const previousRunId = s.runId;
+  const originalReads = f.service.plan(s.runId).nodes.filter((node) => node.action.id === 'ai-implement').map((node) => node.resources.reads);
+  assert.ok(originalReads[1].length > 32, 'dependency closure exceeds the AI readPaths field bound');
   s = await f.service.command(s.runId, 'replan', request(s));
   assert.equal(s.phase, 'execution');
   assert.equal(s.planVersion, 3);
   const fixedPlan = f.service.plan(s.runId);
   assert.equal(fixedPlan.stage, 'execution');
   assert.equal(s.nodes.filter((node) => node.action.id === 'ai-implement').length, 2, 'fix preserves semantic task steps');
+  const repairedWork = fixedPlan.nodes.filter((node) => node.action.id === 'ai-implement');
+  for (const [index, reads] of originalReads.entries())
+    for (const file of reads) assert.ok(repairedWork[index].resources.reads.includes(file), `repair lost ${file}`);
   assert.equal(f.service.store.readRun(previousRunId).planHash, implementationHash);
   assert.equal(s.nodes.find((n) => n.action.id === 'check-tests').status, 'pending');
   assert.equal(s.nodes.every((n) => n.attempt === 0), true);

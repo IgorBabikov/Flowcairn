@@ -16,6 +16,7 @@ import {
 import path from 'node:path';
 import { GraphError, sha256 } from './io.mjs';
 import { isWithin, pathAllowed } from './registry.mjs';
+import { JSON_TRANSFER_LIMITS, prepareJsonTransfers, validateJsonTransfers } from './json-transfers.mjs';
 
 const MAX_EDITS = 100;
 const MAX_MOVES = 100;
@@ -214,7 +215,7 @@ function validateMove(move) {
   return { from, to, previousHash: move.previousHash };
 }
 
-function preflight(root, before, node, task, edits, moves) {
+function preflight(root, before, node, task, edits, moves, jsonTransfers) {
   if (!Array.isArray(node?.permissions) || !node.permissions.includes('workspace.source.write')) {
     deny('Нет разрешения source.write');
   }
@@ -255,12 +256,19 @@ function preflight(root, before, node, task, edits, moves) {
   }
   if (!Array.isArray(moves) || moves.length > MAX_MOVES) deny('Moves должны быть bounded массивом');
   const normalizedMoves = moves.map(validateMove);
+  const normalizedTransfers = validateJsonTransfers(jsonTransfers, safeEditPath);
   const claimedPaths = [
     ...normalized.map((edit) => edit.path),
     ...normalizedMoves.flatMap((move) => [move.from, move.to]),
   ];
   if (new Set(claimedPaths).size !== claimedPaths.length)
     deny('Edits и moves не могут использовать один путь дважды');
+  const transferredPaths = new Set(normalizedTransfers.flatMap((transfer) => [transfer.from, transfer.to]));
+  if ([...transferredPaths].some((file) => claimedPaths.some((claimed) => isWithin(file, claimed) || isWithin(claimed, file))))
+    deny('JsonTransfers не могут затрагивать paths из edits или moves');
+  if (normalizedTransfers.length && new Set([...claimedPaths, ...transferredPaths]).size > 100) deny('JsonTransfers затрагивают слишком много файлов');
+  if ([...transferredPaths].some((file) => [...transferredPaths].some((other) => file !== other && isWithin(file, other))))
+    deny('JsonTransfers содержат конфликт file/ancestor paths');
   if (normalized.reduce((total, edit) => total + edit.size, 0) > MAX_TOTAL_BYTES) {
     deny('Patch превышает 1 MiB; разделите задачу');
   }
@@ -299,7 +307,27 @@ function preflight(root, before, node, task, edits, moves) {
     verifyExisting(source, expected);
     return { move, expected, source, target };
   });
-  return { edits: preparedEdits, moves: preparedMoves };
+  const transferredFiles = prepareJsonTransfers(normalizedTransfers, (file, previousHash) => {
+    if (!pathAllowed(file, task) || !writeScopes.some((scope) => isWithin(file, scope))) deny('JsonTransfer выходит за approved scope');
+    inspectParents(root, file);
+    const target = targetPath(root, file), current = inspectTarget(target), expected = files.get(file) ?? null;
+    if (previousHash !== (expected?.hash ?? null)) deny('JsonTransfer BEFORE hash не совпадает');
+    if (!expected) {
+      if (current) deny('JsonTransfer target существует вне BEFORE fingerprint');
+      return null;
+    }
+    if (!current || expected.size > JSON_TRANSFER_LIMITS.fileBytes) deny('JsonTransfer source отсутствует или превышает 8 MiB');
+    const handle = openSync(target, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      const stat = fstatSync(handle);
+      if (!stat.isFile() || stat.nlink !== 1 || stat.size !== expected.size || fileMode(stat) !== expected.mode) deny('JsonTransfer source изменился');
+      const bytes = readFileSync(handle);
+      if (bytes.length !== expected.size || sha256(bytes) !== expected.hash) deny('JsonTransfer source bytes изменились');
+      verifyIdentity(target, { dev: stat.dev, ino: stat.ino });
+      return bytes;
+    } finally { closeSync(handle); }
+  }).map((edit) => ({ edit: { ...edit, executable: files.get(edit.path)?.mode === '100755' }, expected: files.get(edit.path) ?? null, target: targetPath(root, edit.path) }));
+  return { edits: preparedEdits, moves: preparedMoves, transferredFiles };
 }
 
 function recheck(root, item) {
@@ -365,16 +393,17 @@ function applyMove(root, item) {
 }
 
 /** AI has no write access. Only this trusted handler applies schema-validated, hash-bound edits. */
-export function applyProposedEdits(worktree, before, node, task, edits, moves = []) {
+export function applyProposedEdits(worktree, before, node, task, edits, moves = [], jsonTransfers = []) {
   const requested = lstatSync(worktree);
   if (!requested.isDirectory() || requested.isSymbolicLink())
     deny('Worktree должен быть директорией');
   const root = realpathSync(worktree);
-  const batch = preflight(root, before, node, task, edits, moves);
+  const batch = preflight(root, before, node, task, edits, moves, jsonTransfers);
   // Every edit is preflighted before the first write. A later I/O/race failure remains uncertain.
   for (const item of batch.moves) applyMove(root, item);
   for (const item of batch.edits) {
     if (item.edit.content === null) applyDelete(root, item);
     else applyWrite(root, item);
   }
+  for (const item of batch.transferredFiles) applyWrite(root, item);
 }

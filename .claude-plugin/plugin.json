@@ -1,6 +1,6 @@
 {
   "name": "flowcairn",
-  "description": "Проверяемый Graph Runtime: план, человеческие решения, receipts и контроль выполнения AI-задач.",
+  "description": "Доказуемая AI-работа: контракт задачи, требования, исполнение, evidence и PROVEN.",
   "version": "0.2.21",
   "author": { "name": "Igor Babikov" },
   "homepage": "https://github.com/IgorBabikov/flowcairn",

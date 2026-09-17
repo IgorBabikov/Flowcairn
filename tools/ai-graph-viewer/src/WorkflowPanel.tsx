@@ -3,10 +3,11 @@ import type { GateSnapshot, GraphPlan, Snapshot } from './contracts';
 import { humanText, nodeTitle, StatusIcon } from './presentation';
 
 /** Пользователь видит только подтвержденное исполнителем состояние. */
-export function WorkflowPanel({ snapshot, plan, busy, onApprove, onRevise, onStart, onSetup }: {
+export function WorkflowPanel({ snapshot, plan, busy, stateUnavailable = false, onApprove, onRevise, onStart, onSetup }: {
   snapshot: Snapshot;
   plan: GraphPlan | null;
   busy: boolean;
+  stateUnavailable?: boolean;
   onApprove: (gate: GateSnapshot) => void;
   onRevise: (feedback: string) => void;
   onStart: () => void;
@@ -16,22 +17,26 @@ export function WorkflowPanel({ snapshot, plan, busy, onApprove, onRevise, onSta
   const gate = snapshot.gates.find(item => item.type === 'provider-consent') ?? snapshot.gates.find(item => item.type === 'approve-plan');
   const gateNode = snapshot.nodes.find(node => node.id === gate?.nodeId);
   const approved = Boolean(snapshot.nodes.find(node => node.id === 'approve-plan' && node.status === 'passed'));
-  const done = snapshot.integrity.valid && snapshot.status === 'passed' && snapshot.completion === 'ready-for-review' && !snapshot.failureReason;
+  const executionDone = snapshot.status === 'passed' && snapshot.completion === 'ready-for-review';
+  const done = !stateUnavailable && snapshot.integrity.valid && executionDone && !snapshot.failureReason && (!snapshot.proof || snapshot.proof.status === 'PROVEN');
+  const awaitingProof = snapshot.integrity.valid && executionDone && Boolean(snapshot.proof) && !done;
   const readyWithoutGate = snapshot.status === 'ready' && !gate;
   const waitingToStart = snapshot.phase === 'planning' && readyWithoutGate;
   const unavailableReason = readyWithoutGate && snapshot.capabilities.run?.allowed === false
     ? humanText(snapshot.runner?.ai.available === false ? snapshot.runner.ai.reason : snapshot.capabilities.run.reason) || 'Исполнитель сейчас недоступен.'
     : null;
-  const blocked = Boolean(snapshot.failureReason || unavailableReason) || ['failed', 'uncertain', 'stale'].includes(snapshot.status) || !snapshot.integrity.valid;
+  const blocked = stateUnavailable || Boolean(snapshot.failureReason || unavailableReason) || ['failed', 'uncertain', 'stale'].includes(snapshot.status) || !snapshot.integrity.valid;
   const current = snapshot.nodes.find(node => node.id === snapshot.activeNodeId) ?? snapshot.nodes.find(node => ['failed', 'uncertain', 'running'].includes(node.status));
-  const reviewable = Boolean(plan && gate && snapshot.integrity.valid && gate.planHash === snapshot.planHash);
+  const reviewable = !stateUnavailable && Boolean(plan && gate && snapshot.integrity.valid && gate.planHash === snapshot.planHash);
   const changes = [...new Set(snapshot.nodes.flatMap(node => node.changedFiles))];
-  const checks = snapshot.nodes.flatMap(node => node.checks);
+  const checks = snapshot.nodes.flatMap(node => node.checks.map(check => ({ ...check, nodeId: node.id, receiptIds: node.receiptIds })));
   return <section className="workflow-panel" aria-label="План и результат">
-    <h2>{done ? 'Готово к вашему ревью' : blocked ? 'Работа приостановлена' : gate?.type === 'provider-consent' ? 'Согласие на передачу данных' : gate ? 'План работы' : approved ? 'Выполняем задачу' : 'Разбираемся в задаче'}</h2>
+    <h2>{done ? 'Готово к вашему ревью' : blocked ? 'Работа приостановлена' : awaitingProof ? 'Осталось доказать результат' : gate?.type === 'provider-consent' ? 'Согласие на передачу данных' : gate ? 'План работы' : approved ? 'Выполняем задачу' : 'Разбираемся в задаче'}</h2>
     <p className="workflow-summary" role="status">{done
-      ? 'Реализация и проверки завершены. Проверьте изменения, затем создайте коммит и PR.'
+      ? snapshot.proof ? 'Все обязательные требования подтверждены. Откройте доказательства и результаты работы.' : 'Реализация и проверки завершены. Проверьте изменения, затем создайте коммит и PR.'
+      : stateUnavailable ? 'Текущее состояние недоступно. Дождитесь успешного обновления перед продолжением.'
       : blocked ? humanText(snapshot.failureReason || unavailableReason || current?.reason || snapshot.integrity.reason) || 'Откройте отчеты этапа: продолжение требует проверки.'
+      : awaitingProof ? 'Этапы исполнения завершены. Откройте требования: для завершения задачи нужны актуальные доказательства каждого обязательного результата.'
       : gate?.type === 'provider-consent' ? 'Проверьте, какие данные могут быть переданы выбранному AI. Без согласия передача не начнется.'
       : gate ? 'Проверьте шаги и границы изменений. Можно дополнить план перед разработкой.'
       : approved ? 'Реализация, проверки и исправления пройдут автоматически. Можно вернуться к результату позже.'
@@ -84,7 +89,18 @@ export function WorkflowPanel({ snapshot, plan, busy, onApprove, onRevise, onSta
     </section>}
     {(done || approved) && <>
       {changes.length > 0 && <><h3>Измененные файлы</h3><ul className="path-list">{changes.map(path => <li key={path}><code>{path}</code></li>)}</ul></>}
-      {checks.length > 0 && <><h3>Проверки</h3><ul className="result-checks">{checks.map((check, index) => <li key={`${check.id}-${index}`}><StatusIcon status={check.passed ? 'passed' : 'failed'} /><span>{check.id}: {check.passed ? 'пройдена' : 'не пройдена'}</span></li>)}</ul></>}
+      {checks.length > 0 && <><h3>Проверки</h3><ul className="result-checks">{checks.map((check, index) => {
+        const proof = snapshot.proof;
+        const evidence = proof?.evidence.filter(item => item.method === 'check' && item.nodeId === check.nodeId &&
+          item.runId === snapshot.runId && item.receiptId && check.receiptIds.includes(item.receiptId)).at(-1);
+        const unavailable = stateUnavailable || !snapshot.integrity.valid || (proof && !proof.resultHash);
+        const stale = proof && (check.inputHash !== proof.resultHash || evidence?.freshness === 'stale');
+        const unconfirmed = proof && (!evidence || !['passed', 'failed'].includes(evidence.status));
+        const passed = check.passed && (!proof || evidence?.status === 'passed');
+        const status = unavailable || unconfirmed && !stale ? 'uncertain' : stale ? 'stale' : passed ? 'passed' : 'failed';
+        const label = unavailable ? 'актуальность не подтверждена' : stale ? 'устарела, нужна перепроверка' : unconfirmed ? 'результат не подтвержден' : passed ? 'пройдена' : 'не пройдена';
+        return <li key={`${check.id}-${index}`}><StatusIcon status={status} /><span>{check.id}: {label}</span></li>;
+      })}</ul></>}
     </>}
   </section>;
 }

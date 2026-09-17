@@ -355,13 +355,13 @@ test('system temporary directories fail closed for execution, recovery, and prob
 });
 
 test('runner source does not pin a developer home directory', () => {
-  const source = readFileSync(fileURLToPath(new URL('./lib/runner.mjs', import.meta.url)), 'utf8');
+  const source = ['runner.mjs', 'runner-ai-command.mjs'].map((file) => readFileSync(fileURLToPath(new URL(`./lib/${file}`, import.meta.url)), 'utf8')).join('\n');
   assert.equal(source.includes('/Users/'), false);
   assert.equal(source.includes('/home/'), false);
 });
 
 test('AI actions are source read-only and the result contract carries bounded structured edits', () => {
-  const source = readFileSync(fileURLToPath(new URL('./lib/runner.mjs', import.meta.url)), 'utf8');
+  const source = readFileSync(fileURLToPath(new URL('./lib/runner-ai-command.mjs', import.meta.url)), 'utf8');
   assert.match(source, /permissionFilesystem\(worktree, \[\], \{/);
   assert.doesNotMatch(source, /ai-implement[^\n]*node\.resources\.writes/);
   const edits = Array.from({ length: 8 }, (_, index) => ({
@@ -439,6 +439,24 @@ test('AI failure diagnostics persist only fixed codes and ignore untrusted item 
   assert.equal(result.failureReason, 'AI_NETWORK_ERROR');
   assert.equal(result.exitCode, 1);
   assert.ok(!readFileSync(subject.ticket, 'utf8').includes(secret));
+  await closeSupervisor(subject);
+});
+
+test('supervisor persists provider usage without retaining model or tool content', async () => {
+  const output = [
+    { type: 'item.completed', item: { text: 'private-model-content' } },
+    { type: 'turn.completed', usage: { input_tokens: 101, cached_input_tokens: 20, output_tokens: 9 } },
+  ].map((item) => JSON.stringify(item)).join('\n') + '\n';
+  const command = { executable: NODE_BINARY, args: ['-e', `process.stdout.write(${JSON.stringify(output)});`],
+    cwd: realpathSync(os.tmpdir()), env: { PATH: '/usr/bin:/bin' } };
+  const subject = supervisorFixture({ command, actionId: 'ai-analyze' });
+  await subject.next('ready');
+  subject.child.stdin.write(JSON.stringify({ type: 'go', nonce: subject.nonce, command, input: '' }) + '\n');
+  const result = await subject.next('finished');
+  assert.equal(result.usage.totalTokens, 110);
+  const persisted = readFileSync(subject.ticket, 'utf8');
+  assert.equal(JSON.parse(persisted).usage.totalTokens, 110);
+  assert.equal(persisted.includes('private-model-content'), false);
   await closeSupervisor(subject);
 });
 
@@ -613,6 +631,26 @@ test('ручной выбор сохраняет модель и усилени�
   } finally { RUNNER_TESTING.cleanupPrepared(prepared); }
 });
 
+test('auto effort follows contract rigor and records actual prompt bytes', async () => {
+  const { RUNNER_TESTING } = await import('./lib/runner.mjs');
+  const { buildTaskContract } = await import('./lib/task-contract.mjs');
+  for (const [level, expected] of [['light', 'low'], ['standard', 'medium'], ['high', 'high']]) {
+    const contract = runnerContract();
+    contract.plan.taskContract = buildTaskContract(contract.task);
+    contract.plan.taskContract.rigor.level = level;
+    const prepared = RUNNER_TESTING.makeAiCommand({ ...contract, worktree: '/private/tmp/isolated-worktree', skills: [], priorEvidence: null,
+      reviewBundle: null, outputPath: realpathSync(fixture()),
+      toolchain: { node: NODE_BINARY, codexEntry: '/trusted/codex.js', digest: 'a'.repeat(64) },
+      profile: { outputPaths: [], ai: { provider: 'codex', model: 'chosen-model', modelMode: 'auto' } },
+      dependencyToolchain: { dependencyPaths: [], hash: 'b'.repeat(64) } });
+    try {
+      assert.ok(prepared.command.args.includes(`model_reasoning_effort="${expected}"`));
+      assert.equal(prepared.execution.reasoningEffort, expected);
+      assert.equal(prepared.execution.context.promptBytes, Buffer.byteLength(prepared.input));
+    } finally { RUNNER_TESTING.cleanupPrepared(prepared); }
+  }
+});
+
 test('режим provider передает только модель и усиление из настроек CLI', async () => {
   const { RUNNER_TESTING } = await import('./lib/runner.mjs');
   const contract = runnerContract();
@@ -691,6 +729,25 @@ test('схема edits ограничена буквальными путями 
     assert.equal(pattern.test('src/formXmjs'), false); assert.equal(pattern.test('index.html'), false);
     assert.match(prepared.input, /только для текущего узла: src\/form.mjs, styles.css/);
   } finally { RUNNER_TESTING.cleanupPrepared(prepared); }
+});
+
+test('read-only AI schemas forbid every mutation channel including structured JSON transfers', async () => {
+  const { RUNNER_TESTING } = await import('./lib/runner.mjs');
+  const contract = runnerContract();
+  for (const action of ['ai-analyze', 'ai-plan', 'ai-review']) {
+    const node = { ...contract.node, action: { id: action, version: 1, inputs: {} }, resources: { ...contract.node.resources, writes: [] } };
+    const prepared = RUNNER_TESTING.makeAiCommand({ ...contract, node, plan: { ...contract.plan, nodes: [node] },
+      worktree: '/private/tmp/isolated-worktree', skills: [], priorEvidence: null, outputPath: realpathSync(fixture()),
+      profile: { ai: { model: 'fixture-model' }, outputPaths: [] },
+      toolchain: { node: process.execPath, codexEntry: '/trusted/codex.js', digest: 'a'.repeat(64) },
+      dependencyToolchain: { dependencyPaths: [], hash: 'b'.repeat(64) },
+      reviewBundle: action === 'ai-review' ? { content: '{}', bytes: 2, hash: sha256('{}') } : null });
+    try {
+      const schema = JSON.parse(readFileSync(prepared.schemaFile, 'utf8'));
+      for (const key of ['edits', 'moves', 'jsonTransfers', 'changedFiles']) assert.equal(schema.properties[key].maxItems, 0, `${action}:${key}`);
+      assert.ok(prepared.command.args.includes('project_doc_max_bytes=0'));
+    } finally { RUNNER_TESTING.cleanupPrepared(prepared); }
+  }
 });
 
 test('prompt отделяет запрет корня worktree от разрешенных read paths', async () => {

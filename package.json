@@ -1,7 +1,7 @@
 {
   "name": "flowcairn",
   "version": "0.2.21",
-  "description": "AI-разработка по проверяемому плану: задачи, Graph, React Flow и Skills вашего проекта",
+  "description": "AI-работа с доказуемым результатом: требования, исполнение, актуальные evidence и PROVEN",
   "type": "module",
   "license": "MIT",
   "engines": {
@@ -43,6 +43,7 @@
     "lint": "eslint --config tools/ai-graph-viewer/eslint.graph.config.mjs scripts/ai-graph tools/ai-graph-viewer/controller.mjs tools/ai-graph-viewer/server.mjs bin",
     "check:public": "node scripts/check-public.mjs",
     "test:ui": "playwright test --config tools/ai-graph-viewer/playwright.config.mjs",
+    "test:proof-browser": "node scripts/ai-graph/proof-browser.mjs",
     "check:package": "node scripts/check-package.mjs",
     "test:install": "node --test tests/install.test.mjs tests/install-platform.test.mjs tests/package-managers.test.mjs tests/skills-selection.test.mjs tests/uninstall-cli.test.mjs"
   },

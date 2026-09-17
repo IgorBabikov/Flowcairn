@@ -1,5 +1,6 @@
 import { GraphError, hashObject } from './io.mjs';
 import { GraphPlanSchema, TaskSpecSchema, assertJsonBounds } from './schemas.mjs';
+import { validateTaskContract } from './task-contract.mjs';
 import {
   resolveAction,
   requiredChecks,
@@ -179,7 +180,7 @@ export function validatePlan(
     if (autonomous) {
       const analyze = plan.nodes.filter((n) => n.action.id === 'ai-analyze');
       const planner = plan.nodes.filter((n) => n.action.id === 'ai-plan');
-      if (planner.length !== 1 || analyze.length !== (plan.analysisArtifact ? 0 : 1) ||
+      if (planner.length !== 1 || analyze.length !== (plan.analysisArtifact || plan.taskContract?.rigor.level === 'light' ? 0 : 1) ||
           (analyze.length && !ancestors.get(planner[0].id).has(analyze[0].id)) ||
           plan.nodes.some((n) => !['human-provider-consent','ai-analyze','ai-plan','artifact-handoff'].includes(n.action.id)) ||
           plan.nodes.some((n) => n.permissions.some((p) => p !== 'ai.read')))
@@ -238,6 +239,7 @@ export function validatePlan(
         if (!ancestors.get(review.id).has(check.id))
           reject('REVIEW_BEFORE_CHECKS', 'Review должен учитывать все checks');
   }
+  if (plan.taskContract) validateTaskContract(plan.taskContract, task, plan.stage === 'planning' ? [] : plan.nodes);
   freeze(plan);
   return Object.freeze({ plan, hash: hashObject(plan), order: Object.freeze(order), ancestors });
 }

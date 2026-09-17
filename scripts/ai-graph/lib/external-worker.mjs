@@ -4,6 +4,8 @@ import { closeSync, constants, fstatSync, fsyncSync, lstatSync, openSync, readFi
 import path from 'node:path';
 import { z } from 'zod';
 import { GraphError } from './io.mjs';
+import { providerUsage } from './usage.mjs';
+import { externalProviderPrompt } from './codex.mjs';
 
 const Input = z.strictObject({ version: z.literal(1), provider: z.enum(['claude', 'cursor']), executable: z.string().min(1).max(1024), versionPin: z.string().min(1).max(160), prompt: z.string().min(1).max(128 * 1024), schema: z.record(z.string(), z.json()) });
 const fail = (code, message) => { throw new GraphError(code, message); };
@@ -40,12 +42,16 @@ function main() {
   if (version.error || version.status !== 0 || `${version.stdout ?? ''}`.trim() !== input.versionPin) fail('PROVIDER_VERSION_DRIFT', 'Версия provider изменилась до запуска.');
   const schemaText = JSON.stringify(input.schema);
   if (Buffer.byteLength(schemaText) > 64 * 1024) fail('PROVIDER_SCHEMA_LIMIT', 'Схема provider превышает лимит.');
-  const cursorPrompt = `${input.prompt}\n\nВерни ровно один JSON object, соответствующий этой JSON Schema; без markdown и пояснений:\n${schemaText}`;
+  const cursorPrompt = externalProviderPrompt('cursor', input.prompt, input.schema);
   if (Buffer.byteLength(cursorPrompt) > 192 * 1024) fail('AI_CONTEXT_LIMIT', 'Контекст Cursor превышает лимит. Сузьте approved scope.');
   const args = input.provider === 'claude'
     ? ['--setting-sources', '', '--strict-mcp-config', '--no-session-persistence', '--permission-mode', 'dontAsk', '--tools', '', '-p', '--output-format', 'json', '--json-schema', JSON.stringify(input.schema), input.prompt]
     : ['--print', '--output-format', 'json', '--sandbox', 'enabled', '--mode', 'ask', cursorPrompt];
   const run = spawnSync(input.executable, args, { cwd: scratch, env: environment, encoding: 'utf8', timeout: 120_000, maxBuffer: 2 * 1024 * 1024, shell: false });
+  let envelope;
+  try { envelope = JSON.parse(run.stdout); } catch { /* Output validation below reports the error. */ }
+  const usage = providerUsage(input.provider, envelope);
+  if (usage) process.stdout.write(`${JSON.stringify({ type: 'flowcairn.provider-usage', usage })}\n`);
   if (run.error && Reflect.get(run.error, 'code') === 'ETIMEDOUT') fail('PROVIDER_TIMEOUT', 'Внешний provider превысил timeout.');
   if (run.error || run.status !== 0) fail('PROVIDER_FAILED', 'Внешний provider завершился без подтвержденного результата.');
   writeResult(resultFile, parseResult(input.provider, run.stdout));
