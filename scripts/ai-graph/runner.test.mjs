@@ -23,6 +23,7 @@ import { inspectProcess, probeRunner, runRegisteredAction } from './lib/runner.m
 import { buildPrompt } from './lib/codex.mjs';
 import { AIResultSchema } from './lib/schemas.mjs';
 import { classifyAiFailure } from './lib/supervisor.mjs';
+import { MAX_CONTROL_ARG_CHARS, validCommand } from './lib/supervisor-control.mjs';
 
 const NODE_BINARY = realpathSync(process.execPath);
 const SUPERVISOR_FILE = fileURLToPath(new URL('./lib/supervisor.mjs', import.meta.url));
@@ -226,6 +227,25 @@ test('supervisor rejects a forged GO without starting the action', async () => {
   const final = await subject.next('finished');
   assert.equal(final.failureReason, 'CONTROL_REJECTED');
   assert.equal(existsSync(marker), false);
+  await closeSupervisor(subject);
+});
+
+test('supervisor accepts a bounded filesystem policy above the old 16 KiB argument limit', async () => {
+  const directory = fixture();
+  const command = {
+    executable: NODE_BINARY,
+    args: ['-e', 'process.exit(0)', 'x'.repeat(16_433)],
+    cwd: directory,
+    env: { PATH: '/usr/bin:/bin:/usr/sbin:/sbin' },
+  };
+  assert.equal(validCommand(command), true);
+  assert.equal(validCommand({ ...command, args: ['x'.repeat(MAX_CONTROL_ARG_CHARS + 1)] }), false);
+  const subject = supervisorFixture({ command });
+  await subject.next('ready');
+  subject.child.stdin.write(`${JSON.stringify({ type: 'go', nonce: subject.nonce, command, input: '' })}\n`);
+  const final = await subject.next('finished');
+  assert.equal(final.exitCode, 0);
+  assert.equal(final.failureReason, null);
   await closeSupervisor(subject);
 });
 

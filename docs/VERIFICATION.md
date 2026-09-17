@@ -6,15 +6,15 @@
 
 | Проверка | Результат |
 | --- | --- |
-| `npm test` | 583 passed, 0 failed, 5 skipped; повторный запуск с доступом к локальному порту и npm-кешу |
+| `npm test` | 584 passed, 0 failed, 5 skipped; повторный запуск с доступом к локальному порту и npm-кешу |
 | `npm run typecheck` | Runtime и React/TypeScript — PASS |
 | `npm run lint` | PASS; вынесенные UI-модули дополнительно проверены TypeScript/React hooks ESLint |
 | `npm run build` | Production UI собран |
-| `npm run test:ui` | Chromium: 72 passed, 1 skipped |
+| `npm run test:ui` | Chromium: 73 passed, 1 skipped |
 | `npm run test:proof-browser` | Настоящий WorkflowService + HTTP + Chromium: PROVEN, просмотр подтверждений, STALE и ручная приемка — PASS; снимки использованы для анимации README |
 | `npm run check:public` | Документы, локальные ссылки и базовая проверка приватных данных — PASS |
-| `npm run check:package` | В архиве 127 файлов: runtime, Skills, CLI и собранный UI |
-| Измененные интеграционные инструкции и onboarding | 42 tests passed после финального обновления генерируемого Markdown-блока |
+| `npm run check:package` | В архиве 130 файлов: runtime, Skills, CLI и собранный UI |
+| Измененные интеграционные инструкции и onboarding | Входят в полный `npm test` |
 
 Полный runtime-набор включает установку настоящего локального npm-архива, offline `npm ci` и запуск установленного bin в отдельном тестовом проекте. Для offline-проверки нужен предварительно заполненный npm-кеш. Проверка с пустым временным кешем закономерно завершилась `ENOTCACHED`; повтор с существующим кешем прошел.
 
@@ -43,7 +43,7 @@
 
 ## Что именно было реальным
 
-В proof integration/browser проверках реальны файловая система, receipts, store, WorkflowService, HTTP, Node assertion и Chromium. AI-ответы задаются детерминированным тестовым адаптером. UI layout tests используют явно синтетические fixtures. Анимация README показывает два реальных состояния этого тестового интерфейса: подтвержденный результат и устаревшую после изменения файла проверку. Эти уровни нельзя выдавать за завершенный платный прогон Codex, Claude Code или Cursor на пользовательской задаче.
+В proof integration/browser проверках реальны файловая система, receipts, store, WorkflowService, HTTP, Node assertion и Chromium. AI-ответы задаются детерминированным тестовым адаптером. UI layout tests используют явно синтетические fixtures. Две анимации README показывают три проверенных требования к сроку действия ссылки для сброса пароля и то, как после изменения файла каждое подтверждение становится неактуальным. Эти уровни нельзя выдавать за завершенный платный прогон Codex, Claude Code или Cursor на пользовательской задаче.
 
 CLI providers проверены тестами схем, контекста, safe parameters, consent и числовой usage. Реальное наличие модели у аккаунта и качество ответа провайдера требуют отдельного запуска с его авторизацией. Windows/WSL2, Docker daemon и поведение чужого production-проекта этим набором не подтверждены.
 

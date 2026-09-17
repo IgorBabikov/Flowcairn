@@ -73,6 +73,22 @@ test('stale evidence revokes visible completion after a committed revision', asy
   await expect(page.getByRole('heading', { name: 'Готово к вашему ревью', exact: true })).toHaveCount(0);
 });
 
+test('stale blockers name the check and requirement for a person', async ({ page }) => {
+  const state = taskWithProof();
+  state.proof.status = 'STALE'; state.proof.coverage.proven = 0; state.proof.certificate = null;
+  state.proof.requirements[0].status = 'stale';
+  state.proof.blockers = [
+    'Обязательная проверка check-tests не подтверждена на текущем результате',
+    'R1: Нужна актуальная успешная проверка требования',
+  ];
+  await mockApi(page, state); await page.goto(`/#session=${token}`);
+  const blockers = page.locator('.proof-blockers');
+  await expect(blockers).toContainText('Тесты нужно повторить для текущего состояния файлов.');
+  await expect(blockers).toContainText('Форма отклоняет пустой адрес: Нужна актуальная успешная проверка требования');
+  await expect(blockers).not.toContainText('check-tests');
+  await expect(blockers).not.toContainText('R1:');
+});
+
 test('a failed live snapshot hides previous proof until fresh confirmation returns', async ({ page }) => {
   await mockApi(page, taskWithProof()); await page.goto(`/#session=${token}`);
   await expect(page.getByTestId('task-proof-status')).toHaveText('Результат подтвержден');

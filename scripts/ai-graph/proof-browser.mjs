@@ -16,14 +16,19 @@ let browser;
 const runningServers = [];
 async function openFixture(options) {
   const sample = await fixture(context, options);
-  const snapshot = await sample.run();
   const token = randomBytes(32).toString('hex'); secrets.push(token);
   const server = startViewer({ service: sample.service, token, port: 0 }); runningServers.push(server);
   await once(server, 'listening');
   const address = server.address();
   assert.ok(address && typeof address !== 'string');
   const page = await browser.newPage({ viewport: { width: 1440, height: 1100 } });
-  await page.goto(`http://127.0.0.1:${address.port}/#session=${token}`);
+  const url = `http://127.0.0.1:${address.port}/#session=${token}`;
+  const snapshot = await sample.run({ onPlan: options.example === 'password-reset' ? async () => {
+    await page.goto(url);
+    await expect(page.getByRole('region', { name: 'Задача и доказательства', exact: true })).toBeVisible();
+    await page.screenshot({ path: '/tmp/flowcairn-actual-plan.png', fullPage: true });
+  } : undefined });
+  await page.goto(url);
   await expect(page.getByRole('region', { name: 'Задача и доказательства', exact: true })).toBeVisible();
   return { sample, snapshot, page };
 }
@@ -31,10 +36,10 @@ async function openFixture(options) {
 try {
   await import('../../tools/ai-graph-viewer/build.mjs');
   browser = await chromium.launch({ headless: true });
-  const success = await openFixture({});
+  const success = await openFixture({ example: 'password-reset' });
   const { sample, snapshot, page } = success;
   await expect(page.getByTestId('task-proof-status')).toHaveText('Результат подтвержден');
-  await expect(page.getByTestId('requirement-coverage')).toContainText('1 из 1');
+  await expect(page.getByTestId('requirement-coverage')).toContainText('3 из 3');
   assert.deepEqual(sample.checkExitCodes(), [0]);
   const evidence = snapshot.proof.evidence.find((item) => item.method === 'check' && item.status === 'passed');
   assert.ok(evidence);
@@ -47,11 +52,11 @@ try {
   await page.screenshot({ path: '/tmp/flowcairn-actual-cockpit.png', fullPage: true });
 
   const beforeRevision = sample.service.revision(snapshot.runId);
-  writeFileSync(path.join(sample.worktree, 'src/answer.mjs'), 'export const answer = () => 13;\n');
+  writeFileSync(path.join(sample.worktree, 'src/reset-link.mjs'), 'export const canUseResetLink = () => true;\n');
   assert.equal(sample.service.revision(snapshot.runId), beforeRevision);
   // The live UI polls even without an SSE revision: external file changes never update persisted revision.
   await expect(page.getByTestId('task-proof-status')).toHaveText('Нужна повторная проверка', { timeout: 45000 });
-  await expect(page.getByTestId('requirement-coverage')).toContainText('0 из 1');
+  await expect(page.getByTestId('requirement-coverage')).toContainText('0 из 3');
   await expect(page.locator('.completion-certificate')).toHaveCount(0);
   assert.equal(sample.service.revision(snapshot.runId), beforeRevision);
   assert.equal(sample.service.snapshot(snapshot.runId).proof.status, 'STALE');

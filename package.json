@@ -1,6 +1,6 @@
 {
   "name": "flowcairn",
-  "version": "0.2.21",
+  "version": "0.2.22",
   "description": "AI-работа с доказуемым результатом: требования, исполнение, актуальные evidence и PROVEN",
   "type": "module",
   "license": "MIT",

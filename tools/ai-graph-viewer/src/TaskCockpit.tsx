@@ -8,12 +8,21 @@ const requirementLabels = { proven: 'Подтверждено', unproven: 'Ну�
 const taskLabels = { PROVEN: 'Результат подтвержден', UNPROVEN: 'Результат пока не подтвержден', STALE: 'Нужна повторная проверка', FAILED: 'Обнаружена проблема', BLOCKED: 'Работа заблокирована', RUNNING: 'Работа продолжается' };
 const methodLabels: Record<string, string> = { check: 'Выполнение проверки', 'source-review': 'Проверка исходных данных', human: 'Приемка человеком' };
 const evidenceLabels = { passed: 'Проверка пройдена', failed: 'Проверка не пройдена', uncertain: 'Результат неоднозначен', unavailable: 'Проверка недоступна' };
+const checkLabels: Record<string, string> = { 'check-tests': 'Тесты', 'check-typecheck': 'Проверка типов', 'check-lint': 'Проверка стиля кода', 'check-build': 'Сборка' };
 const views = { requirements: 'Требования', evidence: 'Доказательства', changes: 'Изменения', cost: 'Ресурсы' };
 type View = keyof typeof views;
 type OpenEvidence = (evidence: ProofEvidence, artifactId?: string) => void;
 
 function date(value: string | null) {
   return value && !Number.isNaN(Date.parse(value)) ? new Date(value).toLocaleString('ru-RU') : 'Время не передано';
+}
+
+function blockerText(reason: string, proof: TaskProof) {
+  const check = /^Обязательная проверка (check-[a-z]+) не подтверждена на текущем результате$/.exec(reason);
+  if (check?.[1]) return `${checkLabels[check[1]] ?? 'Проверку'} нужно повторить для текущего состояния файлов.`;
+  const requirement = proof.requirements.find(item => reason.startsWith(`${item.id}: `));
+  if (requirement) return `${requirement.title}: ${humanText(reason.slice(requirement.id.length + 2))}`;
+  return humanText(reason);
 }
 
 export function TaskCockpit({ snapshot, busy, unavailable = false, onOpenEvidence, onOpenArtifact, onAcceptRequirement }: {
@@ -51,7 +60,7 @@ export function TaskCockpit({ snapshot, busy, unavailable = false, onOpenEvidenc
         <progress aria-label="Подтвержденные обязательные требования" value={proof.coverage.proven} max={Math.max(proof.coverage.required, 1)} />
       </div>
       {current && !proven && <p className="cockpit-current"><strong>Сейчас:</strong> {nodeTitle(current, 'ru')}<span>{current.outcome}</span></p>}
-      {proof.blockers.length > 0 && <div className="proof-blockers"><strong>Что мешает завершению</strong><ul>{proof.blockers.map((reason, index) => <li key={index}>{humanText(reason)}</li>)}</ul></div>}
+      {proof.blockers.length > 0 && <div className="proof-blockers"><strong>Что мешает завершению</strong><ul>{proof.blockers.map((reason, index) => <li key={index}>{blockerText(reason, proof)}</li>)}</ul></div>}
     </header>
     <div className="cockpit-content">
       {proven && proof.certificate && <Certificate proof={proof} onSelectRequirement={selectRequirement} />}
@@ -113,7 +122,7 @@ function RequirementDetails({ requirement, snapshot, busy, onOpenEvidence, onOpe
     {requirement.reason && <p>{humanText(requirement.reason)}</p>}
     <h4>Как проверяется</h4>
     <p>{methodLabels[requirement.verification.method] ?? requirement.verification.method}: {requirement.verification.criterion}</p>
-    {requirement.verification.checkIds.length > 0 && <p>Проверки: {requirement.verification.checkIds.join(', ')}</p>}
+    {requirement.verification.checkIds.length > 0 && <p>Проверки: {requirement.verification.checkIds.map(id => checkLabels[id] ?? id).join(', ')}</p>}
     {requirement.verification.paths.length > 0 && <ul className="path-list">{requirement.verification.paths.map(path => <li key={path}><code>{path}</code></li>)}</ul>}
     <h4>Связанная работа</h4>
     {work.length ? <ul>{work.map(node => <li key={node.id}><strong>{nodeTitle(node, 'ru')}</strong><p>{node.status === 'passed' ? 'Этап завершен. ' : node.status === 'running' ? 'Выполняется. ' : 'Этап еще не завершен. '}{node.outcome}</p></li>)}</ul> : <p>Работа с этим требованием еще не связана.</p>}

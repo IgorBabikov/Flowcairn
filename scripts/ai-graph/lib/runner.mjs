@@ -14,6 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { GraphError, canonicalJson, sha256 } from './io.mjs';
+import { MAX_CONTROL_BYTES, MAX_CONTROL_INPUT_BYTES, validCommand } from './supervisor-control.mjs';
 import {
   resolveAction,
 } from './registry.mjs';
@@ -684,6 +685,14 @@ export async function runRegisteredAction({
   });
   let supervisor;
   try {
+    if (!validCommand(prepared.command) || typeof prepared.input !== 'string' ||
+        Buffer.byteLength(prepared.input) > MAX_CONTROL_INPUT_BYTES)
+      fail('RUNNER_CONTROL_INVALID', 'AI-команда не помещается в ограниченный протокол запуска');
+    const controlBytes = Buffer.byteLength(JSON.stringify({
+      type: 'go', nonce: '0'.repeat(64), command: prepared.command, input: prepared.input,
+    })) + 1;
+    if (controlBytes > MAX_CONTROL_BYTES)
+      fail('RUNNER_CONTROL_LIMIT', 'AI-команда и контекст превышают лимит протокола запуска');
     const nonce = randomBytes(32).toString('hex');
     const commandHash = sha256(canonicalJson(prepared.command));
     const ticketFile = path.join(allocation.tickets, `${randomUUID()}.json`);

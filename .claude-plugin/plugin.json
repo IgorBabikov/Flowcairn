@@ -1,7 +1,7 @@
 {
   "name": "flowcairn",
   "description": "Доказуемая AI-работа: контракт задачи, требования, исполнение, evidence и PROVEN.",
-  "version": "0.2.21",
+  "version": "0.2.22",
   "author": { "name": "Igor Babikov" },
   "homepage": "https://github.com/IgorBabikov/flowcairn",
   "repository": "https://github.com/IgorBabikov/flowcairn",

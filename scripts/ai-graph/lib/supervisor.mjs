@@ -12,9 +12,9 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createUsageCollector } from './usage.mjs';
+import { MAX_CONTROL_BYTES, MAX_CONTROL_INPUT_BYTES, validCommand } from './supervisor-control.mjs';
 
 const MAX_TICKET_BYTES = 64 * 1024;
-const MAX_CONTROL_BYTES = 256 * 1024;
 const TERMINATION_GRACE_MS = 2_000;
 
 // Only fixed error codes leave memory; provider output may contain secrets or source text.
@@ -110,27 +110,6 @@ function writeTicket(ticketPath, value) {
 
 function sendControl(value) {
   writeSync(3, `${JSON.stringify(value)}\n`);
-}
-
-function validCommand(command) {
-  return (
-    command &&
-    typeof command === 'object' &&
-    Object.getPrototypeOf(command) === Object.prototype &&
-    typeof command.executable === 'string' &&
-    path.isAbsolute(command.executable) &&
-    Array.isArray(command.args) &&
-    command.args.length <= 1_000 &&
-    command.args.every((item) => typeof item === 'string' && item.length <= 16_384) &&
-    typeof command.cwd === 'string' &&
-    path.isAbsolute(command.cwd) &&
-    command.env &&
-    typeof command.env === 'object' &&
-    Object.getPrototypeOf(command.env) === Object.prototype &&
-    Object.entries(command.env).every(
-      ([key, value]) => /^[A-Z_][A-Z0-9_]*$/.test(key) && typeof value === 'string',
-    )
-  );
 }
 
 export async function supervise(ticketPath) {
@@ -254,7 +233,7 @@ export async function supervise(ticketPath) {
       !validCommand(message.command) ||
       sha256(canonicalJson(message.command)) !== initial.commandHash ||
       typeof message.input !== 'string' ||
-      Buffer.byteLength(message.input) > 128 * 1024
+      Buffer.byteLength(message.input) > MAX_CONTROL_INPUT_BYTES
     ) {
       terminate('CONTROL_REJECTED');
       return;

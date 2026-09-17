@@ -9,19 +9,47 @@ import { hashObject, sha256 } from '../lib/io.mjs';
 import { SKILL_ROUTES } from '../lib/config.mjs';
 
 export const identity = hashObject('provable-work-runtime');
-const title = 'Функция answer возвращает 42';
-const assertion = 'assert.equal(answer(), 42);';
+const examples = {
+  answer: {
+    title: 'Функция answer возвращает 42', sourcePath: 'src/answer.mjs', testPath: 'src/answer.test.mjs',
+    exportedName: 'answer', initial: 'export const answer = () => 0;\n',
+    passing: 'export const answer = () => 42;\n', failing: 'export const answer = () => 41;\n',
+    assertion: 'assert.equal(answer(), 42);', fact: 'Экспортируется answer',
+  },
+  'password-reset': {
+    title: 'Защитить восстановление пароля ссылкой со сроком действия',
+    requirements: [
+      'Действующая ссылка позволяет сбросить пароль',
+      'Ссылка прекращает действовать в момент истечения срока',
+      'Просроченная ссылка не позволяет сбросить пароль',
+    ],
+    sourcePath: 'src/reset-link.mjs', testPath: 'src/reset-link.test.mjs', exportedName: 'canUseResetLink',
+    initial: 'export const canUseResetLink = () => true;\n',
+    passing: 'export const canUseResetLink = ({ validUntil, now }) => now < validUntil;\n',
+    failing: 'export const canUseResetLink = () => true;\n',
+    assertion: [
+      'assert.equal(canUseResetLink({ validUntil: 2000, now: 1999 }), true);',
+      'assert.equal(canUseResetLink({ validUntil: 2000, now: 2000 }), false);',
+      'assert.equal(canUseResetLink({ validUntil: 2000, now: 2001 }), false);',
+    ].join('\n'),
+    fact: 'Экспортируется проверка срока действия ссылки',
+  },
+};
 const skills = [...new Set(Object.values(SKILL_ROUTES).flat())].map((id) => ({ id, path: `skills/${id}/SKILL.md`, hash: identity }));
 export const request = (snapshot, extra = {}) => ({ operationId: `op-${randomUUID()}`, expectedRevision: snapshot.revision, planHash: snapshot.planHash, ...extra });
 
-export async function fixture(t, { repair = false, method = 'check', missingAssessment = false, badCitation = false, reviewFailures = 0 } = {}) {
+export async function fixture(t, { repair = false, method = 'check', missingAssessment = false, badCitation = false, reviewFailures = 0, example = 'answer' } = {}) {
+  const sample = examples[example];
+  if (!sample) throw new Error('Unknown proof test example');
+  const { title, assertion, sourcePath, testPath } = sample;
+  const requirements = sample.requirements ?? [title];
   const root = mkdtempSync(path.join(os.tmpdir(), 'flowcairn-proof-e2e-'));
   const worktree = path.join(root, '.ai-orchestrator', 'worktrees', 'proof-1');
   mkdirSync(path.join(worktree, 'src'), { recursive: true, mode: 0o700 });
-  writeFileSync(path.join(worktree, 'src/answer.mjs'), 'export const answer = () => 0;\n');
-  writeFileSync(path.join(worktree, 'src/answer.test.mjs'), `import assert from 'node:assert/strict';\nimport { answer } from './answer.mjs';\n${assertion}\n`);
+  writeFileSync(path.join(worktree, sourcePath), sample.initial);
+  writeFileSync(path.join(worktree, testPath), `import assert from 'node:assert/strict';\nimport { ${sample.exportedName} } from './${path.basename(sourcePath)}';\n${assertion}\n`);
   const fingerprint = () => {
-    const files = ['src/answer.mjs', 'src/answer.test.mjs'].map((file) => {
+    const files = [sourcePath, testPath].map((file) => {
       const bytes = readFileSync(path.join(worktree, file));
       return { path: file, hash: sha256(bytes), size: bytes.length, mode: '100644' };
     });
@@ -40,7 +68,7 @@ export async function fixture(t, { repair = false, method = 'check', missingAsse
     verifyBinding: () => true, replaceBinding: ({ binding, newRunId, sourceHash }) => ({ ...binding, runId: newRunId, sourceHash }),
     fingerprint, inspectChanges: changes,
     applyEdits: (_root, _before, _node, _task, edits) => { for (const edit of edits) writeFileSync(path.join(worktree, edit.path), edit.content); },
-    diff: (_root, before, after) => ({ content: before.hash === after.hash ? '' : '--- a/src/answer.mjs\n+++ b/src/answer.mjs\n+export const answer = () => 42;', complete: true }),
+    diff: (_root, before, after) => ({ content: before.hash === after.hash ? '' : `--- a/${sourcePath}\n+++ b/${sourcePath}\n+${sample.passing.trim()}`, complete: true }),
     runner: { ai: { available: true }, checks: { available: true } },
     loadSkills: (ids) => ids.map((name) => ({ name, text: 'fixture', hash: identity, path: `skills/${name}/SKILL.md` })),
     execute: async ({ node, onStart, reviewEvidence, plan }) => {
@@ -50,33 +78,32 @@ export async function fixture(t, { repair = false, method = 'check', missingAsse
         // Node's outer test runner marker makes a nested --test silently skip files with exit 0.
         const env = { ...process.env };
         delete env.NODE_TEST_CONTEXT;
-        const result = spawnSync(process.execPath, ['--test', 'src/answer.test.mjs'], { cwd: worktree, env, encoding: 'utf8', timeout: 10000 });
+        const result = spawnSync(process.execPath, ['--test', testPath], { cwd: worktree, env, encoding: 'utf8', timeout: 10000 });
         assert.equal(result.error, undefined);
         actualCheckExitCodes.push(result.status);
         return { exitCode: result.status, stopped: true, uncertain: false };
       }
       const output = { ...baseOutput, skillsUsed: node.skills };
-      if (node.action.id === 'ai-analyze') output.analysis = { requirements: [title], constraints: [], projectFacts: [{ path: 'src/answer.mjs', fact: 'Экспортируется answer' }], acceptance: [title], risks: [] };
+      if (node.action.id === 'ai-analyze') output.analysis = { requirements, constraints: [], projectFacts: [{ path: sourcePath, fact: sample.fact }], acceptance: requirements, risks: [] };
       if (node.action.id === 'ai-plan') {
-        output.steps = [{ id: 'answer', title, outcome: title, needs: [], paths: ['src/answer.mjs'], requirementIds: ['req-001'] }];
-        output.contractProposal = { requirements: [{ id: 'req-001', title, mandatory: true,
-          verification: { method, checkIds: method === 'check' ? ['check-tests'] : [], criterion: title, paths: ['src/answer.test.mjs'] } }],
+        output.steps = [{ id: 'answer', title, outcome: title, needs: [], paths: [sourcePath], requirementIds: requirements.map((_, index) => `req-${String(index + 1).padStart(3, '0')}`) }];
+        output.contractProposal = { requirements: requirements.map((requirement, index) => ({ id: `req-${String(index + 1).padStart(3, '0')}`, title: requirement, mandatory: true,
+          verification: { method, checkIds: method === 'check' ? ['check-tests'] : [], criterion: requirement, paths: [testPath] } })),
           optionalImprovements: [], constraints: [], assumptions: [], unknowns: [] };
       }
       if (node.action.id === 'ai-implement') {
-        const value = repair && implementationCalls++ === 0 ? 41 : 42;
-        const content = `export const answer = () => ${value};\n`;
-        if (readFileSync(path.join(worktree, 'src/answer.mjs'), 'utf8') !== content) {
-          output.changedFiles = ['src/answer.mjs'];
-          output.edits = [{ path: 'src/answer.mjs', previousHash: fingerprint().files[0].hash, content, executable: false }];
+        const content = repair && implementationCalls++ === 0 ? sample.failing : sample.passing;
+        if (readFileSync(path.join(worktree, sourcePath), 'utf8') !== content) {
+          output.changedFiles = [sourcePath];
+          output.edits = [{ path: sourcePath, previousHash: fingerprint().files[0].hash, content, executable: false }];
         }
       }
       if (node.action.id === 'ai-review') {
         output.reviewEvidenceHash = hashObject(reviewEvidence);
-        if (method !== 'human' && !missingAssessment) output.requirementAssessments = plan.taskContract.requirements.map((item) => ({
+        if (method !== 'human' && !missingAssessment) output.requirementAssessments = plan.taskContract.requirements.map((item, index) => ({
           requirementId: item.id, criterion: item.verification.criterion, checkIds: item.verification.checkIds,
-          verdict: reviewFailures-- > 0 ? 'fail' : 'pass', reason: 'Реальная зарегистрированная проверка исполнила assertion для answer',
-          citations: [{ path: 'src/answer.test.mjs', startLine: 3, quote: badCitation ? 'assert.equal(answer(), 999);' : assertion }],
+          verdict: reviewFailures-- > 0 ? 'fail' : 'pass', reason: 'Зарегистрированная проверка исполнила тестовый сценарий',
+          citations: [{ path: testPath, startLine: 3 + index, quote: badCitation ? 'assert.equal(answer(), 999);' : assertion.split('\n')[index] }],
         }));
       }
       return { exitCode: 0, stopped: true, uncertain: false, output };
@@ -93,11 +120,12 @@ export async function fixture(t, { repair = false, method = 'check', missingAsse
     }
     throw new Error('Task did not settle');
   };
-  const run = async () => {
-    let snapshot = await service.create({ id: 'TASK-PROOF', goal: title, instructions: title, acceptance: [title], scope: ['src'], checks: ['tests'] },
+  const run = async ({ onPlan } = {}) => {
+    let snapshot = await service.create({ id: 'TASK-PROOF', goal: title, instructions: title, acceptance: requirements, scope: ['src'], checks: ['tests'] },
       { runId: 'proof-task', operationId: 'create-proof', stage: 'planning', workflow: 'autonomous' });
     snapshot = await service.command(snapshot.runId, 'run', request(snapshot));
     snapshot = await service.command(snapshot.runId, 'replan', request(snapshot));
+    if (onPlan) await onPlan(snapshot);
     const gate = snapshot.gates.find((item) => item.type === 'approve-plan');
     snapshot = await service.command(snapshot.runId, 'gate', request(snapshot, { nodeId: gate.nodeId, decision: 'approve', permissions: gate.requiredPermissions, challenge: gate.challenge }));
     return settle(snapshot);
