@@ -122,7 +122,7 @@ test('Cursor проходит выбор и preflight в чистом проек
   assert.equal(result.profile.ai.providerVersion, 'fixture-cursor 1.0');
   const { probeRunner } = await import('../scripts/ai-graph/lib/runner.mjs');
   const preflight = await probeRunner({root});
-  assert.equal(preflight.ai.available, true);
+  assert.equal(preflight.ai.available, true, preflight.ai.reason);
 });
 
 test('Claude и Cursor доступны только после local capability probe', async t => {
