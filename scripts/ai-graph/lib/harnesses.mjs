@@ -55,7 +55,7 @@ export const HARNESS_DESCRIPTORS = Object.freeze({
     runtime: Object.freeze({
       status: 'available-after-probe',
       execution: 'safe-readonly-cli-adapter',
-      reason: 'CLI запускается только в пустом private workspace в sandbox и Ask mode. Его JSON-ответ дополнительно валидируется Flowcairn; нужна точная версия и отдельное согласие.',
+      reason: 'CLI запускается только в пустом private workspace в sandbox и Ask mode. Его JSON-ответ дополнительно валидируется flowcairn; нужна точная версия и отдельное согласие.',
     }),
   }),
 });

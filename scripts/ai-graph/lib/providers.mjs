@@ -55,7 +55,7 @@ function supportsCursorSafeExecution(executable) {
   const run = spawnSync(executable, ['--help'], { encoding: 'utf8', timeout: 10_000, maxBuffer: 64 * 1024, env: safeEnv, shell: false });
   const help = `${run.stdout ?? ''}`;
   if (run.error || run.status !== 0 || !['--print', '--output-format', '--sandbox', '--mode'].every((flag) => help.includes(flag)))
-    throw new GraphError('PROVIDER_CAPABILITY_UNAVAILABLE', 'Cursor не поддерживает безопасный non-interactive режим Flowcairn.');
+    throw new GraphError('PROVIDER_CAPABILITY_UNAVAILABLE', 'Cursor не поддерживает безопасный non-interactive режим flowcairn.');
 }
 function hasExternalAuthentication(provider, executable) {
   const run = spawnSync(executable, provider === 'claude' ? ['auth', 'status'] : ['status'], {

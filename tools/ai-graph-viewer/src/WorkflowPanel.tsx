@@ -43,7 +43,7 @@ export function WorkflowPanel({ snapshot, plan, busy, stateUnavailable = false, 
       : waitingToStart ? 'Анализ еще не начался. Начните работу, чтобы получить план для согласования.'
       : 'Изучаем проект и требования. Затем покажем план для согласования.'}</p>
     {unavailableReason && <div className="workflow-start-help">
-      <p>Проверьте выбранный AI-клиент в настройках проекта. После исправления установки перезапустите Flowcairn.</p>
+      <p>Проверьте выбранный AI-клиент в настройках проекта. После исправления установки перезапустите flowcairn.</p>
       <button className="button" type="button" onClick={onSetup}>Настройки проекта</button>
     </div>}
     {waitingToStart && !blocked && snapshot.capabilities.run?.allowed &&

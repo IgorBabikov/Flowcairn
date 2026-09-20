@@ -193,7 +193,7 @@ export const GateDialog = React.forwardRef<
             type="checkbox"
           />
           {gate.type === 'provider-consent' && locale === 'ru'
-            ? 'Я понимаю, что Flowcairn передаст только перечисленные данные выбранному AI-провайдеру.'
+            ? 'Я понимаю, что flowcairn передаст только перечисленные данные выбранному AI-провайдеру.'
             : labels.confirmation}
         </label>
         <label className="confirmation">

@@ -17,7 +17,7 @@ export function assertUninstallSafe({ projectRoot, processProbe, worktreePaths }
   const root = canonicalInstructionRoot(projectRoot);
   if (typeof processProbe !== 'function') instructionError('UNINSTALL_PROCESS_UNKNOWN', 'A live installer process probe is required before uninstall.');
   const proof = processProbe();
-  if (!proof || proof.state !== 'stopped' || proof.verified !== true || typeof proof.evidence !== 'string' || !proof.evidence.trim()) instructionError('UNINSTALL_PROCESS_UNKNOWN', 'Active or unknown process state: stop Flowcairn normally and verify before uninstall.');
+  if (!proof || proof.state !== 'stopped' || proof.verified !== true || typeof proof.evidence !== 'string' || !proof.evidence.trim()) instructionError('UNINSTALL_PROCESS_UNKNOWN', 'Active or unknown process state: stop flowcairn normally and verify before uninstall.');
   if (!Array.isArray(worktreePaths) || worktreePaths.length > 128 || worktreePaths.some((entry) => typeof entry !== 'string')) instructionError('UNINSTALL_WORKTREE_UNKNOWN', 'A bounded installer-owned worktree inventory is required.');
   const checked = [];
   for (const candidate of new Set(worktreePaths)) {

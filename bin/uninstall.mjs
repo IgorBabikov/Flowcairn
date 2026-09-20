@@ -47,7 +47,6 @@ function ownedPlan(root) {
   let packageManager;
   for (const [relative, owned, hash] of [
     ['.flowcairn.json', owner.profileOwned === true, owner.profileHash],
-    ['.ai-orchestrator/task.example.json', typeof owner.exampleHash === 'string', owner.exampleHash],
   ]) {
     const current = inspectFile(root, relative);
     if (!current) continue;
@@ -78,7 +77,7 @@ function ownedPlan(root) {
       throw new GraphError('UNINSTALL_OWNER', 'Исходное состояние локального Git-исключения не подтверждено.');
     if (!alreadyRestored) changes.push({ current: localExclude, desired });
   }
-  // Receipts from Flowcairn <= 0.2.5 may still own a project .gitignore block.
+  // Receipts from flowcairn <= 0.2.5 may still own a project .gitignore block.
   const ignore = inspectFile(root, '.gitignore');
   if (ignore && owner.ignoreBlockOwned === true) {
     const text = ignore.bytes.toString('utf8');
@@ -206,5 +205,5 @@ export async function uninstallCommand(projectRoot, options = {}, loader = defau
       result.packageRemovalCommand = manager === 'npm' ? 'npm uninstall flowcairn' : ['pnpm', 'yarn'].includes(manager) ? `${manager} remove flowcairn` : null;
     }
   }
-  return { ...result, status: result.remaining.length ? 'partial' : 'complete', message: result.remaining.length ? 'Owned-интеграция снята. Сохраненные остатки перечислены отдельно; пакет при необходимости удалите своим менеджером.' : 'Owned-интеграция Flowcairn удалена. Файлы проекта сохранены.' };
+  return { ...result, status: result.remaining.length ? 'partial' : 'complete', message: result.remaining.length ? 'Owned-интеграция снята. Сохраненные остатки перечислены отдельно; пакет при необходимости удалите своим менеджером.' : 'Owned-интеграция flowcairn удалена. Файлы проекта сохранены.' };
 }

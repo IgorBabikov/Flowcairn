@@ -52,7 +52,7 @@ async function fixture(t) {
     server,
     calls,
     lifecycle,
-    headers: { 'X-Flowcairn-Control': token, Origin: url, 'Content-Type': 'application/json' },
+    headers: { 'X-flowcairn-Control': token, Origin: url, 'Content-Type': 'application/json' },
   };
 }
 
@@ -159,7 +159,7 @@ test('SSE carries committed revision hints; reconnect recovers via snapshot', as
 test('Unicode auth header with equal character length is denied without crashing server', async (t) => {
   const f = await fixture(t);
   const denied = await fetch(`${f.url}/api/runs`, {
-    headers: { ...f.headers, 'X-Flowcairn-Control': 'é'.repeat(token.length) },
+    headers: { ...f.headers, 'X-flowcairn-Control': 'é'.repeat(token.length) },
   });
   assert.equal(denied.status, 403);
   assert.equal((await fetch(`${f.url}/api/runs`, { headers: f.headers })).status, 200);

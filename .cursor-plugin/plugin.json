@@ -1,12 +1,19 @@
 {
   "name": "flowcairn",
-  "displayName": "Flowcairn",
-  "description": "Доказуемая AI-работа: контракт задачи, требования, исполнение, evidence и PROVEN.",
-  "version": "0.2.22",
-  "author": { "name": "Igor Babikov" },
+  "displayName": "flowcairn",
+  "description": "Сложная задача: план, выполнение и проверенный результат.",
+  "version": "0.3.0",
+  "author": {
+    "name": "Igor Babikov"
+  },
   "homepage": "https://github.com/IgorBabikov/flowcairn",
   "repository": "https://github.com/IgorBabikov/flowcairn",
   "license": "MIT",
-  "keywords": ["ai-workflow", "graph", "skills", "developer-tools"],
+  "keywords": [
+    "ai-workflow",
+    "graph",
+    "skills",
+    "developer-tools"
+  ],
   "skills": "./skills/"
 }

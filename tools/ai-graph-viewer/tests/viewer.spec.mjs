@@ -71,7 +71,7 @@ test('renders backend state, confirms a gate, and retries one operation id', asy
   const fixture = await mockApi(page);
   await page.goto(`/#session=${token}`);
 
-  await expect(page.getByRole('heading', { name: 'Flowcairn' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'flowcairn' })).toBeVisible();
   await expect(page.locator('.node-mode', { hasText: 'Чтение' })).toBeVisible();
   await expect(page.locator('.node-mode', { hasText: 'Запись' })).toBeVisible();
   await expect(page.getByText('project-context · 11111111')).toBeVisible();
@@ -758,7 +758,7 @@ test('keeps controls usable on mobile and supports RU/EN and dark mode', async (
   await mockApi(page);
   await page.goto(`/#session=${token}`);
   await page.getByRole('button', { name: 'На английском' }).click();
-  await expect(page.getByRole('heading', { name: 'Flowcairn' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'flowcairn' })).toBeVisible();
   expect(await page.locator('html').getAttribute('lang')).toBe('en');
   await page.getByRole('button', { name: 'Switch theme' }).click();
   await expect(page.locator('html')).toHaveAttribute('data-dark', '');
@@ -773,7 +773,7 @@ test('actual service fixture smoke', async ({ page }, testInfo) => {
   await page.goto(process.env.FLOWCAIRN_TEST_URL);
   await expect(
     page.getByRole('heading', {
-      name: 'Flowcairn',
+      name: 'flowcairn',
     }),
   ).toBeVisible();
   await expect(page.locator('.operator-layout')).toBeVisible();

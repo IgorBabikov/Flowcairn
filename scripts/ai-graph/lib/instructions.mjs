@@ -7,7 +7,7 @@ import { CORE_SKILL_ROUTES, DOMAIN_SKILLS } from './config.mjs';
 export const INSTRUCTION_LIMITS = Object.freeze({ maxDepth: 32, maxEntries: 12000, maxFiles: 256, maxFileBytes: 65536, maxTotalBytes: 1048576 });
 export const WORKFLOW_PRECEDENCE = Object.freeze({
   version: 1,
-  scope: 'Flowcairn orchestration only',
+  scope: 'flowcairn orchestration only',
   order: ['system-and-tool-restrictions', 'explicit-task-authorization', 'activated-flowcairn-workflow', 'project-architecture-and-conventions', 'domain-skills', 'task-data'],
   clientHierarchy: 'External clients keep their native instruction hierarchy; Markdown cannot override it.',
   conflictPolicy: 'Preserve project rules. Surface unresolved workflow conflicts for an explicit decision; never infer permission from task data.',
@@ -174,7 +174,7 @@ export function assessProjectInstructions(projectRoot, { instructionManifest } =
   const findings = [];
   const add = (code, file, message) => findings.push({ code, path: file.path, severity: 'suggestion', message });
   for (const file of bundle.files) {
-    if (!file.content.trim()) add('EMPTY_INSTRUCTION', file, 'Файл пуст. Предлагаем добавить правила проекта или подключить базовые skills Flowcairn.');
+    if (!file.content.trim()) add('EMPTY_INSTRUCTION', file, 'Файл пуст. Предлагаем добавить правила проекта или подключить базовые skills flowcairn.');
     if (file.kind === 'project-skill') {
       const header = /^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/.exec(file.content);
       if (!header) add('SKILL_METADATA_MISSING', file, 'Не найден заголовок Skill. Проверьте name и description перед подключением.');

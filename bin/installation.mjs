@@ -265,15 +265,9 @@ export function initializeProject(input, options = {}) {
         ...(existingProfile ? [] : [PROFILE]),
         ...(exclude === oldExclude ? [] : [`${LOCAL_EXCLUDE} (локально)`]),
         OWNER_FILE,
-        '.ai-orchestrator/task.example.json',
       ],
     };
   const tmp = excludeFile ? path.join(path.dirname(excludeFile), `.flowcairn-exclude-${randomUUID()}.tmp`) : null;
-  const exampleText = JSON.stringify({
-    id: 'ORCH-001', goal: 'Один проверяемый результат',
-    instructions: 'Опишите нужное поведение и ограничения', scope: ['README.md'],
-    acceptance: ['Как проверить результат'], checks: [],
-  }, null, 2) + '\n';
   const ownedFiles = [];
   let createdDirectory = false,
     ignoreWritten = false;
@@ -302,15 +296,10 @@ export function initializeProject(input, options = {}) {
           localExcludeBefore: oldExclude,
           localExcludeAfterHash: sha256(exclude),
           localExcludeBlockOwned: exclude !== oldExclude,
-          exampleHash: sha256(exampleText),
         },
         null,
         2,
       ) + '\n',
-    );
-    createOwned(
-      path.join(stateDirectory, 'task.example.json'),
-      exampleText,
     );
     if (excludeFile && tmp && exclude !== oldExclude) {
       const excludeMode = existsNoFollow(excludeFile) ? lstatSync(excludeFile).mode & 0o777 : 0o600;

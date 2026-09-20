@@ -171,7 +171,7 @@ test('size, manifest syntax and unsafe workspace patterns fail explicitly', (t) 
 });
 
 
-test('Flowcairn installation metadata does not imply frontend or a JavaScript product', (t) => {
+test('flowcairn installation metadata does not imply frontend or a JavaScript product', (t) => {
   const f = fixture(t); f.pkg('package.json', { flowcairn: '*' }); f.write('main.py', 'print("hello")');
   const context = discoverProjectContext(f.root, { scope: ['main.py'] });
   assert.deepEqual(context.domains, ['engineering']);

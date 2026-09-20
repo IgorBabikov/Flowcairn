@@ -9,7 +9,7 @@ body:
     id: environment
     attributes:
       label: Окружение
-      description: Версия Flowcairn, ОС, Node, Docker, режим AI. Без credentials.
+      description: Версия Flowcairn, ОС, Node.js и AI-клиент. Docker — если используется.
     validations:
       required: true
   - type: textarea

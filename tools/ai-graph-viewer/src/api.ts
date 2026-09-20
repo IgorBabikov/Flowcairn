@@ -75,7 +75,7 @@ async function requestJson<T>(url: string, init: RequestInit = {}): Promise<T> {
       cache: 'no-store',
       headers: {
         Accept: 'application/json',
-        'X-Flowcairn-Control': sessionToken() ?? '',
+        'X-flowcairn-Control': sessionToken() ?? '',
         ...init.headers,
       },
     });
@@ -208,7 +208,7 @@ export function watchRevisions(
         cache: 'no-store',
         headers: {
           Accept: 'text/event-stream',
-          'X-Flowcairn-Control': sessionToken() ?? '',
+          'X-flowcairn-Control': sessionToken() ?? '',
         },
         signal,
       });

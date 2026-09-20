@@ -70,7 +70,7 @@ const reasons: Record<string, string> = {
   RUNNER_TOOLCHAIN_INVALID: 'Инструменты исполнителя не прошли проверку',
   PROVIDER_RETIRED: 'OpenAI API больше не поддерживается. Выберите Codex, Claude Code или Cursor.',
   PROVIDER_AUTH_REQUIRED: 'AI-клиент не авторизован. Войдите в выбранный CLI и повторите запуск.',
-  CODEX_MODEL_SETTINGS_REQUIRED: 'Модель и усиление CLI не определены. Задайте их в настройках Flowcairn или конфигурации Codex CLI.',
+  CODEX_MODEL_SETTINGS_REQUIRED: 'Модель и усиление CLI не определены. Задайте их в настройках flowcairn или конфигурации Codex CLI.',
   CODEX_AUTH_REQUIRED: 'Codex не авторизован. Выполните codex login и повторите запуск.',
   PROJECT_PROFILE_INVALID: 'Настройки проекта не прошли проверку',
   analysis: 'Анализ задачи',

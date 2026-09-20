@@ -4,7 +4,7 @@ export type Locale = 'ru' | 'en';
 
 export const COPY = {
   ru: {
-    title: 'Flowcairn',
+    title: 'flowcairn',
     subtitle: 'От задачи до проверенного результата.',
     runs: 'Запуски',
     active: 'Активные',
@@ -81,7 +81,7 @@ export const COPY = {
     missingSessionHint: 'Запустите flowcairn ui --root PROJECT и откройте ссылку из терминала.',
   },
   en: {
-    title: 'Flowcairn',
+    title: 'flowcairn',
     subtitle: 'From your task to a checked result.',
     runs: 'Runs',
     active: 'Active',

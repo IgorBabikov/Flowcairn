@@ -378,7 +378,7 @@ function codexLoginAvailable(entry) {
 function localCheckToolchain(profile) {
   let runningNode;
   try { runningNode = statSync(NODE_BINARY); } catch { runningNode = null; }
-  // Node is the already-running Flowcairn process. Managed distributions may
+  // Node is the already-running flowcairn process. Managed distributions may
   // hard-link it, so nlink is not a security signal here. Ownership, mode and
   // the immutable digest recorded below remain required.
   if (!/^v22\./.test(process.version))

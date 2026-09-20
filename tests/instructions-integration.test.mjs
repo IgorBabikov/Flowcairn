@@ -116,7 +116,7 @@ test('activation requires consent and fresh fingerprint; instruction changes inv
 });
 test('managed edits and duplicate markers refuse without deletion; exact orphan blocks are adopted', (t) => {
   const f = fixture(t); f.write('AGENTS.md', 'owner\n'); f.activate(); const original = f.read('AGENTS.md');
-  f.write('AGENTS.md', original.toString().replace('Flowcairn активирован', 'User edited'));
+  f.write('AGENTS.md', original.toString().replace('flowcairn активирован', 'User edited'));
   assert.equal(inspectIntegration({ projectRoot: f.root }).status, 'modified');
   assert.throws(f.uninstall, { code: 'INTEGRATION_MODIFIED' });
   assert.throws(f.activate, { code: 'INTEGRATION_CONFLICT' });

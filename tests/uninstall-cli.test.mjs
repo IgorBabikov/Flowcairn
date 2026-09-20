@@ -55,9 +55,9 @@ test('active lifecycle and changed owned files refuse all deletion', async (t) =
   const profile = readFileSync(path.join(root, '.flowcairn.json'));
   await assert.rejects(uninstallCommand(root, {}, fakeLifecycle({ state: 'active' })), { code: 'UNINSTALL_PROCESS_UNKNOWN' });
   assert.deepEqual(readFileSync(path.join(root, '.flowcairn.json')), profile);
-  writeFileSync(path.join(root, '.ai-orchestrator/task.example.json'), '{}');
+  writeFileSync(path.join(root, '.flowcairn.json'), '{}');
   await assert.rejects(uninstallCommand(root, {}, fakeLifecycle()), { code: 'UNINSTALL_MODIFIED_FILE' });
-  assert.deepEqual(readFileSync(path.join(root, '.flowcairn.json')), profile);
+  assert.deepEqual(readFileSync(path.join(root, '.flowcairn.json')), Buffer.from('{}'));
 });
 
 test('unrelated project ignore edits, user results and dependencies remain and status is partial', async (t) => {
