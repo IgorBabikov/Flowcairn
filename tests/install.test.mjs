@@ -67,7 +67,27 @@ function fixture(t) {
   return { root, git };
 }
 const testClaude = path.resolve(import.meta.dirname, 'fixtures/verified-claude/node_modules/@anthropic-ai/claude-code/bin/claude.exe');
-const options = { provider: 'claude', 'provider-path': testClaude };
+const options = { provider: 'claude', 'provider-path': testClaude, 'workspace-mode': 'worktree' };
+
+test('new project without Git uses its own directory for task state and source', async (t) => {
+  const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'flowcairn-no-git-')));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(path.join(root, 'src'));
+  writeFileSync(path.join(root, 'src', 'feature.mjs'), 'export const ready = false;\n');
+  writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: 'direct-fixture', version: '1.0.0', type: 'module' }));
+  const installed = initializeProject(root, { provider: 'claude', 'provider-path': testClaude,
+    'read-consent': true, 'package-manager': 'npm' });
+  assert.equal(installed.profile.workspaceMode, 'direct');
+  assert.equal(installed.profile.onboarding.readScope, 'project-files');
+  const task = { id: 'DIRECT-001', goal: 'Исправить значение в текущем проекте',
+    instructions: 'Изменить src/feature.mjs', scope: ['src/feature.mjs'], acceptance: ['Значение исправлено'], checks: [] };
+  writeFileSync(path.join(root, '.npmrc'), 'private fixture\n');
+  await assert.rejects(createTask(root, { ...task, includeUntracked: ['.npmrc'] }), { code: 'DIRECT_SCOPE' });
+  const snapshot = await createTask(root, task, { run: 'run-direct-install' });
+  assert.equal(snapshot.status, 'waiting-for-human');
+  assert.equal(existsSync(path.join(root, '.git')), false);
+  assert.equal(existsSync(path.join(root, '.ai-orchestrator', 'worktrees')), false);
+});
 
 test('init dry run has no effects; setup is repeatable and preserves owner instructions/hooks', (t) => {
   const { root, git } = fixture(t);

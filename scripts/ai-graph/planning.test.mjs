@@ -74,6 +74,30 @@ test('planner compiler produces different semantic graphs while mandatory checks
   }
 });
 
+test('isolated repair part does not inherit all earlier source paths', () => {
+  const ordinary = compileTaskProposal(task, proposal(steps), context).plan;
+  const isolated = compileTaskProposal(task, proposal(steps), {
+    ...context,
+    repairReadPaths: { export: ['src/export.mjs'] },
+    isolatedReadStepIds: ['export'],
+  }).plan;
+  assert.ok(ordinary.nodes.find((node) => node.id === 'step-export').resources.reads.includes('src/format.mjs'));
+  const narrowed = isolated.nodes.find((node) => node.id === 'step-export').resources.reads;
+  assert.ok(narrowed.includes('src/export.mjs'));
+  assert.ok(!narrowed.includes('src/format.mjs'));
+});
+
+test('large compiled execution receives a bounded duration matching its steps', () => {
+  const pieces = Array.from({ length: 8 }, (_, index) => ({ id: `piece-${index + 1}`,
+    title: `Часть ${index + 1}`, outcome: `Часть ${index + 1} готова`, needs: [],
+    paths: [`src/piece-${index + 1}.mjs`] }));
+  const plan = compileTaskProposal(task, proposal(pieces), { ...context, workflow: 'autonomous' }).plan;
+  assert.equal(plan.nodes.filter((node) => node.action.id === 'ai-implement').length, 8);
+  assert.equal(plan.autonomy.maxDurationMs, 90 * 60 * 1000);
+  const historical = { ...plan, autonomy: { ...plan.autonomy, maxDurationMs: 30 * 60 * 1000 } };
+  assert.equal(validatePlan(historical, task, context).plan.autonomy.maxDurationMs, 30 * 60 * 1000);
+});
+
 test('planner proposals cannot select actions, Skills, permissions, broaden scope or introduce cycles', () => {
   for (const field of ['action', 'skills', 'permissions', 'command']) {
     assert.throws(() => compileTaskProposal(task, proposal([{ ...steps[0], [field]: 'untrusted' }]), context), (error) => error.code === 'PLANNING_SCHEMA');

@@ -1,6 +1,7 @@
 import { GraphError, hashObject } from './io.mjs';
 import { GraphPlanSchema, TaskSpecSchema, assertJsonBounds } from './schemas.mjs';
 import { validateTaskContract } from './task-contract.mjs';
+import { validAutonomyForNodes } from './autonomy-policy.mjs';
 import {
   resolveAction,
   requiredChecks,
@@ -102,7 +103,7 @@ export function validatePlan(
     (autonomous && plan.nodes.some((n) => n.action.id === 'human-accept'))
   )
     reject('INVALID_GATES', 'Нужны один начальный approve-plan и один конечный accept-result');
-  if (autonomous && (!plan.autonomy || plan.autonomy.maxRepairCycles !== 2 || plan.autonomy.maxDurationMs !== 1800000))
+  if (autonomous && !validAutonomyForNodes(plan.autonomy, plan.nodes))
     reject('AUTONOMY_POLICY', 'Нет ограниченной политики автономного выполнения');
   const declaredSkills = new Set(plan.skills.map((s) => s.id));
   const usedSkills = new Set();

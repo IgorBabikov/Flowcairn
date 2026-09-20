@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, lstatSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -26,7 +26,7 @@ test('local checks execute only a profile-bound script in the allocated worktree
   git('config', 'user.email', 'fixture@example.invalid');
   writeFileSync(path.join(root, 'package.json'), JSON.stringify({
     name: 'local-check-fixture', version: '1.0.0',
-    scripts: { test: "node -e \"process.stdout.write('local check ok')\"" },
+    scripts: { test: "node -e \"require('fs').writeFileSync(process.env.HOME + '/check-home.json', JSON.stringify({cache: process.env.NPM_CONFIG_CACHE})); process.stdout.write('local check ok')\"" },
   }) + '\n');
   writeFileSync(path.join(root, 'package-lock.json'), '{"lockfileVersion":3}\n');
   writeFileSync(path.join(root, '.flowcairn.json'), JSON.stringify({
@@ -90,4 +90,7 @@ test('local checks execute only a profile-bound script in the allocated worktree
   assert.equal(result.execution.kind, 'local-check');
   assert.equal(result.execution.script, 'test');
   assert.equal(result.execution.isolation, 'worktree-only');
+  assert.equal(existsSync(path.join(worktree, 'check-home.json')), false);
+  assert.deepEqual(JSON.parse(readFileSync(path.join(outputDirectory, 'check-home.json'), 'utf8')),
+    { cache: path.join(outputDirectory, 'npm-cache') });
 });

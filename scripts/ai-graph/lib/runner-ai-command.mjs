@@ -14,6 +14,7 @@ import { ExternalConsentSchema } from './providers.mjs';
 import { codexModelSettings } from './codex-settings.mjs';
 import { measurePromptContext } from './bounded-context.mjs';
 import { fitPromptBudget } from './prompt-budget.mjs';
+import { fingerprintDirectWorkspace } from './direct-workspace.mjs';
 
 // Prepared commands contain the bounded input and exact sandbox policy; process ownership stays in runner.
 export const CODEX_VERSION = 'codex-cli 0.154.0';
@@ -61,9 +62,17 @@ function permissionFilesystem(
     '**/.git',
     '.ai-orchestrator',
     '**/.ai-orchestrator',
+    '.ai',
+    '**/.ai',
     '.env',
     '**/.env',
     '**/.env.*',
+    '.npmrc',
+    '**/.npmrc',
+    '.pypirc',
+    '**/.pypirc',
+    '.netrc',
+    '**/.netrc',
     '**/*.pem',
     '**/*.key',
   ];
@@ -291,8 +300,10 @@ export function makeAiCommand({
 
 function sourceFingerprint(worktree, profile, dependencyToolchain = { dependencyPaths: [] }) {
   // Callers obtain dependencyToolchain from verifyToolchain; dependency links are checked there.
-  return fingerprintWorkspace(worktree, {
-    outputPaths: [...new Set([...profile.outputPaths, ...dependencyToolchain.dependencyPaths])],
+  const fingerprint = profile.workspaceMode === 'direct' ? fingerprintDirectWorkspace : fingerprintWorkspace;
+  return fingerprint(worktree, {
+    outputPaths: profile.workspaceMode === 'direct' ? profile.outputPaths :
+      [...new Set([...profile.outputPaths, ...dependencyToolchain.dependencyPaths])],
   });
 }
 

@@ -32,6 +32,7 @@ const VALUE_OPTIONS = new Set([
   'provider-path',
   'provider-version',
   'model-mode',
+  'workspace-mode',
   'reasoning-effort',
   'review-reasoning-effort',
   'test-policy',
@@ -148,6 +149,7 @@ export async function setupCommand(input, options = {}, terminal = {}) {
   const resolved = {
     provider:current.values.provider, model:current.values.model,
     'model-mode':current.values.modelMode, 'reasoning-effort':current.values.reasoningEffort,
+    'workspace-mode':current.values.workspaceMode,
     ...(current.values.providerPath ? {'provider-path':current.values.providerPath} : {}),
     ...(current.values.providerVersion ? {'provider-version':current.values.providerVersion} : {}),
     'test-policy':current.values.testPolicy, coverage:current.values.coverage,

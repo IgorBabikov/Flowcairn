@@ -35,12 +35,12 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 const request=(s,extra={})=>({operationId:`op-${randomUUID()}`,expectedRevision:s.revision,planHash:s.planHash,...extra});
 const analysis={requirements:['Валидация email'],constraints:['Сохранить интерфейс'],projectFacts:[{path:'src/form.mjs',fact:'Форма уже существует'}],acceptance:['Неверный email отклонен'],risks:[]};
-async function fixture(t,{consent=true,reviewFails=0,checkFails=0,uncertain=false,plannerUncertain=0,plannerFailures=0,steps=output.steps,maxReplans=2,scopeCandidates=['src']}={}) {
+async function fixture(t,{consent=true,reviewFails=0,implementationFails=0,checkFails=0,uncertain=false,plannerUncertain=0,plannerFailures=0,steps=output.steps,maxReplans=2,scopeCandidates=['src']}={}) {
  const root=mkdtempSync(path.join(os.tmpdir(),'flowcairn-product-'));
  t.after(()=>rmSync(root,{recursive:true,force:true}));
  const worktree=path.join(root,'.ai-orchestrator','worktrees','fixture-1');
  mkdirSync(worktree,{recursive:true,mode:0o700});
- const calls=[]; let reviews=0,checks=0,remainingPlannerUncertainty=plannerUncertain,remainingPlannerFailures=plannerFailures;
+ const calls=[]; let reviews=0,implementations=0,checks=0,remainingPlannerUncertainty=plannerUncertain,remainingPlannerFailures=plannerFailures;
  let runtimeHash=hash;
  const fingerprint=()=>({hash,files:[],git:{head:'a'.repeat(40),indexHash:hash}});
  const adapters={identity:()=>runtimeHash,skills:()=>skills,hasReadConsent:()=>consent,
@@ -55,7 +55,8 @@ async function fixture(t,{consent=true,reviewFails=0,checkFails=0,uncertain=fals
   calls.push({nodeId:node.id,action:node.action.id,priorEvidence,reviewEvidence,task,planVersion:plan.version});await onStart({ticket:'fixture',pid:process.pid});
   if(node.action.id==='ai-plan'&&remainingPlannerFailures-- > 0)return {exitCode:1,stopped:true,uncertain:false,failureReason:'AI_INVALID_SCHEMA'};
   if(node.action.id==='check-tests')return {exitCode:checks++<checkFails?1:0,stopped:true,uncertain:false};
-  const fail=node.action.id==='ai-review' && reviews++<reviewFails;
+  const fail=(node.action.id==='ai-review' && reviews++<reviewFails) ||
+    (node.action.id==='ai-implement' && implementations++<implementationFails);
   const plannerIsUncertain=node.action.id==='ai-plan'&&remainingPlannerUncertainty>0;
   if(plannerIsUncertain)remainingPlannerUncertainty-=1;
   return {exitCode:0,stopped:true,uncertain:false,output:{...output,steps:undefined,verdict:uncertain&&node.action.id==='ai-analyze'?'uncertain':plannerIsUncertain?'uncertain':fail?'fail':'pass',skillsUsed:node.skills,findings:fail?[{severity:'blocking',message:'Неверный email принят',path:'src/form.mjs'}]:[],...(node.action.id==='ai-plan'?{steps}:{}),...(node.action.id==='ai-analyze'?{analysis}:{}),...(reviewEvidence?{reviewEvidenceHash:hashObject(reviewEvidence)}:{})}};
@@ -174,6 +175,14 @@ test('повторный review failure останавливается посл�
  f.service.store.updateRun(s.runId,state.revision,current=>({...current,policyGrant:{...current.policyGrant,cycle:1}}));
  assert.equal(f.service.snapshot(s.runId).integrity.valid,false,'понижение счетчика должно нарушать integrity');
 });
+test('unchanged failed implementation is repaired under the approved plan',async(t)=>{
+ const f=await fixture(t,{implementationFails:1});let s=await f.settle(await f.intake());const approvedId=s.runId;
+ s=await f.approve(s);s=await f.settle(s);
+ assert.equal(s.status,'passed',JSON.stringify({status:s.status,nodes:s.nodes.map(n=>({id:n.id,status:n.status,reason:n.reason}))}));
+ assert.notEqual(s.runId,approvedId);
+ assert.equal(f.service.store.readRun(s.runId).policyGrant.cycle,1);
+ assert.equal(f.calls.filter(c=>c.action==='ai-implement').length,2);
+});
 test('warnings-only uncertain analysis continues to planning instead of stopping a local task',async(t)=>{
  const f=await fixture(t,{uncertain:true});const s=await f.settle(await f.intake());
  assert.equal(s.status,'waiting-for-human');assert.equal(s.phase,'execution');
@@ -197,6 +206,50 @@ test('technical planner failure preserves the verified analysis after a runtime 
  assert.equal(s.status,'waiting-for-human');
  assert.deepEqual(f.calls.map(c=>c.action),['ai-analyze','ai-plan','ai-plan']);
  assert.deepEqual(f.calls.at(-1).priorEvidence.analysis.result.analysis,analysis);
+});
+
+test('out-of-scope planning read is rejected and automatically replanned without broadening access',async(t)=>{
+ const f=await fixture(t);
+ const execute=f.service.adapters.execute;let firstPlan=true;
+ f.service.adapters.execute=async(args)=>{
+  const result=await execute(args);
+  if(args.node.action.id==='ai-plan' && firstPlan){
+   firstPlan=false;
+   result.output.steps=[{...output.steps[0],readPaths:['private/secret.ts']}];
+  }
+  return result;
+ };
+ const s=await f.settle(await f.intake());
+ assert.equal(s.status,'waiting-for-human');
+ assert.deepEqual(f.calls.map(call=>call.action),['ai-analyze','ai-plan','ai-plan']);
+ assert.match(f.calls.at(-1).priorEvidence.feedback[0],/readPaths только внутри/);
+ assert.equal(f.calls.some(call=>call.action==='ai-implement'),false);
+});
+
+test('natural task planning repairs missing per-criterion coverage before human approval',async(t)=>{
+ const steps=[{...output.steps[0],requirementIds:['req-001','req-002']}];
+ const f=await fixture(t,{steps});
+ const original={id:'req-001',title:'Добавить проверку email',mandatory:true,
+  verification:{method:'check',checkIds:['check-tests'],criterion:'Добавить проверку email',paths:['src/form.mjs']}};
+ const specific={id:'req-002',title:'Валидация email',mandatory:true,
+  verification:{method:'check',checkIds:['check-tests'],criterion:'Валидация email',paths:['src/form.mjs']}};
+ const proposal={requirements:[original,specific],optionalImprovements:[],constraints:[],assumptions:[],unknowns:[]};
+ const execute=f.service.adapters.execute;let firstPlan=true;
+ f.service.adapters.execute=async(args)=>{
+  const result=await execute(args);
+  if(args.node.action.id==='ai-plan'){
+   result.output.contractProposal={...proposal,requirements:firstPlan?[original]:[original,specific]};
+   firstPlan=false;
+  }
+  return result;
+ };
+ const s=await f.settle(await f.intake());
+ assert.equal(s.status,'waiting-for-human');
+ assert.deepEqual(f.calls.map(call=>call.action),['ai-analyze','ai-plan','ai-plan']);
+ assert.equal(s.proof.contract.requirements.length,1);
+ assert.equal(s.proof.contract.requirements[0].title,'Валидация email');
+ assert.ok(s.proof.contract.requirements.every(item=>item.workIds.length>0));
+ assert.equal(f.calls.some(call=>call.action==='ai-implement'),false);
 });
 
 test('unapproved plan can be revised after runtime changes without transferring write permission',async(t)=>{
@@ -405,10 +458,9 @@ test('final review сохраняет подтвержденные partial chang
  assert.equal(snapshot.capabilities.requestReplan.allowed,true);
  snapshot=await f.service.command(snapshot.runId,'replan',request(snapshot));
  snapshot=await f.settle(await f.approve(snapshot));
- assert.equal(snapshot.status,'failed');
- snapshot=await f.service.command(snapshot.runId,'replan',request(snapshot));
- snapshot=await f.settle(await f.approve(snapshot));
  assert.equal(snapshot.status,'passed');
+ assert.equal(f.service.store.readRun(snapshot.runId).policyGrant.cycle,1,
+   'Неизмененная failed-реализация должна исправляться автоматически');
  snapshot=await f.service.command(snapshot.runId,'replan',request(snapshot));
  snapshot=await f.settle(await f.approve(snapshot));
  assert.equal(snapshot.status,'passed');

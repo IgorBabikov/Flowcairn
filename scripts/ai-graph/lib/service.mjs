@@ -37,16 +37,15 @@ import { POLICY_HASH, REGISTRY_HASH, resolveAction, pathAllowed } from './regist
 import { initialNodes, reconcile, calculateCapabilities } from './state.mjs';
 import { buildHistoricalReviewEvidence, MAX_HISTORICAL_EXECUTIONS } from './review-evidence.mjs';
 import { ExternalConsentSchema, makeExternalConsent, providerToolchain } from './providers.mjs';
+import { safeReason } from './failure-reason.mjs';
+import { autonomyForNodes } from './autonomy-policy.mjs';
+import { canReplanRejectedImplementation } from './manual-continuation.mjs';
 
 const fail = (code, message) => {
   throw new GraphError(code, message);
 };
 const unique = (values) => [...new Set(values)];
 const externalProvider = (provider) => ['claude', 'cursor'].includes(provider);
-const safeReason = (error) =>
-  error instanceof GraphError
-    ? `${error.code}: ${sanitizeText(error.message)}`
-    : 'INTERNAL_ERROR: операция не завершена; требуется проверка evidence';
 const processDead = (pid) => {
   try {
     process.kill(pid, 0);
@@ -122,8 +121,11 @@ export class WorkflowService {
     if (snapshotRequested && legacy?.snapshotHash !== project.bootstrap?.snapshotHash) fail('STALE_CONTEXT', 'Исходный снимок изменился; подтвердите актуальные файлы');
     if (untracked.some((file) => !project.bootstrap?.untrackedCandidates.includes(file))) fail('INTAKE_SCOPE', 'Файл не входит в текущий список snapshot candidates');
     if (!requestedScope && project.scopeCandidates.length > 64) fail('INTAKE_SCOPE_LIMIT', 'Выберите не более 64 областей задачи');
-    const inferredScope = unique([...project.scopeCandidates, ...untracked.filter((file) => file !== '.flowcairn.json').map((file) => file.includes('/') ? file.split('/')[0] : file)]);
+    const inferredScope = product && this.adapters.selectTaskScope
+      ? this.adapters.selectTaskScope(body.description, project.scopeCandidates)
+      : unique([...project.scopeCandidates, ...untracked.filter((file) => file !== '.flowcairn.json').map((file) => file.includes('/') ? file.split('/')[0] : file)]);
     const task = TaskInputSchema.parse({ id: `TASK-${suffix.toUpperCase()}`, goal: product ? body.title : body.prompt.slice(0, 4000),
+      ...(product ? { intakeKind: 'natural' } : {}),
       ...(product ? { taskNumber: body.taskNumber } : {}),
       instructions: product ? body.description : body.prompt, scope: product ? inferredScope : requestedScope ?? inferredScope,
       contextPaths: project.contextPaths, includeUntracked: untracked, acceptance: [product ? body.description.slice(0, 4000) : body.prompt.slice(0, 4000)], checks: project.checks });
@@ -269,6 +271,8 @@ export class WorkflowService {
       return null;
     try {
       this.adapters.verifyBinding(state.binding);
+      if (state.binding.mode === 'direct' && realpathSync(state.binding.worktree) === this.root)
+        return { workspacePath: '.', mode: 'direct' };
       const relative = path.relative(this.root, realpathSync(state.binding.worktree)).split(path.sep).join('/');
       if (
         !relative ||
@@ -356,9 +360,26 @@ export class WorkflowService {
         runId = next.runId;
         continue;
       }
+      if (plan.stage === 'planning' && state.status === 'failed' && caps.run.requestReplan.allowed) {
+        const planner = plan.nodes.find((node) => node.action.id === 'ai-plan');
+        const failed = planner && state.nodes[planner.id];
+        const receiptId = failed?.receipts.at(-1);
+        const receipt = receiptId && ReceiptSchema.parse(this.store.readObject('receipts', receiptId));
+        const reasonCode = failed?.reason?.split(':')[0];
+        if (failed?.status !== 'failed' || !['PLANNING_READ_SCOPE', 'CONTRACT_ANALYSIS_COVERAGE'].includes(reasonCode) ||
+            receipt?.phase !== 'finished' || receipt.termination?.stopped !== true ||
+            receipt.termination.uncertain || receipt.beforeFingerprint !== receipt.afterFingerprint) return;
+        const feedback = reasonCode === 'PLANNING_READ_SCOPE'
+          ? `Предыдущий план предложил чтение вне разрешенной области. Используй readPaths только внутри ${JSON.stringify([...new Set([...task.scope, ...task.contextPaths])].sort())}; не расширяй права.`
+          : 'Предыдущий план свел отдельные обязательные пункты анализа к одному требованию. Для каждого пункта создай отдельное mandatory requirement с проверкой и свяжи его с implementation step через requirementIds. Не расширяй scope или права.';
+        const next = await this.command(runId, 'replan', { ...request, feedback }, { actor: state.actor });
+        runId = next.runId;
+        continue;
+      }
       if (plan.stage === 'execution' && state.status === 'failed') {
         const failed = plan.nodes.filter((node) => state.nodes[node.id].status === 'failed');
-        const repairable = failed.length === 1 && (failed[0].action.id.startsWith('check-') || failed[0].action.id === 'ai-review');
+        const repairable = failed.length === 1 &&
+          (failed[0].action.id.startsWith('check-') || ['ai-review', 'ai-implement'].includes(failed[0].action.id));
         const definition = failed[0];
         const lastId = definition && state.nodes[definition.id].receipts.at(-1);
         const receipt = lastId && ReceiptSchema.parse(this.store.readObject('receipts', lastId));
@@ -369,7 +390,11 @@ export class WorkflowService {
           return result.success && result.data.verdict === 'fail' && result.data.findings.some((finding) => finding.severity === 'blocking');
         });
         const knownCheck = definition?.action.id.startsWith('check-') && receipt?.checks.some((check) => check.exitCode !== null && check.exitCode !== 0 && !check.passed);
-        if (!repairable || (!semanticReview && !knownCheck) || receipt?.phase !== 'finished' || !receipt.termination?.stopped || receipt.termination.uncertain) return;
+        const rejectedImplementation = definition?.action.id === 'ai-implement' &&
+          receipt?.verdict === 'fail' && receipt.beforeFingerprint === receipt.afterFingerprint &&
+          receipt.changedFiles.length === 0;
+        if (!repairable || (!semanticReview && !knownCheck && !rejectedImplementation) ||
+            receipt?.phase !== 'finished' || !receipt.termination?.stopped || receipt.termination.uncertain) return;
         const original = state.policyGrant ?? {
           runId: state.runId, planHash: state.planHash,
           receiptId: state.nodes['approve-plan'].receipts.at(-1),
@@ -580,7 +605,7 @@ export class WorkflowService {
     if (workflow === 'autonomous' && stage === 'planning' && !this.#hasReadConsent())
       fail('ONBOARDING_REQUIRED', 'Нет локального согласия на чтение выбранным AI');
     const compiled = (stage === 'planning' ? compilePlanningPlan : compilePlan)(task, context).plan;
-    const staged = { ...compiled, ...(stage ? { stage } : {}), ...(workflow === 'autonomous' ? { workflow, autonomy: { maxRepairCycles: 2, maxDurationMs: 1800000 } } : {}) };
+    const staged = { ...compiled, ...(stage ? { stage } : {}), ...(workflow === 'autonomous' ? { workflow, autonomy: autonomyForNodes(draft?.nodes ?? compiled.nodes) } : {}) };
     const proposal = draft ? { ...staged, nodes: draft.nodes, skills: context.skills.filter((skill) => draft.nodes.some((node) => node.skills.includes(skill.id))) } : staged;
     proposal.taskContract = taskContract ?? proposal.taskContract ?? buildTaskContract(task, {
       steps: proposal.nodes.filter((node) => node.action.id === 'ai-implement').map((node) => ({ id: node.id, nodeId: node.id, paths: node.resources.writes })),
@@ -908,6 +933,9 @@ export class WorkflowService {
       )
     )
       capabilities.run.recover = { allowed: true, reason: null };
+    if (!lock && canReplanRejectedImplementation(state, plan,
+      (id) => ReceiptSchema.parse(this.store.readObject('receipts', id))))
+      capabilities.run.requestReplan = { allowed: true, reason: null };
     if (!state.binding && this.adapters.readiness) {
       const readiness = this.adapters.readiness(this.store.readObject('tasks', state.taskHash));
       if (!readiness.available)

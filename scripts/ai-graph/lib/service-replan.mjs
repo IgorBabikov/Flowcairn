@@ -4,6 +4,8 @@ import { AIAnalysisResultSchema, AIPlanningResultSchema, ReceiptSchema, assertJs
 import { compileTaskProposal } from './planning.mjs';
 import { compilePlan, validatePlan } from './validator.mjs';
 import { buildTaskContract } from './task-contract.mjs';
+import { repairExecutionSteps } from './repair-decomposition.mjs';
+import { autonomyForNodes } from './autonomy-policy.mjs';
 
 const fail = (code, message) => { throw new GraphError(code, message); };
 const unique = (values) => [...new Set(values)];
@@ -71,17 +73,13 @@ export async function replanRun(host, { state, task, plan, request, digest, acto
       fail('PLANNING_INCOMPLETE', 'Сначала выполните AI-планирование');
     }
   } else if (plan.stage === 'execution' && !request.draft) {
-    // A fix keeps semantic task granularity, with new attempts/checks/review and fresh approval.
-    const implementations = plan.nodes.filter((node) => node.action.id === 'ai-implement');
-    const ids = new Set(implementations.map((node) => node.id));
-    const steps = implementations.map((node, index) => ({ id: `fix-${index + 1}`, title: node.title,
-      outcome: node.outcome, paths: node.resources.writes,
-      requirementIds: plan.taskContract?.requirements.filter((item) => item.workIds.includes(node.id)).map((item) => item.id),
-      needs: node.needs.filter((id) => ids.has(id)).map((id) => `fix-${implementations.findIndex((n) => n.id === id) + 1}`) }));
+    // A timed-out broad step is subdivided without changing the approved write scope.
+    const { steps, repairReadPaths, isolatedReadStepIds } = repairExecutionSteps(plan, state,
+      (id) => ReceiptSchema.parse(host.store.readObject('receipts', id)));
     const proposal = { summary: 'Исправить по evidence предыдущей версии', verdict: 'pass', skillsUsed: [],
       findings: [], changedFiles: [], edits: [], plan: [], steps };
-    const repairReadPaths = Object.fromEntries(implementations.map((node, index) => [`fix-${index + 1}`, node.resources.reads]));
-    const executable = compileTaskProposal(task, proposal, { ...context, repairReadPaths }).plan;
+    const executable = compileTaskProposal(task, proposal, { ...context, repairReadPaths,
+      isolatedReadStepIds }).plan;
     nextDraft = { nodes: executable.nodes };
     nextContract = executable.taskContract;
   }
@@ -97,7 +95,7 @@ export async function replanRun(host, { state, task, plan, request, digest, acto
     if (nextContract && request.draft) nextContract = buildTaskContract(task, { previousContract: nextContract,
       steps: nextDraft.nodes.filter((node) => node.action.id === 'ai-implement').map((node) => ({ id: node.id, nodeId: node.id, paths: node.resources.writes })) });
     validatePlan(
-      { ...compilePlan(task, context).plan, ...(plan.workflow === 'autonomous' ? { workflow: 'autonomous', autonomy: plan.autonomy, stage: nextStage } : {}), ...(nextContract ? { taskContract: nextContract } : {}), nodes: nextDraft.nodes, skills: context.skills.filter((skill) => nextDraft.nodes.some((node) => node.skills.includes(skill.id))) },
+      { ...compilePlan(task, context).plan, ...(plan.workflow === 'autonomous' ? { workflow: 'autonomous', autonomy: autonomyForNodes(nextDraft.nodes), stage: nextStage } : {}), ...(nextContract ? { taskContract: nextContract } : {}), nodes: nextDraft.nodes, skills: context.skills.filter((skill) => nextDraft.nodes.some((node) => node.skills.includes(skill.id))) },
       task,
       context,
     );

@@ -18,6 +18,7 @@ const SetupSchema = z.strictObject({
   profileHash: z.string().regex(/^[a-f0-9]{64}$/).nullable(),
   provider: z.enum(['codex', 'claude', 'cursor']), model: ProjectProfileSchema.shape.ai.shape.model,
   modelMode: z.enum(['provider', 'manual', 'auto']), reasoningEffort: effort,
+  workspaceMode: z.enum(['direct', 'worktree']).optional(),
   providerPath: z.string().max(1024).optional(), providerVersion: z.string().max(160).optional(),
   reviewModel: ProjectProfileSchema.shape.ai.shape.model.optional(), reviewReasoningEffort: effort.optional(),
   testPolicy: z.enum(['keep', 'add']), coverage: z.boolean(), readConsent: z.boolean(),
@@ -68,6 +69,7 @@ export function inspectOnboarding(root) {
     ],
     values: {
       provider: profile?.ai.provider ?? defaultProvider(), model: profile?.ai.model ?? '',
+      workspaceMode: profile?.workspaceMode ?? 'worktree',
       modelMode: profile?.ai.modelMode ?? 'manual', reasoningEffort: inherited?.reasoningEffort ?? profile?.ai.reasoningEffort ?? 'medium',
       ...(inherited ? { model: inherited.model } : {}),
       ...(profile?.ai.reviewModel ? { reviewModel: profile.ai.reviewModel } : {}),
@@ -190,6 +192,7 @@ export function onboardingInput(options, profileHash) {
   return SetupSchema.parse({
     profileHash, provider: options.provider, model: options.model,
     modelMode: options['model-mode'] ?? 'manual', reasoningEffort: options['reasoning-effort'] ?? 'medium',
+    ...(options['workspace-mode'] ? { workspaceMode: options['workspace-mode'] } : {}),
     ...(options['provider-path'] ? { providerPath: options['provider-path'] } : {}),
     ...(options['provider-version'] ? { providerVersion: options['provider-version'] } : {}),
     ...(options['review-model'] ? { reviewModel: options['review-model'] } : {}),
@@ -216,19 +219,21 @@ function configuredProfile(root, previous, value) {
     if (checks.some((id) => !available.checks.includes(id))) fail('CHECK_SCRIPT_MISSING', 'Выбранная проверка не имеет существующего script package.json.');
     checkSettings = { checkMode, checks, checkScripts: Object.fromEntries(checks.map((id) => [id, available.checkScripts[id]])) };
   }
+  const workspaceMode = value.workspaceMode ?? previous.workspaceMode ?? 'worktree';
   return ProjectProfileSchema.parse({ ...previous,
       ...checkSettings,
+      workspaceMode,
       ai: { ...extraAi, provider:value.provider, model:value.model, modelMode:value.modelMode, reasoningEffort:value.reasoningEffort,
         ...(value.reviewModel ? {reviewModel:value.reviewModel} : {}), ...(value.reviewReasoningEffort ? {reviewReasoningEffort:value.reviewReasoningEffort} : {}),
         ...(value.providerPath ? {providerPath:value.providerPath} : {}), ...(value.providerVersion ? {providerVersion:value.providerVersion} : {}),
       },
-      onboarding:{version:1,readConsent:value.readConsent,readScope:'tracked-project',testPolicy:value.testPolicy,coverage:value.coverage,instructions:'preserve'},
+      onboarding:{version:1,readConsent:value.readConsent,readScope:workspaceMode === 'direct' ? 'project-files' : 'tracked-project',testPolicy:value.testPolicy,coverage:value.coverage,instructions:'preserve'},
     });
 }
 
 function sameProfileStructure(previous, next) {
-  const { ai: _previousAi, onboarding: _previousOnboarding, checkMode: _previousMode, checks: _previousChecks, checkScripts: _previousScripts, ...previousStructure } = previous;
-  const { ai: _nextAi, onboarding: _nextOnboarding, checkMode: _nextMode, checks: _nextChecks, checkScripts: _nextScripts, ...nextStructure } = next;
+  const { ai: _previousAi, onboarding: _previousOnboarding, workspaceMode: _previousWorkspace, checkMode: _previousMode, checks: _previousChecks, checkScripts: _previousScripts, ...previousStructure } = previous;
+  const { ai: _nextAi, onboarding: _nextOnboarding, workspaceMode: _nextWorkspace, checkMode: _nextMode, checks: _nextChecks, checkScripts: _nextScripts, ...nextStructure } = next;
   return hashObject(previousStructure) === hashObject(nextStructure);
 }
 

@@ -154,7 +154,8 @@ export function calculateCapabilities(
         usable &&
           state.status !== 'running' &&
           (state.status !== 'uncertain' || state.recovered === true || semanticUncertainty) &&
-          state.planVersion <= state.maxReplans,
+          (state.planVersion <= state.maxReplans ||
+            (state.status === 'uncertain' && (state.recovered === true || semanticUncertainty) && state.planVersion < 100)),
         reason,
       ),
     };
@@ -194,7 +195,8 @@ export function calculateCapabilities(
         usable &&
           state.status !== 'running' &&
           (state.status !== 'uncertain' || state.recovered === true || semanticUncertainty) &&
-          state.planVersion <= state.maxReplans,
+          (state.planVersion <= state.maxReplans ||
+            (state.status === 'uncertain' && (state.recovered === true || semanticUncertainty) && state.planVersion < 100)),
         reason,
       ),
       openReceipt: capability(

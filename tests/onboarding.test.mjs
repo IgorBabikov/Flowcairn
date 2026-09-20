@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { initializeProject, printInitialization } from '../bin/flowcairn.mjs';
 import { inspectCodexInstallation } from '../scripts/ai-graph/lib/runner.mjs';
+import { codexModelSettings } from '../scripts/ai-graph/lib/codex-settings.mjs';
 
 function fixture(t) {
   const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'flowcairn-onboarding-')));
@@ -35,7 +36,7 @@ function simulatedCursor(root) {
   return executable;
 }
 const testClaude = path.resolve('tests/fixtures/verified-claude/node_modules/@anthropic-ai/claude-code/bin/claude.exe');
-const options = {provider:'claude', 'provider-path':testClaude, 'model-mode':'provider', 'reasoning-effort':'high', 'test-policy':'keep', 'read-consent':true};
+const options = {provider:'claude', 'provider-path':testClaude, 'workspace-mode':'worktree', 'model-mode':'provider', 'reasoning-effort':'high', 'test-policy':'keep', 'read-consent':true};
 
 test('явный onboarding сохраняет проверенный CLI и политику без навязанного coverage', t => {
   const root = fixture(t);
@@ -55,6 +56,11 @@ test('старый init не предоставляет разрешение н�
 
 test('Codex init без ID модели сохраняет выбор из самого Codex', t => {
   if (!requireVerifiedCodex(t)) return;
+  try { codexModelSettings(); }
+  catch {
+    t.skip('В CLI Codex не заданы одновременно модель и уровень усилия.');
+    return;
+  }
   const result = initializeProject(fixture(t), {provider:'codex'});
   assert.equal(result.profile.ai.model, 'provider-default');
   assert.equal(result.profile.ai.modelMode, 'provider');

@@ -35,6 +35,10 @@ export const RelativePath = z
   .string()
   .min(1)
   .max(512)
+  // Keep the basic boundary visible in provider JSON Schema as well as in Zod.
+  // A simple provider-compatible pattern rejects root and absolute paths;
+  // the refinement below remains the full trusted path check.
+  .regex(/^(?:[^./\\]|\.[^./\\])[^\\]*$/)
   .refine((value) => {
     if (
       value.includes('\\') ||
@@ -97,6 +101,7 @@ export const TaskContractSchema = z.strictObject({
   version: z.literal(1),
   goal: Text,
   instructionsHash: Hash,
+  acceptanceHash: Hash.optional(),
   requirements: z.array(RequirementSchema).min(1).max(40),
   optionalImprovements: z.array(Text).max(20),
   constraints: z.array(Text).max(32),
@@ -117,6 +122,7 @@ export const TaskContractProposalSchema = z.strictObject({
 });
 export const TaskInputSchema = z.strictObject({
   id: z.string().regex(/^[A-Z][A-Z0-9-]{2,40}$/),
+  intakeKind: z.literal('natural').optional(),
   goal: Text,
   taskNumber: z.string().trim().min(1).max(80).optional(),
   planningFeedback: z.array(z.string().trim().min(1).max(4000)).max(10).optional(),
@@ -175,7 +181,7 @@ export const GraphPlanSchema = z.strictObject({
   workflow: z.literal('autonomous').optional(),
   analysisArtifact: Hash.optional(),
   taskContract: TaskContractSchema.optional(),
-  autonomy: z.strictObject({ maxRepairCycles: z.literal(2), maxDurationMs: z.literal(1800000) }).optional(),
+  autonomy: z.strictObject({ maxRepairCycles: z.literal(2), maxDurationMs: z.number().int().min(1800000).max(7200000) }).optional(),
   contextHash: Hash.optional(),
   schemaVersion: z.literal(2),
   taskHash: Hash,
@@ -366,6 +372,9 @@ const BindingSchema = z.strictObject({
   sourceHash: Hash,
   runId: Id.optional(),
   owner: z.string().max(120).optional(),
+  mode: z.literal('direct').optional(),
+  outputPaths: z.array(RelativePath).max(128).optional(),
+  previousRunId: Id.optional(),
 });
 export const RunStateSchema = z.strictObject({
   schemaVersion: z.literal(2),

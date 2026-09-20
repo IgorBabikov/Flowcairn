@@ -142,6 +142,16 @@ test('orphan ownership allows only recovery until stop proof is persisted', () =
   waiting.recovered = true;
   capabilities = calculateCapabilities(waiting, plan, { runner });
   assert.equal(capabilities.run.requestReplan.allowed, true);
+  waiting.planVersion = waiting.maxReplans + 1;
+  capabilities = calculateCapabilities(waiting, plan, { runner });
+  assert.equal(capabilities.run.requestReplan.allowed, true,
+    'после подтвержденной остановки можно создать новый план с новым human gate');
+  waiting.recovered = false;
+  capabilities = calculateCapabilities(waiting, plan, { runner });
+  assert.equal(capabilities.run.requestReplan.allowed, false);
+  capabilities = calculateCapabilities(waiting, plan, { runner, semanticUncertainty: true });
+  assert.equal(capabilities.run.requestReplan.allowed, true,
+    'Завершенная неопределенная проверка допускает новый согласуемый план');
 });
 
 test('superseded run exposes only terminal recovery for an orphan recovery owner', () => {

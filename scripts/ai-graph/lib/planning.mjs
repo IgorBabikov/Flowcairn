@@ -3,6 +3,7 @@ import { AIPlanningResultSchema, RelativePath, assertJsonBounds } from './schema
 import { compilePlan, validatePlan } from './validator.mjs';
 import { resolveAction, pathAllowed, contextPathAllowed } from './registry.mjs';
 import { buildTaskContract } from './task-contract.mjs';
+import { autonomyForNodes } from './autonomy-policy.mjs';
 
 const fail = (code, message) => { throw new GraphError(code, message); };
 const selected = (nodes, skills) => skills.filter((skill) => nodes.some((node) => node.skills.includes(skill.id)));
@@ -29,7 +30,7 @@ export function compilePlanningPlan(task, context) {
       else planner.needs = ['provider-consent'];
     }
     const nodes = [...(consent ? [consent] : []), ...(reuseAnalysis ? [] : [analyze]), planner, terminal];
-    return validatePlan({ ...baseline, workflow: 'autonomous', autonomy: { maxRepairCycles: 2, maxDurationMs: 1800000 },
+    return validatePlan({ ...baseline, workflow: 'autonomous', autonomy: autonomyForNodes(nodes),
       ...(context.analysisArtifact ? { analysisArtifact: context.analysisArtifact } : {}), stage: 'planning', skills: selected(nodes, context.skills), nodes }, task, context);
   }
   const approve = structuredClone(baseline.nodes.find((n) => n.action.id === 'human-approve'));
@@ -95,6 +96,8 @@ export function compileTaskProposal(task, proposalInput, context) {
   const readPathsFor = (step, visited = new Set()) => {
     if (visited.has(step.id)) return [];
     visited.add(step.id);
+    if (context.isolatedReadStepIds?.includes(step.id))
+      return [...step.paths, ...(step.readPaths ?? []), ...(context.repairReadPaths?.[step.id] ?? [])];
     return [...step.paths, ...(step.readPaths ?? []), ...(context.repairReadPaths?.[step.id] ?? []),
       ...step.needs.flatMap((id) => readPathsFor(byId.get(id), visited))];
   };
@@ -120,5 +123,5 @@ export function compileTaskProposal(task, proposalInput, context) {
   }
   const taskContract = buildTaskContract(task, { proposal: proposal.contractProposal, analysis: context.analysis,
     previousContract: context.taskContract, steps: ordered });
-  return validatePlan({ ...baseline, taskContract, stage: 'execution', ...(context.workflow === 'autonomous' ? { workflow: 'autonomous', autonomy: { maxRepairCycles: 2, maxDurationMs: 1800000 } } : {}), nodes: executable, skills: selected(executable, context.skills) }, task, context);
+  return validatePlan({ ...baseline, taskContract, stage: 'execution', ...(context.workflow === 'autonomous' ? { workflow: 'autonomous', autonomy: autonomyForNodes(executable) } : {}), nodes: executable, skills: selected(executable, context.skills) }, task, context);
 }

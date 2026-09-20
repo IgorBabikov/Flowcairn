@@ -73,6 +73,8 @@ const CHECK_SCRIPT_CANDIDATES = Object.freeze({
 export const ProjectProfileSchema = z.strictObject({
   version: z.literal(1),
   integrationBranch: branch,
+  // Older installations retain their isolated worktree until explicitly migrated.
+  workspaceMode: z.enum(['direct', 'worktree']).optional(),
   packageManager: z.enum(['npm', 'pnpm', 'yarn']),
   contextPaths: paths,
   checks: z
@@ -112,7 +114,7 @@ export const ProjectProfileSchema = z.strictObject({
   onboarding: z.strictObject({
     version: z.literal(1),
     readConsent: z.boolean(),
-    readScope: z.literal('tracked-project'),
+    readScope: z.enum(['tracked-project', 'project-files']),
     testPolicy: z.enum(['keep', 'add']),
     coverage: z.boolean(),
     instructions: z.literal('preserve'),
@@ -296,7 +298,8 @@ export function projectProfileHash(root) {
 export function projectContextPaths(root, profile = loadProjectProfile(root)) {
   const context = [
     ...new Set([
-      ...['AGENTS.md', ...(profile.ai.provider === 'codex' ? ['AGENTS.override.md'] : []), 'AGENT.md', 'README.md'].filter((name) => existsSync(path.join(root, name))),
+      ...['AGENTS.md', ...(profile.ai.provider === 'codex' ? ['AGENTS.override.md'] : []), 'AGENT.md',
+        ...(profile.workspaceMode === 'direct' ? [] : ['README.md'])].filter((name) => existsSync(path.join(root, name))),
       ...profile.contextPaths,
       ...profile.manifests.filter((file) => /(?:^|\/)package\.json$/.test(file)),
     ]),

@@ -161,7 +161,7 @@ function assertPrivateDirectory(candidate, code) {
   return resolved;
 }
 
-function validateAllocation(root, worktree, outputDirectory, provider) {
+function validateAllocation(root, worktree, outputDirectory, provider, direct = false) {
   const rootPath = realDirectory(root, 'RUNNER_ROOT_INVALID');
   if (provider === 'codex' && isSystemTemporary(rootPath)) {
     fail('RUNNER_TEMP_UNSAFE', 'Runtime root внутри системного temp не поддерживается на macOS');
@@ -171,18 +171,18 @@ function validateAllocation(root, worktree, outputDirectory, provider) {
     'RUNNER_STORAGE_INVALID',
   );
   assertNoSymlinkAncestors(rootPath, graphRoot, 'RUNNER_STORAGE_INVALID');
-  const workspaces = assertPrivateDirectory(
+  const workspaces = direct ? null : assertPrivateDirectory(
     path.join(rootPath, '.ai-orchestrator', 'worktrees'),
     'RUNNER_WORKSPACE_INVALID',
   );
   const worktreePath = realDirectory(worktree, 'RUNNER_WORKTREE_INVALID');
   if (
-    !isWithin(worktreePath, workspaces) ||
+    (direct ? worktreePath !== rootPath : !isWithin(worktreePath, workspaces)) ||
     (provider === 'codex' && isSystemTemporary(worktreePath))
   ) {
-    fail('RUNNER_WORKTREE_INVALID', 'Worktree не принадлежит trusted Graph allocation');
+    fail('RUNNER_WORKTREE_INVALID', 'Рабочий каталог не принадлежит текущему проекту');
   }
-  assertNoSymlinkAncestors(workspaces, worktreePath, 'RUNNER_WORKTREE_INVALID');
+  if (!direct) assertNoSymlinkAncestors(workspaces, worktreePath, 'RUNNER_WORKTREE_INVALID');
   const outputPath = assertPrivateDirectory(outputDirectory, 'RUNNER_OUTPUT_INVALID');
   if (!isWithin(outputPath, graphRoot)) {
     fail('RUNNER_OUTPUT_INVALID', 'Output directory находится вне private Graph storage');
@@ -407,7 +407,7 @@ function localCheckToolchain(profile) {
   return Object.freeze({ node: NODE_BINARY, entry, digest: sha256(canonicalJson(identity)), identity });
 }
 
-function makeLocalCheckCommand({ root, worktree, node, profile, toolchain, dependencyToolchain }) {
+function makeLocalCheckCommand({ root, worktree, node, profile, toolchain, dependencyToolchain, outputPath }) {
   const script = resolveProjectCheckScript(root, node.action.id, profile);
   return {
     command: {
@@ -415,7 +415,8 @@ function makeLocalCheckCommand({ root, worktree, node, profile, toolchain, depen
       args: [toolchain.entry, 'run', script],
       cwd: worktree,
       env: safeEnvironment({
-        HOME: worktree,
+        HOME: outputPath,
+        NPM_CONFIG_CACHE: path.join(outputPath, 'npm-cache'),
         NPM_CONFIG_USERCONFIG: '/dev/null',
         NPM_CONFIG_UPDATE_NOTIFIER: 'false',
         NPM_CONFIG_FUND: 'false',
@@ -654,7 +655,8 @@ export async function runRegisteredAction({
   const localCheck = ['check-typecheck', 'check-lint', 'check-tests', 'check-build'].includes(action.id);
   if (localCheck && !hasTrustedLocalChecksConsent(root, profile))
     fail('CHECK_LOCAL_CONSENT_REQUIRED', 'trusted-local требует подтверждение exact scripts текущего профиля.');
-  const allocation = validateAllocation(root, worktree, outputDirectory, localCheck ? 'local' : profile.ai.provider);
+  const allocation = validateAllocation(root, worktree, outputDirectory, localCheck ? 'local' : profile.ai.provider,
+    profile.workspaceMode === 'direct');
   if (action.id.startsWith('check-') && !localCheck)
     fail('RUNNER_CHECK_CONTAINMENT_UNAVAILABLE', 'Незарегистрированная project-проверка не исполняется локально.');
   const toolchain = localCheck ? localCheckToolchain(profile) : runnerToolchain(profile);

@@ -83,8 +83,10 @@ export function WorkflowPanel({ snapshot, plan, busy, stateUnavailable = false, 
       </details>
     </>}
     {done && snapshot.delivery && <section className="plan-boundaries">
-      <h3>Рабочая копия с результатом</h3>
-      <p>Откройте эту папку внутри проекта в редакторе для личного ревью, коммита и PR.</p>
+      <h3>{snapshot.delivery.mode === 'direct' ? 'Результат в текущем проекте' : 'Рабочая копия с результатом'}</h3>
+      <p>{snapshot.delivery.mode === 'direct'
+        ? 'Изменения уже находятся в папке проекта. Просмотрите их перед коммитом и PR.'
+        : 'Откройте эту папку внутри проекта в редакторе для личного ревью, коммита и PR.'}</p>
       <code>{snapshot.delivery.workspacePath}</code>
     </section>}
     {(done || approved) && <>

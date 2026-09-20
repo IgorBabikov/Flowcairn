@@ -7,11 +7,11 @@ const fail = (code, message) => { throw new GraphError(code, message); };
 const normalize = (value) => value.trim().replace(/\s+/g, ' ');
 const requirementId = (title) => `req-${hashObject(normalize(title)).slice(0, 16)}`;
 
-function referencesExistingRequirements(title, existingIds) {
-  const prefix = /^(req-[a-z0-9-]+(?:\s*[/,]\s*(?:req-[a-z0-9-]+|[0-9]{3}))*)\s*:\s*\S/.exec(title.trim());
-  if (!prefix) return false;
+function referencedDetail(title, existingIds) {
+  const prefix = /^(req-[a-z0-9-]+(?:\s*[/,]\s*(?:req-[a-z0-9-]+|[0-9]{3}))*)\s*:\s*(\S[\s\S]*)$/.exec(title.trim());
+  if (!prefix) return null;
   const ids = prefix[1].split(/\s*[/,]\s*/).map((id) => id.startsWith('req-') ? id : `req-${id}`);
-  return ids.every((id) => existingIds.has(id));
+  return ids.every((id) => existingIds.has(id)) ? prefix[2].trim() : null;
 }
 
 /** Deterministic effort selection never changes permissions or removes configured checks. */
@@ -60,16 +60,22 @@ function bindWork(requirements, steps) {
 /** AI proposes semantics; the runtime preserves the original obligations and allowed verification. */
 export function buildTaskContract(task, { proposal = null, analysis = null, previousContract = null, steps = [] } = {}) {
   const instructionsHash = hashObject(task.instructions);
+  const omnibusAcceptance = (task.intakeKind === 'natural' || (!task.intakeKind && task.taskNumber)) &&
+    task.acceptance.length === 1 &&
+    normalize(task.acceptance[0]) === normalize(task.instructions.slice(0, 4000));
   if (previousContract) {
     const previous = TaskContractSchema.parse(previousContract);
+    const decomposed = omnibusAcceptance && previous.acceptanceHash === hashObject(task.acceptance);
     if (previous.goal !== task.goal || previous.instructionsHash !== instructionsHash ||
         hashObject(previous.scope) !== hashObject(task.scope) || hashObject(previous.forbiddenPaths) !== hashObject(task.forbiddenPaths) ||
-        previous.requirements.filter((item) => item.origin === 'acceptance').length !== task.acceptance.length)
+        (previous.acceptanceHash && !decomposed) ||
+        (!decomposed && previous.requirements.filter((item) => item.origin === 'acceptance').length !== task.acceptance.length) ||
+        (decomposed && previous.requirements.some((item) => item.origin !== 'analysis' || !item.mandatory)))
       fail('CONTRACT_DRIFT', 'Исправление не может изменить исходную задачу и ее границы');
     const rigorLevels = ['light', 'standard', 'high'];
     if (rigorLevels.indexOf(previous.rigor.level) < rigorLevels.indexOf(selectTaskRigor(task).level))
       fail('CONTRACT_RIGOR_WEAKENED', 'Контракт не может уменьшить необходимую строгость проверки');
-    for (const [index, title] of task.acceptance.entries()) {
+    for (const [index, title] of (decomposed ? [] : task.acceptance).entries()) {
       const requirement = previous.requirements.find((item) => item.id === `req-${String(index + 1).padStart(3, '0')}`);
       if (!requirement?.mandatory || requirement.title !== title || requirement.origin !== 'acceptance')
         fail('CONTRACT_DRIFT', 'Исходное обязательное требование отсутствует в сохраненном контракте');
@@ -81,7 +87,10 @@ export function buildTaskContract(task, { proposal = null, analysis = null, prev
   if (proposed && new Set(proposed.requirements.map((item) => item.id)).size !== proposed.requirements.length)
     fail('CONTRACT_REQUIREMENT_DUPLICATE', 'Идентификаторы требований повторяются');
   const proposedById = new Map(proposed?.requirements.map((item) => [item.id, item]) ?? []);
-  const requirements = task.acceptance.map((title, index) => {
+  const decomposing = omnibusAcceptance && Boolean(analysis?.requirements?.length);
+  if (omnibusAcceptance && proposed && !decomposing)
+    fail('CONTRACT_ANALYSIS_REQUIRED', 'Естественная задача требует отдельного анализа обязательных пунктов');
+  const requirements = (decomposing ? [] : task.acceptance).map((title, index) => {
     const id = `req-${String(index + 1).padStart(3, '0')}`, candidate = proposedById.get(id);
     if (candidate && (!candidate.mandatory || candidate.title !== title || candidate.verification.criterion !== title))
       fail('CONTRACT_ACCEPTANCE_WEAKENED', 'Planner не может удалить, переименовать или ослабить исходное требование');
@@ -89,15 +98,24 @@ export function buildTaskContract(task, { proposal = null, analysis = null, prev
   });
   const titles = new Set(requirements.map((item) => normalize(item.title)));
   const existingIds = new Set(requirements.map((item) => item.id));
-  for (const title of analysis?.requirements ?? []) {
-    if (titles.has(normalize(title)) || referencesExistingRequirements(title, existingIds)) continue;
+  for (const rawTitle of analysis?.requirements ?? []) {
+    const detail = referencedDetail(rawTitle, existingIds);
+    if (detail && !decomposing) continue;
+    const title = decomposing
+      ? rawTitle.replace(/^(?:req-[a-z0-9-]+(?:\s*[/,]\s*(?:req-[a-z0-9-]+|[0-9]{3}))*)\s*:\s*/i, '').trim()
+      : rawTitle;
+    if (titles.has(normalize(title))) continue;
     const candidate = proposed?.requirements.find((item) => normalize(item.title) === normalize(title));
-    if (candidate && !candidate.mandatory) fail('CONTRACT_ACCEPTANCE_WEAKENED', 'Требование анализа нельзя превратить в необязательное улучшение');
+    if (decomposing && proposed && !candidate)
+      fail('CONTRACT_ANALYSIS_COVERAGE', 'План должен отдельно проверить каждый пункт анализа');
+    if (candidate && (!candidate.mandatory || candidate.verification.criterion !== title))
+      fail('CONTRACT_ACCEPTANCE_WEAKENED', 'Требование анализа нельзя ослабить или заменить общим критерием');
     requirements.push({ id: candidate?.id ?? requirementId(title), title, mandatory: true, origin: 'analysis',
       verification: verificationFor(task, title, candidate?.verification), workIds: [] });
     titles.add(normalize(title));
   }
   for (const candidate of proposed?.requirements ?? []) {
+    if (decomposing && candidate.id === 'req-001' && candidate.title === task.acceptance[0]) continue;
     if (requirements.some((item) => item.id === candidate.id)) continue;
     if (titles.has(normalize(candidate.title))) fail('CONTRACT_REQUIREMENT_DUPLICATE', 'Одинаковое требование получило разные идентификаторы');
     requirements.push({ ...candidate, origin: 'analysis', verification: verificationFor(task, candidate.title, candidate.verification), workIds: [] });
@@ -105,9 +123,16 @@ export function buildTaskContract(task, { proposal = null, analysis = null, prev
   }
   if (new Set(requirements.map((item) => item.id)).size !== requirements.length)
     fail('CONTRACT_REQUIREMENT_DUPLICATE', 'Идентификаторы требований пересекаются с исходным контрактом');
+  const linkedSteps = decomposing ? steps.map((step) => ({ ...step,
+    ...(step.requirementIds ? { requirementIds: step.requirementIds.filter((id) => id !== 'req-001') } : {}),
+  })) : steps;
+  const bound = bindWork(requirements, linkedSteps);
+  if (decomposing && proposed && steps.length && bound.some((item) => item.origin === 'analysis' && !item.workIds.length))
+    fail('CONTRACT_ANALYSIS_COVERAGE', 'Каждый пункт анализа должен быть связан с работой плана');
   return TaskContractSchema.parse({
     version: 1, goal: task.goal, instructionsHash,
-    requirements: bindWork(requirements, steps),
+    ...(decomposing ? { acceptanceHash: hashObject(task.acceptance) } : {}),
+    requirements: bound,
     optionalImprovements: proposed?.optionalImprovements ?? [],
     constraints: unique(proposed ? proposed.constraints : analysis?.constraints ?? []),
     assumptions: proposed?.assumptions ?? [],

@@ -510,8 +510,9 @@ function validatedRunInput({
 
   const canonicalWorktree = physicalDirectory(worktree, 'INVALID_CHECK_WORKTREE');
   const worktrees = path.join(canonicalRoot, '.ai-orchestrator', 'worktrees');
-  if (!inside(worktrees, canonicalWorktree)) {
-    fail('INVALID_CHECK_WORKTREE', 'Worktree выходит из Orchestrator storage');
+  const direct = loadProjectProfile(canonicalRoot).workspaceMode === 'direct';
+  if (direct ? canonicalWorktree !== canonicalRoot : !inside(worktrees, canonicalWorktree)) {
+    fail('INVALID_CHECK_WORKTREE', 'Каталог проверки не принадлежит текущему проекту');
   }
   const canonicalOutput = physicalDirectory(outputDirectory, 'INVALID_CHECK_OUTPUT', {
     privateMode: true,

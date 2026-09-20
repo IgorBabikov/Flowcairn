@@ -22,6 +22,7 @@ import { fileURLToPath } from 'node:url';
 import { inspectProcess, probeRunner, runRegisteredAction } from './lib/runner.mjs';
 import { buildPrompt } from './lib/codex.mjs';
 import { AIResultSchema } from './lib/schemas.mjs';
+import { aiResponseSchema } from './lib/runner-ai-command.mjs';
 import { classifyAiFailure } from './lib/supervisor.mjs';
 import { MAX_CONTROL_ARG_CHARS, validCommand } from './lib/supervisor-control.mjs';
 
@@ -411,6 +412,15 @@ test('AI actions are source read-only and the result contract carries bounded st
   assert.match(prompt, /Объявленный read context: scripts\/ai-graph/);
   assert.match(prompt, /Зарегистрированные проверки запускает Executor/);
   assert.match(prompt, /Ты не записываешь файлы/);
+  assert.match(prompt, /findings\[\]\.path/);
+  const directPrompt = buildPrompt({ nodeId: contract.node.id, task: contract.task,
+    plan: contract.plan, skills: '', priorEvidence: null, profile: { workspaceMode: 'direct' } });
+  assert.match(directPrompt, /вне текущего проекта/);
+  const findingPath = aiResponseSchema(contract.node, contract.plan).properties.findings.items.properties.path.anyOf[0];
+  const providerPath = new RegExp(findingPath.pattern);
+  assert.equal(providerPath.test('src/modules/accept/index.tsx'), true);
+  for (const invalid of ['.', '../src/file.ts', '/Users/example/file.ts', 'C:\\secret'])
+    assert.equal(providerPath.test(invalid), false);
   const analysisNode = {
     ...contract.node,
     id: 'analyze',

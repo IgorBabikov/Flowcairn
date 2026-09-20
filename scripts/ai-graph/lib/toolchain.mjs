@@ -72,6 +72,25 @@ function context(root, worktree) {
   return { ...ctx, dependencyPaths, readRoots };
 }
 
+function directManifest(root) {
+  const canonical = physicalDirectory(root, 'INVALID_TOOLCHAIN_ROOT', 'root');
+  const profile = loadProjectProfile(canonical);
+  if (profile.workspaceMode !== 'direct') fail('INVALID_TOOLCHAIN_WORKTREE', 'Прямой режим не выбран');
+  validatePackageManagerProject(canonical, profile.packageManager);
+  const lockfile = path.join(canonical, packageManagerLock(profile.packageManager));
+  const lock = existsNoFollow(lockfile) ? readFileSync(lockfile) : Buffer.alloc(0);
+  const dependencyPaths = workspaceDependencyPaths({ root: canonical, profile });
+  const readRoots = dependencyPaths.map((relative) => realpathSync(path.join(canonical, relative)));
+  const roots = dependencyPaths.map((relative) => {
+    const file = path.join(canonical, relative), stat = lstatSync(file);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) fail('TOOLCHAIN_DRIFT', 'Каталог зависимостей изменился');
+    const installedLock = path.join(file, '.package-lock.json');
+    return { relative, dev: stat.dev, ino: stat.ino,
+      installedLockHash: existsNoFollow(installedLock) ? sha256(readFileSync(installedLock)) : null };
+  });
+  return { dependencyPaths, readRoots, hash: hashObject({ mode: 'direct', profile, lockHash: sha256(lock), roots }) };
+}
+
 function safeRelative(value) {
   if (
     typeof value !== 'string' ||
@@ -339,6 +358,8 @@ function verifyProjection(descriptionValue, ctx) {
 }
 
 export function prepareToolchain({ root, worktree }) {
+  if (realpathSync(root) === realpathSync(worktree))
+    return verifyToolchain({ root, worktree, manifest: directManifest(root) });
   const ctx = context(root, worktree);
   const desired = description(ctx);
   for (const group of desired.groups) {
@@ -354,6 +375,12 @@ export function prepareToolchain({ root, worktree }) {
 
 export function verifyToolchain({ root, worktree, manifest }) {
   validateManifest(manifest);
+  if (realpathSync(root) === realpathSync(worktree)) {
+    const expected = directManifest(root);
+    if (hashObject(manifest) !== hashObject(expected)) fail('TOOLCHAIN_DRIFT', 'Зависимости текущего проекта изменились');
+    return Object.freeze({ dependencyPaths: Object.freeze([...expected.dependencyPaths]),
+      readRoots: Object.freeze([...expected.readRoots]), hash: expected.hash });
+  }
   const ctx = context(root, worktree);
   const desired = description(ctx);
   const expected = {

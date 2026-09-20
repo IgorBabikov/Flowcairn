@@ -11,6 +11,7 @@ import {
   RUNTIME_ROOT,
 } from './lib/project.mjs';
 import { runtimeIdentity, WorkflowService } from './lib/service.mjs';
+import { defaultAdapters } from './lib/service-adapters.mjs';
 import { loadSkill } from './lib/skills.mjs';
 const profile = {
   version: 1,
@@ -90,6 +91,25 @@ test('context directories contribute bounded identity without requiring product 
   const before = runtimeIdentity(root);
   writeFileSync(path.join(root, 'docs', 'context.md'), 'second');
   assert.notEqual(before, runtimeIdentity(root));
+});
+
+test('direct runtime keeps its identity when approved project files change', async (t) => {
+  const root = fixture(t);
+  writeFileSync(path.join(root, 'AGENTS.md'), 'Initial instructions');
+  writeFileSync(path.join(root, 'package.json'), '{"scripts":{"test":"node --test"}}');
+  writeFileSync(path.join(root, '.flowcairn.json'), JSON.stringify({ ...profile,
+    workspaceMode: 'direct', manifests: ['package.json'], contextPaths: ['AGENTS.md'] }));
+  const adapters = await defaultAdapters(root);
+  const task = { scope: ['AGENTS.md', 'package.json'], contextPaths: ['AGENTS.md', 'package.json'] };
+  const runtime = runtimeIdentity(root), identity = adapters.identity(), context = adapters.contextHash(task);
+  writeFileSync(path.join(root, 'package.json'), '{"scripts":{"test":"node --test","build":"echo done"}}');
+  writeFileSync(path.join(root, 'AGENTS.md'), 'Updated instructions');
+  assert.equal(runtimeIdentity(root), runtime);
+  assert.equal(adapters.identity(), identity);
+  assert.equal(adapters.contextHash(task), context);
+  writeFileSync(path.join(root, '.flowcairn.json'), JSON.stringify({ ...profile,
+    workspaceMode: 'direct', manifests: ['package.json'], contextPaths: ['AGENTS.md'], checks: ['lint'] }));
+  assert.notEqual(runtimeIdentity(root), runtime);
 });
 
 test('default AI context excludes lockfiles while preserving explicit lockfile opt-in', (t) => {

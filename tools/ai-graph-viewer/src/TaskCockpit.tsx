@@ -82,7 +82,7 @@ export function TaskCockpit({ snapshot, busy, unavailable = false, onOpenEvidenc
         {proof.evidence.map(evidence => <EvidenceDetails key={evidence.id} evidence={evidence} onOpen={onOpenEvidence} requirements={proof.requirements} onSelectRequirement={selectRequirement} />)}
       </section>}
       {view === 'changes' && <section className="proof-changes"><h3>Результаты работы</h3>
-        {snapshot.delivery && <p>Рабочая копия: <code>{snapshot.delivery.workspacePath}</code></p>}
+        {snapshot.delivery && <p>{snapshot.delivery.mode === 'direct' ? 'Изменения в текущем проекте' : 'Рабочая копия'}: <code>{snapshot.delivery.workspacePath}</code></p>}
         {changes.length ? <ul className="path-list">{changes.map(path => <li key={path}><code>{path}</code></li>)}</ul> : <p>Изменения файлов не зарегистрированы.</p>}
         <h3>Проблемы и исправления</h3>
         {proof.findings.length ? proof.findings.map(finding => <Finding key={finding.id} finding={finding} snapshot={snapshot} />) : <p>Проблемы не зарегистрированы. Это не заменяет проверку требований.</p>}

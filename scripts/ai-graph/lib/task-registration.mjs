@@ -28,6 +28,7 @@ function git(root, args) {
 
 function projectRoot(input = process.cwd()) {
   const root = realpathSync(path.resolve(input));
+  if (loadProjectProfile(root).workspaceMode === 'direct') return root;
   let top;
   try {
     top = realpathSync(git(root, ['rev-parse', '--show-toplevel']));
@@ -141,6 +142,16 @@ export async function createTask(input, taskInput, options = {}) {
   // Resolve and validate mandatory Skills before creating the Orchestrator
   // registry. A failed preflight must not change firstTask/contextHash.
   service.adapters.skills(task);
+  if (profile.workspaceMode === 'direct')
+    return service.adapters.registerTask(root, task, {
+      service,
+      run: options.run ?? `run-${randomUUID()}`,
+      operation: options.operation,
+      stage: options.stage,
+      workflow: options.workflow,
+      naturalIntakeHash: options.naturalIntakeHash,
+      actor: options.actor,
+    });
   let source;
   if (!firstTask && git(root, ['status', '--porcelain', '--untracked-files=all'])) {
     const existingState = JSON.parse(readRegular(stateFile, 16 * 1024 * 1024).toString('utf8'));

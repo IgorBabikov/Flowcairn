@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, realpathSync } from 'node:fs';
+import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { GraphError } from '../scripts/ai-graph/lib/io.mjs';
 import { assertRuntimePlatform, assertProjectPlatform } from '../scripts/ai-graph/lib/platform.mjs';
@@ -28,6 +28,13 @@ export function projectRoot(input = process.cwd()) {
   assertRuntimePlatform();
   const root = realpathSync(path.resolve(input));
   assertProjectPlatform(root);
+  if (!existsSync(path.join(root, 'package.json')))
+    fail('PACKAGE_JSON', 'Укажите папку Node-проекта с package.json');
+  // New direct projects need their own package root, not a preexisting Git repository.
+  let profile;
+  try { profile = JSON.parse(readRegular(path.join(root, PROFILE)).toString('utf8')); }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
+  if (!profile || profile.workspaceMode === 'direct') return root;
   let top;
   try {
     top = realpathSync(git(root, ['rev-parse', '--show-toplevel']));

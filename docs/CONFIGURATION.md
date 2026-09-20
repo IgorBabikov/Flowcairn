@@ -17,7 +17,8 @@
 | Поле | Назначение |
 | --- | --- |
 | `version` | Версия schema профиля: `1` |
-| `integrationBranch` | Ветка проекта для выделения рабочих копий |
+| `workspaceMode` | `direct` — файлы текущего проекта (по умолчанию при новой настройке); `worktree` — отдельная Git-копия по явному выбору |
+| `integrationBranch` | Ветка для явно выбранного режима `worktree`; в `direct` не нужна |
 | `packageManager` | `npm`, `pnpm` или `yarn`, согласованный с manifests и lockfile |
 | `contextPaths` | Дополнительные разрешенные пути чтения |
 | `checks` | Зарегистрированные обязательные проверки: `typecheck`, `lint`, `tests`, `build` |
@@ -28,6 +29,7 @@
 | `skillManifest` | До четырех project Skills: путь, hash, этапы и область |
 | `onboarding.testPolicy` | `keep` — сохранить подход проекта; `add` — добавлять тесты по задаче |
 | `onboarding.coverage` | Явный выбор измерения покрытия; процент не назначается автоматически |
+| `onboarding.readScope` | `project-files` для прямой работы в проекте; `tracked-project` для Git-режима |
 | `ai.provider` | `codex`, `claude` или `cursor` |
 | `ai.modelMode` | `provider`, `manual` или `auto` |
 | `ai.model`, `ai.reviewModel` | Основная и, при явной настройке, отдельная модель ревью |
@@ -54,7 +56,7 @@ Claude Code и Cursor используют режим `provider` с `provider-de
 | `tests` | `test` |
 | `build` | `build` |
 
-`none` не запускает scripts. `hardened` использует отдельно подготовленный Docker-образ. `trusted-local` запускает утвержденные scripts с правами пользователя в выделенной worktree и требует отдельного согласия. Произвольные executable/argv из описания задачи или ответа AI не принимаются.
+`none` не запускает scripts. `hardened` использует отдельно подготовленный Docker-образ. `trusted-local` запускает утвержденные scripts с правами пользователя в выбранном проекте и требует отдельного согласия. Служебные npm-логи и кеш проверок направляются в приватное хранилище Flowcairn. Произвольные executable/argv из описания задачи или ответа AI не принимаются.
 
 Наличие configured check не доказывает требование. Метод `check` дополнительно связывает фактически выполненную проверку с конкретным критерием; [подробнее о evidence](HOW-FLOWCAIRN-WORKS.md).
 
@@ -64,7 +66,7 @@ Claude Code и Cursor используют режим `provider` с `provider-de
 
 Новый профиль обнаруживает root `package.json`, lockfile и workspace manifests. Для pnpm поле `packages` из `pnpm-workspace.yaml` имеет приоритет над `package.json.workspaces`; для npm учитываются массив `workspaces` и объект `workspaces.packages`.
 
-Пути workspace должны быть относительными и находиться внутри проекта. Игнорируемый Git workspace manifest вызывает `WORKSPACES_IGNORED`; уточните workspace-конфигурацию или правила игнорирования. Не скрывайте проблему удалением обязательного manifest.
+Пути workspace должны быть относительными и находиться внутри проекта. Если проект использует Git, игнорируемый workspace manifest вызывает `WORKSPACES_IGNORED`; уточните workspace-конфигурацию или правила игнорирования. Не скрывайте проблему удалением обязательного manifest.
 
 `--manifests` при `init` задает полный список через запятую, а не дополнение к обнаруженному. Повторный `init` не пересобирает список уже существующего профиля. Изменение структуры проекта требует проверки manifests и нового окружения проверок.
 

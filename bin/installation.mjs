@@ -182,8 +182,9 @@ export function initializeProject(input, options = {}) {
     fail('PACKAGE_JSON', 'В package.json нужен JSON-объект.');
   const manager =
     existingProfile?.packageManager ?? packageManager(root, pkg, options['package-manager']);
+  const gitCheckout = existsNoFollow(path.join(root, '.git'));
   const integrationBranch =
-    existingProfile?.integrationBranch ?? options.branch ?? git(root, ['branch', '--show-current']);
+    existingProfile?.integrationBranch ?? options.branch ?? (gitCheckout ? git(root, ['branch', '--show-current']) : 'direct');
   if (!integrationBranch)
     fail(
       'BRANCH_REQUIRED',
@@ -204,11 +205,15 @@ export function initializeProject(input, options = {}) {
       fail('CHECK_SCRIPT_MISSING', `Для проверки ${check} нужен существующий script package.json.`);
   }
   const checkScripts = Object.fromEntries(checks.map((check) => [check, discoveredChecks.checkScripts[check]]));
+  const workspaceMode = options['workspace-mode'] ?? 'direct';
+  if (!['direct', 'worktree'].includes(workspaceMode))
+    fail('WORKSPACE_MODE', 'Доступны режимы работы: direct или worktree.');
   const profile =
     existingProfile ??
     ProjectProfileSchema.parse({
       version: 1,
       integrationBranch,
+      workspaceMode,
       packageManager: manager,
       contextPaths: csv(options.context),
       checks,
@@ -218,7 +223,8 @@ export function initializeProject(input, options = {}) {
       manifests: discoverManifests(root, pkg, manager, options.manifests),
       ...(options._skillManifest?.length ? { skillManifest: options._skillManifest } : {}),
       ...(['read-consent', 'test-policy', 'coverage'].some((key) => options[key] !== undefined) ? { onboarding: {
-        version: 1, readConsent: options['read-consent'] === true, readScope: 'tracked-project',
+        version: 1, readConsent: options['read-consent'] === true,
+        readScope: workspaceMode === 'direct' ? 'project-files' : 'tracked-project',
         testPolicy: options['test-policy'] ?? 'keep', coverage: options.coverage === true, instructions: 'preserve',
       } } : {}),
       ai: {
@@ -236,9 +242,9 @@ export function initializeProject(input, options = {}) {
   for (const file of profile.manifests) readProjectFile(root, file, 16 * 1024 * 1024);
   // Project .gitignore belongs to the team. Flowcairn keeps only its own local
   // state invisible through Git's per-checkout exclude file.
-  const excludeFile = localExcludeFile(root);
-  const oldExclude = existsNoFollow(excludeFile) ? readRegular(excludeFile).toString('utf8') : '';
-  const alreadyIgnored = spawnSync(
+  const excludeFile = gitCheckout ? localExcludeFile(root) : null;
+  const oldExclude = excludeFile && existsNoFollow(excludeFile) ? readRegular(excludeFile).toString('utf8') : '';
+  const alreadyIgnored = !gitCheckout || spawnSync(
     '/usr/bin/git',
     ['-C', root, 'check-ignore', '-q', '--', '.ai-orchestrator/flowcairn-install.json'],
     { stdio: 'ignore' },
@@ -262,7 +268,7 @@ export function initializeProject(input, options = {}) {
         '.ai-orchestrator/task.example.json',
       ],
     };
-  const tmp = path.join(path.dirname(excludeFile), `.flowcairn-exclude-${randomUUID()}.tmp`);
+  const tmp = excludeFile ? path.join(path.dirname(excludeFile), `.flowcairn-exclude-${randomUUID()}.tmp`) : null;
   const exampleText = JSON.stringify({
     id: 'ORCH-001', goal: 'Один проверяемый результат',
     instructions: 'Опишите нужное поведение и ограничения', scope: ['README.md'],
@@ -306,7 +312,7 @@ export function initializeProject(input, options = {}) {
       path.join(stateDirectory, 'task.example.json'),
       exampleText,
     );
-    if (exclude !== oldExclude) {
+    if (excludeFile && tmp && exclude !== oldExclude) {
       const excludeMode = existsNoFollow(excludeFile) ? lstatSync(excludeFile).mode & 0o777 : 0o600;
       createOwned(tmp, exclude, excludeMode);
       const current = existsNoFollow(excludeFile) ? readRegular(excludeFile).toString('utf8') : '';

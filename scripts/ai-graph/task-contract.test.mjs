@@ -73,6 +73,36 @@ test('known anchored analysis references reuse original requirements, including 
   assert.equal(contract.requirements[3].mandatory, true);
 });
 
+test('natural task description keeps each analyzed criterion separately linked and checked', () => {
+  const description = 'Изменить форму регистрации: отклонять неверный email и сохранять валидный email.';
+  const input = { ...task, intakeKind: 'natural', instructions: description, acceptance: [description] };
+  const details = ['Отклонять неверный email', 'Сохранять валидный email'];
+  const criteria = [{ id: 'req-001', title: description },
+    ...details.map((title, index) => ({ id: `req-00${index + 2}`, title }))];
+  const proposed = { ...proposal, requirements: criteria.map(({ id, title }) => ({ id, title, mandatory: true,
+    verification: { method: 'check', checkIds: ['check-tests'], criterion: title, paths: ['src/form.mjs'] } })) };
+  const steps = details.map((title, index) => ({ id: `fix-${index + 1}`, paths: ['src/form.mjs'],
+    requirementIds: ['req-001', `req-00${index + 2}`] }));
+  const contract = buildTaskContract(input, { proposal: proposed, analysis: {
+    requirements: details.map((title) => `req-001: ${title}`),
+  }, steps });
+  assert.deepEqual(contract.requirements.map((item) => item.title), details);
+  assert.equal(contract.acceptanceHash, hashObject(input.acceptance));
+  assert.ok(contract.requirements.every((item) => item.mandatory && item.workIds.length > 0));
+  assert.deepEqual(buildTaskContract(input, { previousContract: contract }).requirements, contract.requirements);
+  assert.throws(() => buildTaskContract(input, { proposal: { ...proposed, requirements: proposed.requirements.slice(0, 2) },
+    analysis: { requirements: details.map((title) => `req-001: ${title}`) }, steps }),
+  { code: 'CONTRACT_ANALYSIS_COVERAGE' });
+});
+
+test('structured task keeps its one explicit criterion even when instructions use the same wording', () => {
+  const input = { ...task, instructions: task.acceptance[0] };
+  const contract = buildTaskContract(input);
+  assert.equal(contract.requirements.length, 1);
+  assert.equal(contract.requirements[0].origin, 'acceptance');
+  assert.equal(contract.acceptanceHash, undefined);
+});
+
 test('unknown or unanchored analysis references never silently lose requirements', () => {
   const titles = ['req-999: Unknown requirement', 'req-001/999: Partly unknown reference', 'Additional behavior related to req-001: retain this requirement'];
   const contract = compile({ analysis: { requirements: titles } });

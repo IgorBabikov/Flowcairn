@@ -14,6 +14,7 @@ import { applyProposedEdits } from './patch.mjs';
 import { prepareToolchain, verifyToolchain } from './toolchain.mjs';
 import { effectiveInstructionFiles } from './instructions.mjs';
 import { projectInstructionMetadata } from './project-instruction-context.mjs';
+import { directAdapters } from './direct-adapters.mjs';
 
 const fail = (code, message) => { throw new GraphError(code, message); };
 const unique = (values) => [...new Set(values)];
@@ -84,7 +85,10 @@ export function runtimeIdentity(root) {
       instructions.push({ path: relative, hash: sha256(readTrusted(root, relative)) });
     }
   };
-  for (const relative of projectContextPaths(root, profile).sort()) visitContext(relative);
+  // Direct work changes project files in place. Their bytes are fenced by the
+  // source/workspace fingerprint, not by the immutable package runtime hash.
+  if (profile.workspaceMode !== 'direct')
+    for (const relative of projectContextPaths(root, profile).sort()) visitContext(relative);
   return hashObject({
     runtime: files
       .sort()
@@ -166,9 +170,11 @@ export async function defaultAdapters(root) {
   const resolveSkills = (node, task) => node.action.id.startsWith('ai-') && resolveContext
     ? contextual(node.action.id, node.resources.writes.length ? node.resources.writes : task.scope).ids
     : [...resolveAction(node.action.id).skills];
-  return {
+  const adapters = {
     project: profile,
-    identity: () => hashObject({ runtime: pinnedRuntimeIdentity(root), instructions: instructionInspection()?.fingerprint ?? null }),
+    identity: () => profile.workspaceMode === 'direct'
+      ? pinnedRuntimeIdentity(root)
+      : hashObject({ runtime: pinnedRuntimeIdentity(root), instructions: instructionInspection()?.fingerprint ?? null }),
     instructionPaths: (task = null) => relevantInstructions(task?.scope).map((file) => file.path),
     instructionMetadata: (node, task) => projectInstructionMetadata(root, node, task, profile, instructionInspection()),
     resolveReadPaths,
@@ -178,12 +184,22 @@ export async function defaultAdapters(root) {
       return [...new Map(manifests.map((skill) => [skill.id, skill])).values()].sort((a, b) => a.id.localeCompare(b.id));
     },
     resolveSkills,
-    contextHash: (task) => hashObject({
-      instructions: instructionInspection()?.fingerprint ?? null,
-      explicitMarkdown: projectInstructionMetadata(root, { resources: { reads: unique([...(profile.contextPaths ?? []), ...task.contextPaths]), writes: [] } }, task, profile, instructionInspection())
-        .filter((file) => file.kind === 'explicit-context'),
-      skills: resolveContext ? ['ai-plan', 'ai-analyze', 'ai-implement', 'ai-review'].map((action) => contextual(action, task.scope).context.hash) : null,
-    }),
+    contextHash: (task) => {
+      const inspection = instructionInspection();
+      const explicitMarkdown = projectInstructionMetadata(root,
+        { resources: { reads: unique([...(profile.contextPaths ?? []), ...task.contextPaths]), writes: [] } },
+        task, profile, inspection).filter((file) => file.kind === 'explicit-context');
+      const direct = profile.workspaceMode === 'direct';
+      const stablePath = ({ path: file, kind, scope }) => ({ path: file, kind, scope });
+      return hashObject({
+        instructions: direct ? relevantInstructions(task.scope).map(stablePath) : inspection?.fingerprint ?? null,
+        explicitMarkdown: direct ? explicitMarkdown.map(stablePath) : explicitMarkdown,
+        skills: resolveContext ? ['ai-plan', 'ai-analyze', 'ai-implement', 'ai-review'].map((action) => {
+          const selected = contextual(action, task.scope);
+          return direct ? selected.manifest : selected.context.hash;
+        }) : null,
+      });
+    },
     skillContextPaths: (task) => resolveContext
       ? ['ai-plan', 'ai-analyze', 'ai-implement', 'ai-review'].flatMap((action) => contextual(action, task.scope).context.evidence).filter((file) => file.hash).map((file) => file.path)
       : [],
@@ -267,4 +283,5 @@ export async function defaultAdapters(root) {
         : runner.inspectProcess({ root, process }),
     loadSkills: (ids) => ids.map((id) => Reflect.apply(loadSkill, undefined, [root, id, { projectSkills }])),
   };
+  return profile.workspaceMode === 'direct' ? directAdapters(root, profile, adapters) : adapters;
 }
