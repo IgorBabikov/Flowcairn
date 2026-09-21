@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { ApiError, Capability, TaskFields } from './contracts';
+import { humanText, runtimeProblem } from './presentation';
 
 /** Форма передает задачу; настройки и права определяет сервис. */
 export function TaskComposer({ capability, busy, pending, error, onSubmit, onRetry, onClose }: {
@@ -16,6 +17,7 @@ export function TaskComposer({ capability, busy, pending, error, onSubmit, onRet
   const [taskNumber, setTaskNumber] = useState('');
   const valid = title.trim().length > 0 && description.trim().length >= 3 && taskNumber.trim().length > 0;
   const allowed = capability?.allowed === true;
+  const problem = error ? runtimeProblem(`${error.code}: ${error.message}`) : null;
   return (
     <section className="task-composer" aria-labelledby="task-heading" aria-busy={busy} onKeyDown={event => { if (event.key === 'Escape' && onClose) onClose(); }}>
       <form onSubmit={event => {
@@ -36,8 +38,9 @@ export function TaskComposer({ capability, busy, pending, error, onSubmit, onRet
         <label htmlFor="task-number">Номер задачи</label>
         <input id="task-number" name="taskNumber" required maxLength={80}
           value={taskNumber} disabled={busy || pending} onChange={event => setTaskNumber(event.target.value)} />
-        {!allowed && <p role="status" className="field-error">{capability?.reason ?? 'Не удалось загрузить проект. Повторите загрузку.'}</p>}
-        {error && <div className="dialog-error" role="alert"><p>{error.message}</p>
+        {!allowed && <p role="status" className="field-error">{humanText(capability?.reason) || 'Не удалось загрузить проект. Повторите загрузку.'}</p>}
+        {error && <div className="dialog-error" role="alert"><p>{(problem?.summary ?? humanText(error.message)) || 'Не удалось подготовить задачу.'}</p>
+          {problem && <p>{problem.action}</p>}
           <button type="button" className="button" disabled={busy} onClick={onRetry}>{pending ? 'Повторить тот же запрос' : 'Обновить контекст'}</button>
         </div>}
         {busy && pending && <p className="intake-progress" role="status">Подготавливаем снимок проекта и граф задачи. Для большого проекта это может занять до двух минут.</p>}

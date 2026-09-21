@@ -19,7 +19,7 @@ test('pending intake shows progress and a timeout preserves the same request for
   await expect(page.locator('.intake-progress')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Запускаем…', exact: true })).toBeDisabled();
   release();
-  await expect(page.locator('.dialog-error')).toContainText('Подготовка задачи превысила допустимое время.');
+  await expect(page.locator('.dialog-error')).toContainText('AI-анализ не запускался');
   await expect(page.locator('.intake-progress')).toHaveCount(0);
   await page.getByRole('button', { name: 'Повторить тот же запрос', exact: true }).click();
   await expect.poll(() => requests.length).toBe(2);
@@ -79,7 +79,7 @@ test('stale context requires a refresh and new request while preserving the task
   await page.getByLabel('Номер задачи', {exact:true}).fill('TASK-101');
   await page.getByLabel('Полное описание задачи', {exact:true}).fill('Исправить поиск');
   await page.getByRole('button', {name:'Запустить'}).click();
-  await expect(page.getByRole('alert').filter({hasText:'Контекст изменился'}).last()).toBeVisible();
+  await expect(page.getByRole('alert').filter({hasText:'Данные задачи устарели'}).last()).toBeVisible();
   await expect(page.getByRole('button', {name:'Повторить тот же запрос'})).toHaveCount(0);
   options.intakeError = null;
   options.projectContext = {...projectContext, contextHash:'b'.repeat(64)};
@@ -108,7 +108,7 @@ test('failed registration refreshes changed bootstrap metadata without hiding th
   await page.getByLabel('Полное описание задачи', { exact: true }).fill('Проверить пустой запрос');
   await page.getByLabel('Номер задачи', { exact: true }).fill('TASK-101');
   await page.getByRole('button', { name: 'Запустить', exact: true }).click();
-  await expect(page.locator('.dialog-error')).toContainText('Контекст выбранных Skills слишком большой');
+  await expect(page.locator('.dialog-error')).toContainText('выбранные правила не помещаются в безопасный контекст');
   await expect(page.getByLabel('Полное описание задачи', { exact: true })).toHaveValue('Проверить пустой запрос');
   await page.getByRole('button', { name: 'Запустить', exact: true }).click();
   await expect(page.locator('.react-flow')).toBeVisible();

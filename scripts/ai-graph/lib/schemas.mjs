@@ -364,6 +364,10 @@ const FingerprintSchema = z.strictObject({
     indexHash: Hash,
   }),
 });
+const StoredFingerprintSchema = z.union([
+  FingerprintSchema,
+  z.strictObject({ hash: Hash }),
+]);
 const BindingSchema = z.strictObject({
   worktree: z.string().max(4096),
   taskId: z.string().max(80),
@@ -424,8 +428,8 @@ export const RunStateSchema = z.strictObject({
   providerConsentHash: Hash.nullable().optional(),
   binding: BindingSchema.nullable(),
   pendingBinding: BindingSchema.nullable().optional(),
-  workspaceFingerprint: FingerprintSchema.nullable(),
-  initialFingerprint: FingerprintSchema.nullable(),
+  workspaceFingerprint: StoredFingerprintSchema.nullable(),
+  initialFingerprint: StoredFingerprintSchema.nullable(),
   activeOperation: z
     .strictObject({
       id: Id,

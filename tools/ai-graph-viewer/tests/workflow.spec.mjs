@@ -28,9 +28,9 @@ test('ready analysis shows a permitted start action or an explicit executor prob
   for (const [name, width, height] of [['desktop', 1440, 900], ['mobile', 390, 844]]) {
     await page.setViewportSize({ width, height });
     await page.goto(`/#session=${token}`);
-    await expect(page.getByRole('heading', { name: 'Работа приостановлена', exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Исполнитель пока не готов', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Начать анализ', exact: true })).toHaveCount(0);
-    await expect(page.locator('.workflow-summary')).toContainText('Инструменты исполнителя не прошли проверку');
+    await expect(page.locator('.workflow-summary')).toContainText('не смог безопасно проверить инструменты');
     await page.locator('.health-details summary').click();
     const health = page.locator('.run-health');
     await health.scrollIntoViewIfNeeded();
@@ -137,6 +137,21 @@ test('scheduler failure is visible even without a failed node', async ({page}) =
   await expect(page.getByText('Разбираемся в задаче',{exact:true})).toHaveCount(0);
   await expect(page.getByText('Выполняем задачу',{exact:true})).toHaveCount(0);
   await expect(page.locator('.current-stage')).toHaveCount(0);
+});
+
+test('internal storage limits are explained without exposing a code to the operator', async ({page}) => {
+  const state = workflow();
+  state.status = 'failed';
+  state.gates = [];
+  state.failureReason = 'STORE_LIMIT_EXCEEDED: state.initialFingerprint.files превышает array limit';
+  state.nodes = state.nodes.map(node => ({ ...node, status: node.id === 'analyze' ? 'failed' : 'pending', capabilities: allDenied }));
+  await mockApi(page, state);
+  await page.goto(`/#session=${token}`);
+  await expect(page.getByRole('heading', { name: 'Не удалось подготовить задачу', exact: true })).toBeVisible();
+  await expect(page.locator('.workflow-summary')).toContainText('Задача не была передана AI');
+  await expect(page.locator('.workflow-problem')).toContainText('Что делать дальше');
+  await expect(page.locator('.workflow-panel')).not.toContainText('STORE_LIMIT_EXCEEDED');
+  await expect(page.locator('.workflow-panel')).not.toContainText('array limit');
 });
 
 test('shows only runtime-authorized recovery controls after autonomous failure', async ({page}) => {

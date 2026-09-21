@@ -81,7 +81,7 @@ export async function executeNode(host, state, task, plan, definition, signal) {
     try {
       if (definition.action.id === 'workspace-check') {
         const assessment = host.adapters.inspectChanges(
-          state.initialFingerprint,
+          host.initialFingerprint(state.initialFingerprint),
           before,
           {
             ...definition,
@@ -472,7 +472,7 @@ export async function executeNode(host, state, task, plan, definition, signal) {
       {
         ...current,
         nodes: finalNodes,
-        workspaceFingerprint: after ?? current.workspaceFingerprint,
+        workspaceFingerprint: after ? host.persistFingerprint(after) : current.workspaceFingerprint,
         status: verdict === 'uncertain' ? 'uncertain' : 'running',
       },
       plan,

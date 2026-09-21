@@ -74,7 +74,10 @@ export async function replanRun(host, { state, task, plan, request, digest, acto
     }
   } else if (plan.stage === 'execution' && !request.draft) {
     // A timed-out broad step is subdivided without changing the approved write scope.
-    const { steps, repairReadPaths, isolatedReadStepIds } = repairExecutionSteps(plan, state,
+    const repairState = state.workspaceFingerprint
+      ? { ...state, workspaceFingerprint: host.resolveFingerprint(state.workspaceFingerprint) }
+      : state;
+    const { steps, repairReadPaths, isolatedReadStepIds } = repairExecutionSteps(plan, repairState,
       (id) => ReceiptSchema.parse(host.store.readObject('receipts', id)));
     const proposal = { summary: 'Исправить по evidence предыдущей версии', verdict: 'pass', skillsUsed: [],
       findings: [], changedFiles: [], edits: [], plan: [], steps };
@@ -112,7 +115,7 @@ export async function replanRun(host, { state, task, plan, request, digest, acto
       resources: { writes: policyGrant ? unique(plan.nodes.flatMap((node) => node.resources.writes)) : task.scope },
     };
     if (
-      !host.adapters.inspectChanges(state.initialFingerprint, fingerprint, scopeNode, task)
+      !host.adapters.inspectChanges(host.resolveFingerprint(state.initialFingerprint), fingerprint, scopeNode, task)
         .allowed
     )
       fail('REPLAN_SCOPE', 'Нельзя включить изменения вне утвержденного scope в новый план');
@@ -161,7 +164,7 @@ export async function replanRun(host, { state, task, plan, request, digest, acto
     },
     draft: nextDraft,
     binding: state.binding,
-    fingerprint,
+    fingerprint: fingerprint ? host.persistFingerprint(fingerprint) : null,
   });
   const prior = { digest, status: 'creating', resultRunId: newRunId, preparationHash };
   state = host.write(state, {
@@ -222,8 +225,8 @@ export async function finishReplan(host, state, request, digest, actor, prior) {
     next = host.write(next, {
       binding,
       toolchain,
-      workspaceFingerprint: fingerprint,
-      initialFingerprint: fingerprint,
+      workspaceFingerprint: fingerprint ? host.persistFingerprint(fingerprint) : null,
+      initialFingerprint: fingerprint ? host.persistFingerprint(fingerprint) : null,
       setupPending: false,
     });
   }

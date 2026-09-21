@@ -3,14 +3,10 @@
 
 :root {
   color-scheme: light;
-  font-family:
-    Inter,
-    ui-sans-serif,
-    system-ui,
-    -apple-system,
-    BlinkMacSystemFont,
-    'Segoe UI',
-    sans-serif;
+  --font-sans: 'Avenir Next', 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI Variable', 'Segoe UI', sans-serif;
+  font-family: var(--font-sans);
+  font-kerning: normal;
+  font-optical-sizing: auto;
   font-synthesis: none;
   --page: #f7f7f6;
   --surface: #ffffff;
@@ -82,6 +78,9 @@ body,
 body {
   background: var(--page);
   color: var(--text);
+  font-weight: 450;
+  letter-spacing: -0.008em;
+  text-rendering: optimizeLegibility;
 }
 button,
 input,
@@ -276,7 +275,12 @@ button {
 .error-banner p {
   margin: 3px 0 0;
   color: var(--muted);
-  font-size: 0.8rem;
+  max-width: 68ch;
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+.error-banner .error-next-step {
+  color: var(--text);
 }
 .error-banner > div:last-child {
   display: flex;
@@ -1321,8 +1325,12 @@ a { text-underline-offset: 3px; }
 .autonomous .graph-facts { display: none; }
 .autonomous .node-mode, .autonomous .node-meta, .autonomous .node-hint { display: none; }
 .autonomous .graph-node { min-height: 124px; }
-.workflow-panel h2 { font-size: 1.35rem; letter-spacing: -.02em; margin: 0 0 12px; }
-.workflow-summary { color: var(--muted); line-height: 1.6; margin: 0 0 22px; }
+.workflow-panel { padding: 28px; }
+.workflow-panel h2 { max-width: 24ch; font-size: clamp(1.45rem, 2.25vw, 2rem); letter-spacing: -.028em; line-height: 1.12; margin: 0 0 12px; text-wrap: balance; }
+.workflow-summary { max-width: 60ch; color: var(--muted); font-size: .96rem; line-height: 1.58; margin: 0 0 22px; }
+.workflow-problem { display: grid; gap: 5px; max-width: 62ch; margin: 18px 0 26px; padding: 16px 18px; border: 1px solid color-mix(in srgb, var(--warning) 35%, var(--border)); border-radius: 14px; background: color-mix(in srgb, var(--warning) 8%, var(--surface)); }
+.workflow-problem strong { color: var(--text); font-size: .88rem; }
+.workflow-problem p { margin: 0; color: var(--muted); font-size: .87rem; line-height: 1.52; }
 .current-stage { display: flex; align-items: center; gap: 10px; color: var(--plum); }
 .workflow-steps { list-style: none; margin: 20px 0 28px; padding: 0; }
 .workflow-steps li { display: flex; align-items: flex-start; gap: 12px; padding: 14px 0; border-bottom: 1px solid var(--border); }
@@ -1352,6 +1360,7 @@ a { text-underline-offset: 3px; }
 .graph-node.status-waiting-for-human.selected { outline: none; }
 [data-page-hidden] .graph-node::after { animation-play-state: paused; }
 @media (max-width: 720px) {
+  .workflow-panel { padding: 22px 18px; }
   .autonomous .detail-panel { order: 1; }
   .autonomous .graph-region { order: 2; }
   .autonomous .run-rail { order: 3; }

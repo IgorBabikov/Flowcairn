@@ -81,6 +81,92 @@ const reasons: Record<string, string> = {
   ai: 'AI-этап',
   gate: 'Решение человека',
 };
+
+export type RuntimeProblem = {
+  title: string;
+  summary: string;
+  action: string;
+};
+
+const runtimeProblems: Record<string, RuntimeProblem> = {
+  STORE_LIMIT_EXCEEDED: {
+    title: 'Не удалось подготовить задачу',
+    summary: 'Flowcairn остановился, пока сохранял безопасный снимок проекта. Задача не была передана AI, изменения в проект не вносились.',
+    action: 'Перезапустите Flowcairn после обновления и начните анализ снова.',
+  },
+  DIRECT_LIMIT: {
+    title: 'Не удалось подготовить задачу',
+    summary: 'Для безопасного анализа проект оказался больше поддерживаемого предела. Задача не была передана AI, изменения не вносились.',
+    action: 'Обновите Flowcairn и повторите запуск. Если проблема останется, приложите отчет из раздела «Доказательства».',
+  },
+  WORKSPACE_LIMIT_EXCEEDED: {
+    title: 'Не удалось подготовить рабочее состояние',
+    summary: 'Flowcairn остановился до изменений, потому что не смог безопасно проверить все нужные файлы.',
+    action: 'Обновите Flowcairn и повторите запуск. Изменения в проект не вносились.',
+  },
+  SOURCE_CAPTURE_TIMEOUT: {
+    title: 'Подготовка задачи заняла слишком много времени',
+    summary: 'Flowcairn не успел безопасно собрать исходное состояние проекта. AI-анализ не запускался.',
+    action: 'Повторите запуск. Если это повторится, проверьте, не занят ли диск или проект другим процессом.',
+  },
+  NETWORK_UNCERTAIN: {
+    title: 'Не удалось связаться с локальным сервисом',
+    summary: 'Результат операции неизвестен: ответ от Flowcairn не получен.',
+    action: 'Обновите состояние. Не повторяйте изменение, пока не увидите актуальный результат.',
+  },
+  SKILLS_CONTEXT_TOO_LARGE: {
+    title: 'Для этой задачи подключено слишком много правил',
+    summary: 'Flowcairn остановился до запуска AI, потому что выбранные правила не помещаются в безопасный контекст.',
+    action: 'Сократите набор правил в настройках проекта и повторите запуск.',
+  },
+  RUNNER_TOOLCHAIN_INVALID: {
+    title: 'Исполнитель пока не готов',
+    summary: 'Flowcairn не смог безопасно проверить инструменты, которые нужны для выполнения задачи.',
+    action: 'Откройте настройки проекта, исправьте установку исполнителя и перезапустите Flowcairn.',
+  },
+  PROVIDER_AUTH_REQUIRED: {
+    title: 'Нужно войти в AI-исполнитель',
+    summary: 'Flowcairn не может начать анализ, пока выбранный AI-клиент не авторизован.',
+    action: 'Войдите в выбранный AI-клиент и повторите запуск.',
+  },
+  CODEX_AUTH_REQUIRED: {
+    title: 'Нужно войти в Codex',
+    summary: 'Flowcairn не может начать анализ, пока Codex не авторизован.',
+    action: 'Выполните вход в Codex и повторите запуск.',
+  },
+  STALE_CONTEXT: {
+    title: 'Данные задачи устарели',
+    summary: 'Проект или настройки изменились, пока Flowcairn готовил действие.',
+    action: 'Обновите состояние и создайте актуальный план.',
+  },
+  REVISION_CONFLICT: {
+    title: 'Задача уже обновилась',
+    summary: 'Другой шаг изменил состояние этой задачи раньше, чем был применен ваш запрос.',
+    action: 'Обновите состояние и продолжайте по актуальному плану.',
+  },
+  PLAN_CONFLICT: {
+    title: 'План уже изменился',
+    summary: 'Ваше действие относится к предыдущей версии плана и не было выполнено.',
+    action: 'Откройте актуальный план и повторите нужное действие.',
+  },
+  GATE_EXPIRED: {
+    title: 'Подтверждение устарело',
+    summary: 'План или его условия изменились до вашего подтверждения, поэтому действие не было выполнено.',
+    action: 'Обновите состояние и подтвердите актуальный план заново.',
+  },
+};
+
+/** Converts internal failures into an explanation and a safe next step for the operator. */
+export function runtimeProblem(value: string | null | undefined, locale: Locale = 'ru'): RuntimeProblem | null {
+  if (!value || locale === 'en') return null;
+  const code = /^([A-Z][A-Z0-9_]+)(?::|\s|$)/.exec(value)?.[1];
+  if (!code) return null;
+  return runtimeProblems[code] ?? {
+    title: 'Не удалось продолжить работу',
+    summary: 'Flowcairn остановил этот шаг до новых изменений, потому что не смог безопасно подтвердить его состояние.',
+    action: 'Обновите состояние задачи. Если проблема повторится, откройте технический отчет для диагностики.',
+  };
+}
 const stateWords: Record<string, string> = {
   idle: 'не начат',
   pending: 'в очереди',
@@ -96,6 +182,8 @@ const stateWords: Record<string, string> = {
 export function humanText(value: string | null | undefined, locale: Locale = 'ru'): string {
   if (!value) return '';
   if (locale === 'en') return value;
+  const problem = runtimeProblem(value, locale);
+  if (problem) return problem.summary;
   if (reasons[value]) return reasons[value];
   // Translate only a known runtime sentence, preserving the referenced machine ID.
   const dependency = /^Ожидается (.+): ([a-z-]+)$/.exec(value);
