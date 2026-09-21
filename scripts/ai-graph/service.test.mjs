@@ -28,13 +28,13 @@ async function fixture(t, overrides = {}, taskInput = input) {
   const skills = [...new Set(Object.values(SKILL_ROUTES).flat())]
     .sort()
     .map((id) => ({ id, path: `.agents/skills/${id}/SKILL.md`, hash }));
-  const fingerprint = () => ({
-    hash: hashObject(value),
-    files: [
+  const fingerprint = () => {
+    const files = [
       { path: 'src/example.txt', hash: hashObject(value), mode: '100644', size: value.length },
-    ],
-    git: { head: hash, indexHash: hash },
-  });
+    ];
+    const git = { head: hash, indexHash: hash };
+    return { hash: hashObject({ files, git }), files, git };
+  };
   const adapters = {
     identity: () => identity,
     skills: () => skills,
@@ -346,7 +346,7 @@ for (const fence of ['binding', 'runtime'])
     let s = await f.approve();
     s = await f.service.command(s.runId, 'run', f.request(s));
     assert.equal(applied, 0);
-    assert.equal(f.adapters.fingerprint().hash, hashObject('before'));
+    assert.equal(f.adapters.fingerprint().files[0].hash, hashObject('before'));
     assert.equal(s.capabilities.run.allowed, false);
   });
 
