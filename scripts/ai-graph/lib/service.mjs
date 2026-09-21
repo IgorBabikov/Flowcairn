@@ -1313,6 +1313,12 @@ export class WorkflowService {
       if (!caps.run.stop.allowed) fail('CONTROL_DENIED', 'Нет активной операции');
       state = this.#write(state, {
         stopRequested: true,
+        stopResult: {
+          operationId: state.activeOperation.id,
+          requestedAt: now(),
+          state: 'requested',
+          reason: null,
+        },
         operations: { ...state.operations, [request.operationId]: { digest, status: 'finished' } },
       });
       this.active.get(runId)?.abort();
@@ -1345,6 +1351,7 @@ export class WorkflowService {
     state = this.#write(state, {
       activeOperation: operation,
       stopRequested: false,
+      stopResult: null,
       actor,
       operations: { ...state.operations, [request.operationId]: { digest, status: 'running' } },
     });
@@ -1376,6 +1383,9 @@ export class WorkflowService {
         const toolchain = this.adapters.prepareToolchain?.(binding.worktree) ?? null;
         const fingerprint = this.adapters.fingerprint(binding.worktree, toolchain);
         const storedFingerprint = this.#persistFingerprint(fingerprint);
+        state = this.store.readRun(runId);
+        if (state.activeOperation?.id !== operation.id)
+          fail('EXECUTION_FENCED', 'Операция больше не владеет run');
         state = this.#write(state, {
           binding,
           toolchain,
@@ -1405,6 +1415,15 @@ export class WorkflowService {
       if (state.activeOperation?.id === operation.id)
         this.#write(state, {
           activeOperation: null,
+          ...(state.stopRequested && state.stopResult?.state === 'requested' && !state.activeOperation.process
+            ? {
+                stopResult: {
+                  ...state.stopResult,
+                  state: 'stopped',
+                  reason: null,
+                },
+              }
+            : {}),
           operations: {
             ...state.operations,
             [request.operationId]: { digest, status: 'finished' },

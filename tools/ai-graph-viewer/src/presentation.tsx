@@ -114,6 +114,11 @@ const runtimeProblems: Record<string, RuntimeProblem> = {
     summary: 'Результат операции неизвестен: ответ от Flowcairn не получен.',
     action: 'Обновите состояние. Не повторяйте изменение, пока не увидите актуальный результат.',
   },
+  STOP_ACCEPTANCE_UNKNOWN: {
+    title: 'Не удалось подтвердить остановку',
+    summary: 'Не удалось подтвердить, принята ли команда остановки. Процесс мог продолжить работу.',
+    action: 'Обновите состояние задачи перед следующим действием. Не отправляйте команду остановки повторно вслепую.',
+  },
   SKILLS_CONTEXT_TOO_LARGE: {
     title: 'Для этой задачи подключено слишком много правил',
     summary: 'Flowcairn остановился до запуска AI, потому что выбранные правила не помещаются в безопасный контекст.',
@@ -156,16 +161,35 @@ const runtimeProblems: Record<string, RuntimeProblem> = {
   },
 };
 
+const unknownRuntimeProblem: RuntimeProblem = {
+  title: 'Не удалось продолжить работу',
+  summary: 'Flowcairn остановил этот шаг до новых изменений, потому что не смог безопасно подтвердить его состояние.',
+  action: 'Обновите состояние задачи. Если проблема повторится, откройте технические детали для диагностики.',
+};
+
+const isTechnicalDiagnostic = (value: string) =>
+  /[A-Za-z]{3,}/.test(value) && !/[А-Яа-я]/.test(value);
+
+export function technicalProblem(value: string | null | undefined): {
+  code: string | null;
+  message: string;
+} | null {
+  if (!value) return null;
+  const match = /^([A-Z][A-Z0-9_]+)(?::|\s|$)/.exec(value);
+  if (match?.[1])
+    return {
+      code: match[1],
+      message: value.slice(match[0].length).trim() || value,
+    };
+  return isTechnicalDiagnostic(value) ? { code: null, message: value } : null;
+}
+
 /** Converts internal failures into an explanation and a safe next step for the operator. */
 export function runtimeProblem(value: string | null | undefined, locale: Locale = 'ru'): RuntimeProblem | null {
   if (!value || locale === 'en') return null;
   const code = /^([A-Z][A-Z0-9_]+)(?::|\s|$)/.exec(value)?.[1];
-  if (!code) return null;
-  return runtimeProblems[code] ?? {
-    title: 'Не удалось продолжить работу',
-    summary: 'Flowcairn остановил этот шаг до новых изменений, потому что не смог безопасно подтвердить его состояние.',
-    action: 'Обновите состояние задачи. Если проблема повторится, откройте технический отчет для диагностики.',
-  };
+  if (code) return runtimeProblems[code] ?? unknownRuntimeProblem;
+  return isTechnicalDiagnostic(value) ? unknownRuntimeProblem : null;
 }
 const stateWords: Record<string, string> = {
   idle: 'не начат',

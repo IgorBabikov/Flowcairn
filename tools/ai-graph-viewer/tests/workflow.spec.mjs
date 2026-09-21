@@ -31,8 +31,12 @@ test('ready analysis shows a permitted start action or an explicit executor prob
     await expect(page.getByRole('heading', { name: 'Исполнитель пока не готов', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Начать анализ', exact: true })).toHaveCount(0);
     await expect(page.locator('.workflow-summary')).toContainText('не смог безопасно проверить инструменты');
-    await page.locator('.health-details summary').click();
-    const health = page.locator('.run-health');
+    if (width < 720) await page.getByRole('button', { name: 'Показать запуски', exact: true }).click();
+    const rail = width < 720
+      ? page.getByRole('dialog', { name: 'Запуски', exact: true })
+      : page.locator('.desktop-run-rail');
+    await rail.locator('.health-details summary').click();
+    const health = rail.locator('.run-health');
     await health.scrollIntoViewIfNeeded();
     const fits = await health.evaluate(element => {
       const box = element.getBoundingClientRect();
@@ -44,6 +48,7 @@ test('ready analysis shows a permitted start action or an explicit executor prob
     expect(fits).toBe(true);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.screenshot({ path: testInfo.outputPath(`runner-health-${name}.png`), fullPage: true });
+    if (width < 720) await page.keyboard.press('Escape');
   }
 });
 test('one approval binds the displayed plan without a manual run', async ({page}) => {
@@ -100,14 +105,32 @@ test('autonomous plan renders on desktop and mobile with reduced motion', async 
     await page.setViewportSize({width,height});await page.goto(`/#session=${token}`);
     await expect(page.getByRole('button',{name:'Согласен',exact:true})).toBeEnabled();
     expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+    await page.getByRole('button',{name:'Граф · детали исполнения',exact:true}).click();
     const animation=await page.locator('.graph-node.status-waiting-for-human').first().evaluate(el=>getComputedStyle(el,'::after').animationName);
     expect(animation).toBe('none');
     await page.screenshot({path:testInfo.outputPath(`workflow-${name}.png`),fullPage:true});
   }
 });
 
+test('task heading keeps one collapsible copy of a long description', async ({ page }) => {
+  const state = workflow();
+  state.task.description = 'Подробное описание задачи с требованиями к интерфейсу, проверкам и безопасному результату. '.repeat(24).trim();
+  await mockApi(page, state);
+  await page.goto(`/#session=${token}`);
+
+  await expect(page.getByRole('heading', { name: state.task.title, exact: true })).toHaveCount(1);
+  const description = page.getByText(state.task.description, { exact: true });
+  await expect(description).toHaveCount(1);
+  await expect(description).toHaveClass(/clamped/);
+  await expect(page.getByRole('button', { name: 'Показать полностью' })).toBeVisible();
+  await page.getByRole('button', { name: 'Показать полностью' }).click();
+  await expect(description).not.toHaveClass(/clamped/);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
 test('historical analysis opens the original receipt and never creates a write capability', async ({page}) => {
   const fixture=await mockApi(page,workflow());await page.goto(`/#session=${token}`);
+  await page.getByRole('button',{name:'Граф · детали исполнения',exact:true}).click();
   await page.getByRole('button',{name:'Анализ задачи: Завершен',exact:true}).click();
   await expect(page.getByText(/Сохраненный анализ из предыдущей версии/)).toBeVisible();
   const request=page.waitForRequest(request=>request.url().includes('/api/runs/run-analysis/receipts/'));
@@ -118,11 +141,12 @@ test('historical analysis opens the original receipt and never creates a write c
 test('plan feedback survives reading reports and historical selection survives refresh', async ({page}) => {
   const fixture=await mockApi(page,workflow());await page.goto(`/#session=${token}`);
   await page.getByLabel('Что дополнить или исправить?').fill('Сохранить введенные значения после ошибки');
+  await page.getByRole('button',{name:'Граф · детали исполнения',exact:true}).click();
   await page.getByRole('button',{name:'Анализ задачи: Завершен',exact:true}).click();
   const reads=fixture.snapshotReads();fixture.current().revision+=1;
   await expect.poll(()=>fixture.snapshotReads()).toBeGreaterThan(reads);
   await expect(page.getByText(/Сохраненный анализ из предыдущей версии/)).toBeVisible();
-  await page.getByRole('tab',{name:'План',exact:true}).click();
+  await page.getByRole('button',{name:'Задача',exact:true}).click();
   await expect(page.getByLabel('Что дополнить или исправить?')).toHaveValue('Сохранить введенные значения после ошибки');
   await expect(page.getByRole('button',{name:'Согласен',exact:true})).toBeDisabled();
 });
@@ -139,7 +163,7 @@ test('scheduler failure is visible even without a failed node', async ({page}) =
   await expect(page.locator('.current-stage')).toHaveCount(0);
 });
 
-test('internal storage limits are explained without exposing a code to the operator', async ({page}) => {
+test('internal storage limits use Russian copy and reveal code only in technical details', async ({page}) => {
   const state = workflow();
   state.status = 'failed';
   state.gates = [];
@@ -150,8 +174,12 @@ test('internal storage limits are explained without exposing a code to the opera
   await expect(page.getByRole('heading', { name: 'Не удалось подготовить задачу', exact: true })).toBeVisible();
   await expect(page.locator('.workflow-summary')).toContainText('Задача не была передана AI');
   await expect(page.locator('.workflow-problem')).toContainText('Что делать дальше');
-  await expect(page.locator('.workflow-panel')).not.toContainText('STORE_LIMIT_EXCEEDED');
-  await expect(page.locator('.workflow-panel')).not.toContainText('array limit');
+  const technical = page.locator('.workflow-panel .technical-details');
+  await expect(technical).not.toHaveAttribute('open', '');
+  await expect(technical.getByText(/STORE_LIMIT_EXCEEDED/)).not.toBeVisible();
+  await technical.locator('summary').click();
+  await expect(technical).toContainText('STORE_LIMIT_EXCEEDED');
+  await expect(technical).toContainText('state.initialFingerprint.files превышает array limit');
 });
 
 test('shows only runtime-authorized recovery controls after autonomous failure', async ({page}) => {
@@ -162,6 +190,7 @@ test('shows only runtime-authorized recovery controls after autonomous failure',
   ];
   state.activeNodeId='review';state.capabilities={...allDenied,requestReplan:allowed};
   const fixture=await mockApi(page,state);await page.goto(`/#session=${token}`);
+  await page.getByRole('button',{name:'Граф · детали исполнения',exact:true}).click();
   const details=page.locator('.node-details');
   await expect(details.getByRole('heading',{name:'Проверка изменений'})).toBeVisible();
   await expect(details.getByRole('button',{name:'Повторить',exact:true})).toBeVisible();
@@ -179,6 +208,7 @@ test('hides the MiniMap for a compact ten-node workflow', async ({page}) => {
   state.nodes=Array.from({length:10},(_,index)=>({...state.nodes[1],id:`step-${index}`,needs:index?[`step-${index-1}`]:[],capabilities:allDenied}));
   state.edges=state.nodes.slice(1).map((node,index)=>({id:`edge-${index}`,source:`step-${index}`,target:node.id}));
   await mockApi(page,state);await page.goto(`/#session=${token}`);
+  await page.getByRole('button',{name:'Граф · детали исполнения',exact:true}).click();
   await expect(page.locator('.graph-node')).toHaveCount(10);
   await expect(page.getByLabel('Мини-карта графа')).toHaveCount(0);
 });

@@ -27,6 +27,8 @@ function taskWithProof() {
 test('task cockpit leads to requirement evidence and advanced graph', async ({ page }) => {
   await mockApi(page, taskWithProof()); await page.goto(`/#session=${token}`);
   await expect(page.getByRole('region', { name: 'Задача и доказательства' })).toBeVisible();
+  await expect(page.locator('.detail-panel')).toHaveCount(0);
+  await expect(page.locator('.detail-scroll')).toHaveCount(0);
   await expect(page.getByTestId('task-proof-status')).toHaveText('Результат подтвержден');
   await expect(page.getByText('PROVEN', { exact: true })).toHaveCount(0);
   await expect(page.getByTestId('requirement-coverage')).toContainText('1 из 1');
@@ -43,8 +45,53 @@ test('task cockpit leads to requirement evidence and advanced graph', async ({ p
   await page.getByRole('button', { name: 'Закрыть', exact: true }).click();
   await page.getByRole('button', { name: 'Граф · детали исполнения', exact: true }).click();
   await expect(page.locator('.graph-node').first()).toBeVisible();
+  await expect(page.locator('.detail-panel')).toHaveCount(1);
+  await expect(page.locator('.detail-scroll')).toHaveCount(1);
   await page.getByRole('button', { name: 'Задача', exact: true }).click();
   await expect(page.getByTestId('task-proof-status')).toHaveText('Результат подтвержден');
+});
+
+test('mobile run rail opens as a modal and restores focus', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockApi(page, taskWithProof());
+  await page.goto(`/#session=${token}`);
+
+  const opener = page.getByRole('button', { name: 'Показать запуски', exact: true });
+  await expect(opener).toBeVisible();
+  await expect(page.locator('.desktop-run-rail')).toBeHidden();
+  await opener.click();
+  const dialog = page.getByRole('dialog', { name: 'Запуски', exact: true });
+  await expect(dialog).toBeVisible();
+  expect(await dialog.evaluate((element) => element.matches(':modal'))).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath('mobile-runs-drawer.png') });
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(opener).toBeFocused();
+});
+
+test('mobile run modal closes when viewport becomes desktop', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockApi(page, taskWithProof());
+  await page.goto(`/#session=${token}`);
+  await page.getByRole('button', { name: 'Показать запуски', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Запуски', exact: true })).toBeVisible();
+
+  await page.setViewportSize({ width: 1366, height: 768 });
+
+  await expect(page.locator('dialog.mobile-runs-dialog')).toHaveCount(0);
+  await expect(page.locator('.desktop-run-rail')).toBeVisible();
+});
+
+test('compact graph details open as a closable dialog', async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await mockApi(page, taskWithProof());
+  await page.goto(`/#session=${token}`);
+  await page.getByRole('button', { name: 'Граф · детали исполнения', exact: true }).click();
+
+  const details = page.getByRole('dialog', { name: 'Детали исполнения', exact: true });
+  await expect(details).toBeVisible();
+  await details.getByRole('button', { name: 'Закрыть детали', exact: true }).click();
+  await expect(details).toHaveCount(0);
 });
 
 test('reports and English navigation use readable labels while API status stays unchanged', async ({ page }) => {
@@ -94,6 +141,7 @@ test('a failed live snapshot hides previous proof until fresh confirmation retur
   await expect(page.getByTestId('task-proof-status')).toHaveText('Результат подтвержден');
   await page.route('**/snapshot', route => route.fulfill({ status: 500, json: { error: { code: 'INTEGRITY', message: 'Evidence lineage is unavailable' } } }));
   await expect(page.getByRole('heading', { name: 'Актуальность результата не подтверждена' })).toBeVisible();
+  await expect(page.getByTestId('task-proof-status')).toHaveText('Состояние недоступно');
   await expect(page.locator('.completion-certificate')).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'Готово к вашему ревью' })).toHaveCount(0);
   await expect(page.locator('.run-row em')).toHaveText('Состояние недоступно');
@@ -106,16 +154,17 @@ test('workflow check summary loses its green pass when proof becomes stale or un
   state.nodes[1].receiptIds = [hash('b')];
   state.nodes[1].checks = [{ id: 'form-validation', passed: true, exitCode: 0, durationMs: 10, summary: 'Проверено', inputHash: hash('a') }];
   const fixture = await mockApi(page, state); await page.goto(`/#session=${token}`);
-  const checks = page.locator('.workflow-panel .result-checks');
-  await expect(checks).toContainText('form-validation: пройдена');
-  await expect(checks.locator('[data-status="passed"]')).toHaveCount(1);
+  const evidence = page.getByRole('region', { name: 'Доказательство требования', exact: true });
+  await expect(evidence).toContainText('Проверка пройдена');
+  await expect(evidence).toContainText('Актуально');
   const current = fixture.current(); current.revision += 1; current.proof.resultHash = hash('c');
   current.proof.status = 'STALE'; current.proof.certificate = null; current.proof.evidence[0].freshness = 'stale';
-  await expect(checks).toContainText('устарела, нужна перепроверка');
-  await expect(checks.locator('[data-status="passed"]')).toHaveCount(0);
+  current.proof.evidence[0].staleReason = 'Проверенное состояние изменилось.';
+  await expect(evidence).toContainText('Устарело');
+  await expect(evidence).toContainText('Проверенное состояние изменилось.');
   await page.route('**/snapshot', route => route.fulfill({ status: 500, json: { error: { code: 'INTEGRITY', message: 'State unavailable' } } }));
-  await expect(checks).toContainText('актуальность не подтверждена');
-  await expect(checks.locator('[data-status="passed"]')).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Актуальность результата не подтверждена' })).toBeVisible();
+  await expect(page.getByText('Проверка пройдена', { exact: true })).toHaveCount(0);
 });
 
 test('incomplete coverage and unavailable verification are never completion', async ({ page }) => {

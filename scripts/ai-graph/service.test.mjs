@@ -416,7 +416,19 @@ test('recovery deduplicates process identity and reuses its durable stop receipt
     inspections += 1;
     return { stopped: true, uncertain: false };
   });
-  let s = await f.restarted.command(f.snapshot.runId, 'recover', f.request(f.snapshot));
+  const beforeRecovery = f.restarted.store.readRun(f.snapshot.runId);
+  f.restarted.store.updateRun(beforeRecovery.runId, beforeRecovery.revision, (current) => ({
+    ...current,
+    stopRequested: true,
+    stopResult: {
+      operationId: current.activeOperation.id,
+      requestedAt: new Date().toISOString(),
+      state: 'requested',
+      reason: null,
+    },
+  }));
+  const recoverable = f.restarted.snapshot(f.snapshot.runId);
+  let s = await f.restarted.command(recoverable.runId, 'recover', f.request(recoverable));
   assert.equal(inspections, 1);
   const recoveredNode = s.nodes.find((node) => node.id === 'analyze');
   const recoveryReceipt = f.restarted.receipt(s.runId, recoveredNode.receiptIds.at(-1));
@@ -426,6 +438,9 @@ test('recovery deduplicates process identity and reuses its durable stop receipt
     recoveryReceipt.termination.ticketHash,
     hashObject({ pid: process.pid, ticket: 'orphan-child' }),
   );
+  const recoveredState = f.restarted.store.readRun(s.runId);
+  assert.equal(recoveredState.stopRequested, false);
+  assert.equal(recoveredState.stopResult, null);
   s = await f.restarted.command(s.runId, 'recover', f.request(s));
   assert.equal(inspections, 1);
   assert.equal(s.integrity.valid, true);
@@ -975,6 +990,88 @@ test('registry drift does not prevent stopping an active allocation', async (t) 
   assert.equal(s.capabilities.stop.allowed, true);
   await f.service.command(s.runId, 'stop', f.request(s));
   assert.equal(f.service.store.readRun(s.runId).stopRequested, true);
+});
+
+test('stop snapshot stays stopping until the owned execution confirms termination', async (t) => {
+  let release;
+  let started;
+  const held = new Promise((resolve) => { release = resolve; });
+  const began = new Promise((resolve) => { started = resolve; });
+  t.after(() => release?.());
+  const f = await fixture(t);
+  f.adapters.execute = async ({ onStart }) => {
+    await onStart({ pid: process.pid, ticket: 'held-stop-fixture' });
+    started();
+    await held;
+    return { exitCode: null, stopped: true, uncertain: true, failureReason: 'ABORTED' };
+  };
+  let current = await f.approve();
+  const running = f.service.command(
+    current.runId,
+    'run',
+    f.request(current, { nodeId: 'analyze' }),
+  );
+  await began;
+  current = f.service.snapshot(current.runId);
+  const stopping = await f.service.command(current.runId, 'stop', f.request(current));
+  assert.equal(stopping.execution.state, 'stopping');
+  release();
+  const finished = await running;
+  assert.equal(finished.execution.state, 'stopped');
+  assert.equal(finished.status, 'uncertain');
+});
+
+test('unconfirmed child termination is projected as stop-uncertain', async (t) => {
+  const f = await fixture(t);
+  const state = f.service.store.readRun(f.snapshot.runId);
+  const next = f.service.store.updateRun(state.runId, state.revision, (current) => ({
+    ...current,
+    stopRequested: true,
+    stopResult: {
+      operationId: 'op-stop-proof',
+      requestedAt: new Date().toISOString(),
+      state: 'uncertain',
+      reason: 'PROCESS_STOP_UNCONFIRMED',
+    },
+  }));
+  assert.equal(f.service.snapshot(next.runId).execution.state, 'stop-uncertain');
+});
+
+test('legacy states without stopResult have compatible execution projections', async (t) => {
+  const f = await fixture(t);
+  assert.deepEqual(f.snapshot.execution, { state: 'idle', stopRequested: false });
+  await f.approve();
+  const running = historicalRegistryFixture(f, { active: true });
+  assert.deepEqual(running.execution, { state: 'running', stopRequested: false });
+});
+
+test('stop before child start becomes stopped without a fictitious termination receipt', async (t) => {
+  let release;
+  let started;
+  const held = new Promise((resolve) => { release = resolve; });
+  const began = new Promise((resolve) => { started = resolve; });
+  t.after(() => release?.());
+  const f = await fixture(t);
+  const allocate = f.adapters.allocate;
+  f.adapters.allocate = async (options) => {
+    started();
+    await held;
+    return allocate(options);
+  };
+  let current = await f.approve();
+  const running = f.service.command(
+    current.runId,
+    'run',
+    f.request(current, { nodeId: 'analyze' }),
+  );
+  await began;
+  current = f.service.snapshot(current.runId);
+  const stopping = await f.service.command(current.runId, 'stop', f.request(current));
+  assert.equal(stopping.execution.state, 'stopping');
+  release();
+  const finished = await running;
+  assert.equal(finished.execution.state, 'stopped');
+  assert.equal(finished.nodes.find((node) => node.id === 'analyze').receiptIds.length, 0);
 });
 
 test('review/fix replan carries the failed check evidence into the next AI analysis', async (t) => {

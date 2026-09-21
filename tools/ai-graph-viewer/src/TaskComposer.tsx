@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import type { ApiError, Capability, TaskFields } from './contracts';
 import { humanText, runtimeProblem } from './presentation';
+import { StatusLoader } from './StatusLoader';
+import { TechnicalDetails } from './TechnicalDetails';
 
 /** Форма передает задачу; настройки и права определяет сервис. */
 export function TaskComposer({ capability, busy, pending, error, onSubmit, onRetry, onClose }: {
@@ -39,14 +41,15 @@ export function TaskComposer({ capability, busy, pending, error, onSubmit, onRet
         <input id="task-number" name="taskNumber" required maxLength={80}
           value={taskNumber} disabled={busy || pending} onChange={event => setTaskNumber(event.target.value)} />
         {!allowed && <p role="status" className="field-error">{humanText(capability?.reason) || 'Не удалось загрузить проект. Повторите загрузку.'}</p>}
-        {error && <div className="dialog-error" role="alert"><p>{(problem?.summary ?? humanText(error.message)) || 'Не удалось подготовить задачу.'}</p>
+        {error && <div className="dialog-error" role="alert"><strong>{problem?.title ?? 'Не удалось подготовить задачу'}</strong><p>{(problem?.summary ?? humanText(error.message)) || 'Не удалось подготовить задачу.'}</p>
           {problem && <p>{problem.action}</p>}
+          <TechnicalDetails code={error.code} message={error.message} />
           <button type="button" className="button" disabled={busy} onClick={onRetry}>{pending ? 'Повторить тот же запрос' : 'Обновить контекст'}</button>
         </div>}
         {busy && pending && <p className="intake-progress" role="status">Подготавливаем снимок проекта и граф задачи. Для большого проекта это может занять до двух минут.</p>}
         <footer>
           <button className="button primary" type="submit" disabled={busy || pending || !allowed || !valid}>
-            {busy ? 'Запускаем…' : 'Запустить'}
+            {busy ? <StatusLoader kind="button" label="Запускаем…" inline announce={false} /> : 'Запустить'}
           </button>
         </footer>
       </form>

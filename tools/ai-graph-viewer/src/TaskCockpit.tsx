@@ -25,10 +25,11 @@ function blockerText(reason: string, proof: TaskProof) {
   return humanText(reason);
 }
 
-export function TaskCockpit({ snapshot, busy, unavailable = false, onOpenEvidence, onOpenArtifact, onAcceptRequirement }: {
+export function TaskCockpit({ snapshot, busy, unavailable = false, embedded = false, onOpenEvidence, onOpenArtifact, onAcceptRequirement }: {
   snapshot: Snapshot;
   busy: boolean;
   unavailable?: boolean;
+  embedded?: boolean;
   onOpenEvidence: OpenEvidence;
   onOpenArtifact: (artifactId: string) => void;
   onAcceptRequirement?: ((requirementId: string, reason: string) => void) | undefined;
@@ -49,12 +50,12 @@ export function TaskCockpit({ snapshot, busy, unavailable = false, onOpenEvidenc
   const selectRequirement = (id: string) => { setSelectedId(id); setView('requirements'); };
   return <section className="task-cockpit" aria-label="Задача и доказательства">
     <header className="cockpit-header">
-      <div className="cockpit-title"><h2>{snapshot.task?.title || proof.contract?.goal || snapshot.task?.goal || 'Задача'}</h2>
+      {!embedded && <><div className="cockpit-title"><h2>{snapshot.task?.title || proof.contract?.goal || snapshot.task?.goal || 'Задача'}</h2>
         <span className={`proof-status ${proven ? 'is-proven' : ''}`} data-testid="task-proof-status">
           {snapshot.integrity.valid ? taskLabels[proof.status] : 'Целостность данных не подтверждена'}
         </span>
       </div>
-      <p>{proof.contract?.goal || snapshot.task?.goal || 'Контракт задачи еще формируется.'}</p>
+      <p>{proof.contract?.goal || snapshot.task?.goal || 'Контракт задачи еще формируется.'}</p></>}
       <div className="coverage-summary">
         <span data-testid="requirement-coverage"><strong>{proof.coverage.proven} из {proof.coverage.required}</strong> обязательных требований подтверждено</span>
         <progress aria-label="Подтвержденные обязательные требования" value={proof.coverage.proven} max={Math.max(proof.coverage.required, 1)} />

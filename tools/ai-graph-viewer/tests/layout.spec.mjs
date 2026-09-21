@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { mkdir } from 'node:fs/promises';
-import { graphNode, snapshot, mockApi, allDenied, token } from './fixtures.mjs';
+import { graphNode, snapshot, mockApi, allDenied, runSummary, token } from './fixtures.mjs';
 
 function chain() {
   const current = snapshot();
@@ -86,6 +86,12 @@ function overlaps(left, right) {
   );
 }
 
+async function openGraph(page) {
+  await page.getByRole('button', { name: 'Граф · детали исполнения', exact: true }).click();
+  const closeDetails = page.getByRole('button', { name: 'Закрыть детали', exact: true });
+  if (await closeDetails.isVisible()) await closeDetails.click();
+}
+
 function redundantChain() {
   const current = snapshot();
   const ids = [
@@ -128,6 +134,7 @@ test('desktop opens the complete dependency-ordered chain in compact rows and pr
   current.nodes.reverse(); // Array order must not replace dependency order.
   const fixture = await mockApi(page, current);
   await page.goto(`/#session=${token}`);
+  await openGraph(page);
   await expect(page.locator('.graph-node')).toHaveCount(9);
   const cards = await positions(page);
   expect(cards.map((card) => card.id)).toEqual(
@@ -183,8 +190,8 @@ test('keeps run rail actions on one compact line', async ({ page }) => {
   expect(heading).not.toBeNull();
   expect(newTask).not.toBeNull();
   expect(refresh).not.toBeNull();
-  expect(newTask.height).toBeLessThanOrEqual(34);
-  expect(refresh.height).toBeLessThanOrEqual(34);
+  expect(newTask.height).toBeGreaterThanOrEqual(40);
+  expect(refresh.height).toBeGreaterThanOrEqual(40);
   expect(newTask.y).toBeGreaterThanOrEqual(heading.y);
   expect(newTask.y + newTask.height).toBeLessThanOrEqual(heading.y + heading.height);
 });
@@ -193,21 +200,21 @@ test('keeps run rail actions readable on mobile', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await mockApi(page, chain());
   await page.goto(`/#session=${token}`);
-  const heading = await page.locator('.rail-heading').boundingBox();
-  const newTask = await page.locator('#new-task').boundingBox();
-  const refresh = await page.getByRole('button', { name: 'Обновить', exact: true }).boundingBox();
+  await page.getByRole('button', { name: 'Показать запуски', exact: true }).click();
+  const rail = page.getByRole('dialog', { name: 'Запуски', exact: true });
+  const heading = await rail.locator('header').boundingBox();
+  const close = await rail.getByRole('button', { name: 'Закрыть', exact: true }).boundingBox();
   expect(heading).not.toBeNull();
-  expect(newTask).not.toBeNull();
-  expect(refresh).not.toBeNull();
-  expect(newTask.height).toBeLessThanOrEqual(34);
-  expect(newTask.x + newTask.width).toBeLessThanOrEqual(heading.x + heading.width);
-  expect(refresh.x + refresh.width).toBeLessThanOrEqual(newTask.x);
+  expect(close).not.toBeNull();
+  expect(close.height).toBeGreaterThanOrEqual(38);
+  expect(close.x + close.width).toBeLessThanOrEqual(heading.x + heading.width);
 });
 
 test('keeps canvas controls in a reserved top-left zone away from graph nodes', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
   await mockApi(page, chain());
   await page.goto(`/#session=${token}`);
+  await openGraph(page);
   const controls = page.locator('.react-flow__controls');
   await expect(controls).toHaveClass(/top/);
   await expect(controls).toHaveClass(/left/);
@@ -226,6 +233,7 @@ test('keeps controls away from the focused node on mobile', async ({ page }) => 
   await page.setViewportSize({ width: 390, height: 844 });
   await mockApi(page, chain());
   await page.goto(`/#session=${token}`);
+  await openGraph(page);
   const controls = page.locator('.react-flow__controls');
   await expect(controls).toHaveClass(/top/);
   const controlsBox = await controls.boundingBox();
@@ -245,6 +253,7 @@ test('keeps a serial workflow compact when it retains transitive dependencies', 
   await page.setViewportSize({ width: 1440, height: 1000 });
   await mockApi(page, redundantChain());
   await page.goto(`/#session=${token}`);
+  await openGraph(page);
   await expect(page.locator('.graph-node')).toHaveCount(12);
 
   const cards = await positions(page);
@@ -294,6 +303,7 @@ test('fork and join remain hierarchical and long titles do not overlap cards', a
   ];
   await mockApi(page, current);
   await page.goto(`/#session=${token}`);
+  await openGraph(page);
   await expect(page.locator('.graph-node')).toHaveCount(4);
   const cards = await positions(page),
     byId = (id) => cards.find((card) => card.id === id);
@@ -305,4 +315,107 @@ test('fork and join remain hierarchical and long titles do not overlap cards', a
   await page.locator('[data-id="left"] .graph-node').click();
   await expect(page.locator('.node-details h2')).toHaveText(current.nodes[1].title);
   await page.screenshot({ path: 'output/playwright/compact-layout-fork.png', fullPage: true });
+});
+
+test('single scroll keeps long task and run list bounded at laptop sizes', async ({ page }, testInfo) => {
+  const current = redundantChain();
+  current.task = {
+    ...snapshot().task,
+    title: 'Большая задача с длинным планом',
+    description: 'Подробное описание пользовательской задачи и ожидаемого результата. '.repeat(32),
+  };
+  const extraRuns = Array.from({ length: 29 }, (_, index) => runSummary({
+    ...current,
+    runId: `run-long-${index}`,
+    task: { ...current.task, id: `TASK-${index}`, taskNumber: `TASK-${index}` },
+  }));
+  await mockApi(page, current, { extraRuns });
+
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 1366, height: 768 }]) {
+    await page.setViewportSize(viewport);
+    await page.goto(`/#session=${token}`);
+    await expect(page.locator('.task-overview')).toBeVisible();
+    const metrics = await page.evaluate(() => {
+      const main = document.querySelector('.main-content');
+      const rail = document.querySelector('.desktop-run-rail .run-list');
+      return {
+        documentFits: document.documentElement.scrollHeight <= window.innerHeight,
+        bodyFits: document.body.scrollHeight <= window.innerHeight,
+        mainOverflowY: main ? getComputedStyle(main).overflowY : '',
+        mainScrollable: Boolean(main && main.scrollHeight > main.clientHeight),
+        railScrollable: Boolean(rail && rail.scrollHeight > rail.clientHeight),
+        detailCount: document.querySelectorAll('.detail-scroll').length,
+      };
+    });
+    expect(metrics.documentFits).toBe(true);
+    expect(metrics.bodyFits).toBe(true);
+    expect(metrics.mainOverflowY).toBe('auto');
+    expect(metrics.mainScrollable).toBe(true);
+    expect(metrics.railScrollable).toBe(true);
+    expect(metrics.detailCount).toBe(0);
+    if (viewport.width === 1366)
+      await page.screenshot({ path: testInfo.outputPath('task-overview-1366x768.png') });
+    const before = await page.evaluate(() => document.scrollingElement?.scrollTop ?? 0);
+    await page.locator('.main-content').hover();
+    await page.mouse.wheel(0, 600);
+    expect(await page.evaluate(() => document.scrollingElement?.scrollTop ?? 0)).toBe(before);
+  }
+});
+
+test('1024 rail and 390 drawer use responsive widths without page overflow', async ({ page }) => {
+  await mockApi(page, chain());
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await page.goto(`/#session=${token}`);
+  expect((await page.locator('.desktop-run-rail').boundingBox())?.width).toBeCloseTo(208, 0);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.locator('.desktop-run-rail')).toBeHidden();
+  await page.getByRole('button', { name: 'Показать запуски', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Запуски', exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test('loads local Latin and Cyrillic Manrope without an external font request', async ({ page }) => {
+  await mockApi(page, chain());
+  await page.goto(`/#session=${token}`);
+  const result = await page.evaluate(async () => {
+    await document.fonts.load('400 16px Manrope', 'flowcairn Привет');
+    return {
+      ready: document.fonts.check('400 16px Manrope', 'flowcairn Привет'),
+      family: getComputedStyle(document.body).fontFamily,
+      fonts: performance.getEntriesByType('resource')
+        .map((entry) => entry.name)
+        .filter((name) => name.includes('Manrope-')),
+    };
+  });
+  expect(result.ready).toBe(true);
+  expect(result.family).toContain('Manrope');
+  expect(result.fonts.some((name) => name.includes('Manrope-Cyrillic-Variable.woff2'))).toBe(true);
+  expect(result.fonts.some((name) => name.includes('Manrope-Latin-Variable.woff2'))).toBe(true);
+  expect(result.fonts.every((name) => new URL(name).origin === 'http://127.0.0.1:4329')).toBe(true);
+});
+
+test('primary controls keep accessible sizes and a visible keyboard focus', async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 768 });
+  await mockApi(page, chain());
+  await page.goto(`/#session=${token}`);
+  const controls = await page.locator('.button:visible, .task-view-switch button:visible').evaluateAll((buttons) =>
+    buttons.map((button) => {
+      const box = button.getBoundingClientRect();
+      return { width: box.width, height: box.height, primary: button.classList.contains('primary') };
+    }));
+  expect(Math.min(...controls.map((control) => control.height))).toBeGreaterThanOrEqual(40);
+  expect(Math.min(...controls.filter((control) => control.primary).map((control) => control.height))).toBeGreaterThanOrEqual(44);
+  const create = page.locator('#new-task');
+  await create.focus();
+  const focus = await create.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { style: style.outlineStyle, width: parseFloat(style.outlineWidth), color: style.outlineColor };
+  });
+  expect(focus.style).toBe('solid');
+  expect(focus.width).toBeGreaterThanOrEqual(3);
+  expect(focus.color).not.toBe('rgba(0, 0, 0, 0)');
+  const skip = page.locator('.skip-link');
+  await expect(skip).toHaveAttribute('href', '#main-content');
+  await expect(page.locator('#main-content')).toHaveCount(1);
 });
