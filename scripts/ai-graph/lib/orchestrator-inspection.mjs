@@ -27,7 +27,7 @@ function makePrompt(state, task, attempt) {
     `Locked resources: ${task.resources.join(', ') || '(none)'}`,
     `Verified dependencies: ${dependencies.join(', ') || '(none)'}`,
     `Read first: ${task.sourceDocs.join(', ') || '(task-local files only)'}`,
-    'Read existing repository instructions and the approved project context. Follow the packaged Flowcairn Skills.',
+    'Read existing repository instructions and the approved project context. Follow the packaged flowcairn Skills.',
     `Acceptance: ${task.acceptance.join(' | ')}`,
     `Required checks: ${task.checks.map((entry) => JSON.stringify(entry)).join(' ; ')}`,
     `Selected model/effort: ${attempt.model} / ${attempt.effort}`,

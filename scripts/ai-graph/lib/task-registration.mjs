@@ -160,7 +160,7 @@ export async function createTask(input, taskInput, options = {}) {
       Array.isArray(existingState.tasks) && existingState.tasks.every(item =>
         item.status === 'pending' && Array.isArray(item.attempts) && item.attempts.length === 0);
     if (!canResumeBootstrap)
-      fail('DIRTY_ROOT', 'В проекте есть незакоммиченные файлы. Сохраните изменения в Git; Flowcairn не коммитит и не прячет их автоматически.');
+      fail('DIRTY_ROOT', 'В проекте есть незакоммиченные файлы. Сохраните изменения в Git; flowcairn не коммитит и не прячет их автоматически.');
     const untracked = git(root, ['ls-files', '--others', '--exclude-standard', '-z']).split('\0').filter(Boolean);
     task = TaskInputSchema.parse({ ...task, includeUntracked: uniqueBootstrapPaths(task.includeUntracked, ownedBootstrapFiles(root), untracked) });
     source = await service.adapters.capture(task);
@@ -198,7 +198,7 @@ export async function createTask(input, taskInput, options = {}) {
       '--owner',
       ownerId,
       '--goal',
-      'Локальные задачи Flowcairn с отдельной приемкой и Git-доставкой',
+      'Локальные задачи flowcairn с отдельной приемкой и Git-доставкой',
       '--mode',
       'autonomous',
       '--max-tasks',
@@ -223,7 +223,7 @@ export async function createTask(input, taskInput, options = {}) {
       id: task.id,
       title: task.goal,
       outcome: task.goal,
-      why: 'Явная постановка задачи оператором Flowcairn',
+      why: 'Явная постановка задачи оператором flowcairn',
       sourceDocs: [PROFILE],
       scope: task.scope,
       resources: task.resources ?? [],

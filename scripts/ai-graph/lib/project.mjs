@@ -160,7 +160,7 @@ export function packageManagerLock(manager) {
 }
 
 /**
- * Maps stable Flowcairn checks to existing project scripts. The mapping is derived
+ * Maps stable flowcairn checks to existing project scripts. The mapping is derived
  * only from package.json and is later revalidated before a Docker check starts.
  */
 export function discoverProjectChecks(pkg) {

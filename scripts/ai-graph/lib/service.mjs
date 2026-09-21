@@ -1120,6 +1120,13 @@ export class WorkflowService {
       updatedAt: now(),
     }));
   }
+  #persistFingerprint(fingerprint) {
+    return this.store.putFingerprint(fingerprint);
+  }
+  #resolveFingerprint(reference) {
+    if (!reference) fail('FINGERPRINT_MISSING', 'Не найден снимок состояния проекта');
+    return Array.isArray(reference.files) ? reference : this.store.readFingerprint(reference.hash);
+  }
   #providerConsent(state, task, plan) {
     const provider = this.adapters.project?.ai.provider;
     if (!externalProvider(provider)) return null;
@@ -1306,6 +1313,12 @@ export class WorkflowService {
       if (!caps.run.stop.allowed) fail('CONTROL_DENIED', 'Нет активной операции');
       state = this.#write(state, {
         stopRequested: true,
+        stopResult: {
+          operationId: state.activeOperation.id,
+          requestedAt: now(),
+          state: 'requested',
+          reason: null,
+        },
         operations: { ...state.operations, [request.operationId]: { digest, status: 'finished' } },
       });
       this.active.get(runId)?.abort();
@@ -1338,6 +1351,7 @@ export class WorkflowService {
     state = this.#write(state, {
       activeOperation: operation,
       stopRequested: false,
+      stopResult: null,
       actor,
       operations: { ...state.operations, [request.operationId]: { digest, status: 'running' } },
     });
@@ -1368,11 +1382,15 @@ export class WorkflowService {
         this.adapters.verifyBinding(binding);
         const toolchain = this.adapters.prepareToolchain?.(binding.worktree) ?? null;
         const fingerprint = this.adapters.fingerprint(binding.worktree, toolchain);
+        const storedFingerprint = this.#persistFingerprint(fingerprint);
+        state = this.store.readRun(runId);
+        if (state.activeOperation?.id !== operation.id)
+          fail('EXECUTION_FENCED', 'Операция больше не владеет run');
         state = this.#write(state, {
           binding,
           toolchain,
-          workspaceFingerprint: fingerprint,
-          initialFingerprint: fingerprint,
+          workspaceFingerprint: storedFingerprint,
+          initialFingerprint: storedFingerprint,
           pendingBinding: null,
         });
       }
@@ -1397,6 +1415,15 @@ export class WorkflowService {
       if (state.activeOperation?.id === operation.id)
         this.#write(state, {
           activeOperation: null,
+          ...(state.stopRequested && state.stopResult?.state === 'requested' && !state.activeOperation.process
+            ? {
+                stopResult: {
+                  ...state.stopResult,
+                  state: 'stopped',
+                  reason: null,
+                },
+              }
+            : {}),
           operations: {
             ...state.operations,
             [request.operationId]: { digest, status: 'finished' },
@@ -1507,6 +1534,8 @@ export class WorkflowService {
       executionHistory: this.#executionHistory.bind(this),
       providerConsent: this.#providerConsent.bind(this),
       putArtifact: this.#putArtifact.bind(this),
+      initialFingerprint: this.#resolveFingerprint.bind(this),
+      persistFingerprint: this.#persistFingerprint.bind(this),
       read: this.#read.bind(this),
       receipt: this.#receipt.bind(this),
       reviewHistory: this.#reviewHistory.bind(this),
@@ -1519,6 +1548,7 @@ export class WorkflowService {
       fail('RECOVERY_DENIED', 'Нет подтвержденного orphan или uncertain состояния');
     return recoverRun({ store: this.store, adapters: this.adapters, ownerStart: this.ownerStart,
       write: this.#write.bind(this), finishReplan: this.#finishReplan.bind(this),
+      persistFingerprint: this.#persistFingerprint.bind(this),
       snapshot: this.snapshot.bind(this), orphan: this.#orphan.bind(this), receipt: this.#receipt.bind(this),
     }, { state, task, plan, request, digest, actor });
   }
@@ -1528,6 +1558,7 @@ export class WorkflowService {
       semanticUncertainty: this.#semanticUncertainty.bind(this), assertWorkspace: this.#assertWorkspace.bind(this),
       read: this.#read.bind(this), analysis: this.#analysis.bind(this), artifact: this.#artifact.bind(this),
       assertConfiguredChecks, write: this.#write.bind(this), create: this.create.bind(this),
+      persistFingerprint: this.#persistFingerprint.bind(this), resolveFingerprint: this.#resolveFingerprint.bind(this),
       snapshot: this.snapshot.bind(this), schedule: this.#schedule.bind(this),
     };
   }

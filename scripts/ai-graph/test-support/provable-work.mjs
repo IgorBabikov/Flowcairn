@@ -53,7 +53,8 @@ export async function fixture(t, { repair = false, method = 'check', missingAsse
       const bytes = readFileSync(path.join(worktree, file));
       return { path: file, hash: sha256(bytes), size: bytes.length, mode: '100644' };
     });
-    return { hash: hashObject(files), files, git: { head: 'a'.repeat(40), indexHash: identity } };
+    const git = { head: 'a'.repeat(40), indexHash: identity };
+    return { hash: hashObject({ files, git }), files, git };
   };
   const changes = (before, after) => ({ allowed: true, changedFiles: after.files.filter((file) => before.files.find((old) => old.path === file.path)?.hash !== file.hash).map((file) => file.path) });
   let implementationCalls = 0, actualChecks = 0;

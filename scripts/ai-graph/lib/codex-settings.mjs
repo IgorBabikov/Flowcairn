@@ -21,6 +21,6 @@ export function codexModelSettings(configPath = path.join(process.env.CODEX_HOME
         typeof reasoningEffort !== 'string' || !['low', 'medium', 'high', 'xhigh'].includes(reasoningEffort)) throw new Error('missing defaults');
     return { model, reasoningEffort, source: 'codex-cli-user-config' };
   } catch {
-    throw new GraphError('CODEX_MODEL_SETTINGS_REQUIRED', 'Укажите модель и усиление в настройках Flowcairn либо задайте model и model_reasoning_effort в конфигурации Codex CLI. Выбор активного чата VS Code автоматически не считывается.');
+    throw new GraphError('CODEX_MODEL_SETTINGS_REQUIRED', 'Укажите модель и усиление в настройках flowcairn либо задайте model и model_reasoning_effort в конфигурации Codex CLI. Выбор активного чата VS Code автоматически не считывается.');
   } finally { if (fd !== undefined) closeSync(fd); }
 }

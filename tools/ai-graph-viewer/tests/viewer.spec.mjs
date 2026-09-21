@@ -67,11 +67,25 @@ async function readableInGraph(page, title) {
     .toBe(true);
 }
 
+async function openGraph(page) {
+  await page.getByRole('button', { name: 'Граф · детали исполнения', exact: true }).click();
+  const closeDetails = page.getByRole('button', { name: 'Закрыть детали', exact: true });
+  if (await closeDetails.isVisible()) await closeDetails.click();
+}
+
+async function selectMobileRun(page, name) {
+  await page.getByRole('button', { name: 'Показать запуски', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Запуски', exact: true }).getByRole('button', { name }).click();
+  const closeDetails = page.getByRole('button', { name: 'Закрыть детали', exact: true });
+  if (await closeDetails.isVisible()) await closeDetails.click();
+}
+
 test('renders backend state, confirms a gate, and retries one operation id', async ({ page }) => {
   const fixture = await mockApi(page);
   await page.goto(`/#session=${token}`);
+  await openGraph(page);
 
-  await expect(page.getByRole('heading', { name: 'Flowcairn' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'flowcairn' })).toBeVisible();
   await expect(page.locator('.node-mode', { hasText: 'Чтение' })).toBeVisible();
   await expect(page.locator('.node-mode', { hasText: 'Запись' })).toBeVisible();
   await expect(page.getByText('project-context · 11111111')).toBeVisible();
@@ -117,6 +131,7 @@ test('creates a task from ordinary text without ids, permissions or external cal
   await composer.getByLabel('Номер задачи', {exact:true}).fill('TASK-101');
   await composer.getByLabel('Полное описание задачи', {exact:true}).fill('Исправить поиск и добавить проверку пустого ввода');
   await composer.getByRole('button', { name: 'Запустить' }).click();
+  await openGraph(page);
   await expect(page.locator('.react-flow')).toBeVisible();
   const request = fixture.calls.find(call => call.action === 'intake').body;
   expect(Object.keys(request).sort()).toEqual(['contextHash', 'description', 'operationId', 'taskNumber', 'title']);
@@ -127,6 +142,7 @@ test('creates a task from ordinary text without ids, permissions or external cal
 test('shows the user task number in the run rail and graph header', async ({ page }) => {
   await mockApi(page, snapshot());
   await page.goto(`/#session=${token}`);
+  await openGraph(page);
   await expect(page.locator('.run-row').first()).toContainText('FORM-101');
   await expect(page.locator('.run-row').first()).not.toContainText('TASK-101');
   await expect(page.locator('.graph-goal summary')).toContainText('FORM-101');
@@ -150,6 +166,7 @@ test('keeps the newest plan in the rail when an older run becomes stale later', 
   await mockApi(page, stale, { extraRuns: [runSummary(latest)] });
   await page.route('**/api/runs/run-new/snapshot', route => route.fulfill({ json: latest }));
   await page.goto(`/#session=${token}`);
+  await openGraph(page);
   const rail = page.locator('.run-list');
   await expect(rail).toContainText('FORM-102');
   await expect(rail).toContainText('Версия плана 5');
@@ -184,6 +201,7 @@ test('does not let a delayed snapshot replace a newer revision', async ({ page }
   });
   await page.goto(`/#session=${token}`);
   await expect(page.getByTestId('run-revision')).toHaveText('3');
+  await openGraph(page);
 
   const held = fixture.holdNextSnapshot();
   await held.captured;
@@ -205,6 +223,7 @@ test('coalesces rapid toolbar clicks before React rerenders', async ({ page }) =
     runDelayMs: 300,
   });
   await page.goto(`/#session=${token}`);
+  await openGraph(page);
 
   const node = page.locator('.graph-node', { hasText: 'Внесение изменений' });
   await node.click();
@@ -240,6 +259,81 @@ test('sends Stop while a long Run request is still pending', async ({ page }) =>
   expect(fixture.calls.filter((call) => call.action === 'run')).toHaveLength(1);
 });
 
+test('shows stopping immediately and keeps it after the control response', async ({ page }, testInfo) => {
+  const current = runnableSnapshot();
+  current.status = 'running';
+  current.execution = { state: 'running', stopRequested: false };
+  current.capabilities = { ...allDenied, stop: allowed };
+  const fixture = await mockApi(page, current, { stopDelayMs: 600 });
+  await page.goto(`/#session=${token}`);
+
+  await page.getByRole('button', { name: 'Остановить', exact: true }).click();
+
+  const status = page.locator('.execution-status');
+  await expect(status).toContainText('Останавливаем процесс');
+  await expect(page.getByRole('button', { name: 'Останавливаем…', exact: true })).toBeDisabled();
+  await page.screenshot({ path: testInfo.outputPath('stopping.png') });
+  await page.waitForTimeout(700);
+  await expect(status).toContainText('Останавливаем процесс');
+  expect(fixture.calls.filter((call) => call.action === 'stop')).toHaveLength(1);
+});
+
+test('distinguishes confirmed stop from unconfirmed termination', async ({ page }, testInfo) => {
+  const current = runnableSnapshot();
+  current.status = 'uncertain';
+  current.execution = { state: 'stopped', stopRequested: true };
+  current.capabilities = allDenied;
+  const fixture = await mockApi(page, current);
+  await page.goto(`/#session=${token}`);
+
+  const status = page.locator('.execution-status');
+  await expect(status).toContainText('Процесс остановлен');
+  await page.screenshot({ path: testInfo.outputPath('stopped.png') });
+  fixture.current().execution = { state: 'stop-uncertain', stopRequested: true };
+  fixture.current().revision += 1;
+  await expect(status).toContainText('Не удалось подтвердить остановку');
+  await expect(status).toHaveAttribute('role', 'alert');
+});
+
+test('refreshes snapshot when the stop response is lost', async ({ page }) => {
+  const current = runnableSnapshot();
+  current.status = 'running';
+  current.execution = { state: 'running', stopRequested: false };
+  current.capabilities = { ...allDenied, stop: allowed };
+  const fixture = await mockApi(page, current, { loseStopResponse: true });
+  await page.goto(`/#session=${token}`);
+  const reads = fixture.snapshotReads();
+
+  await page.getByRole('button', { name: 'Остановить', exact: true }).click();
+
+  await expect.poll(() => fixture.snapshotReads()).toBeGreaterThan(reads);
+  await expect(page.getByText('Проверяем, была ли принята команда…')).toHaveCount(0);
+  await expect(page.locator('.execution-status')).toContainText('Останавливаем процесс');
+  expect(fixture.calls.filter((call) => call.action === 'stop')).toHaveLength(1);
+});
+
+test('does not claim stop acceptance when both stop response and snapshot are unavailable', async ({ page }) => {
+  const current = runnableSnapshot();
+  current.status = 'running';
+  current.execution = { state: 'running', stopRequested: false };
+  current.capabilities = { ...allDenied, stop: allowed };
+  const fixture = await mockApi(page, current, { loseStopResponse: true });
+  await page.goto(`/#session=${token}`);
+  const stop = page.getByRole('button', { name: 'Остановить', exact: true });
+  await expect(stop).toBeVisible();
+  await page.route('**/snapshot', (route) => route.fulfill({
+    status: 503,
+    json: { error: { code: 'NETWORK_UNCERTAIN', message: 'snapshot unavailable' } },
+  }));
+
+  await stop.click();
+
+  const error = page.getByRole('alert').filter({ hasText: 'Не удалось подтвердить, принята ли команда остановки' });
+  await expect(error).toBeVisible();
+  await expect(error.getByRole('button', { name: 'Повторить тот же запрос' })).toHaveCount(0);
+  expect(fixture.calls.filter((call) => call.action === 'stop')).toHaveLength(1);
+});
+
 test('clears a stale Stop request after revision conflict before allowing a new Stop', async ({
   page,
 }) => {
@@ -252,7 +346,7 @@ test('clears a stale Stop request after revision conflict before allowing a new 
 
   const stop = page.getByRole('button', { name: 'Остановить', exact: true });
   await stop.click();
-  await expect(page.getByRole('alert')).toContainText('REVISION_CONFLICT');
+  await expect(page.getByRole('alert')).toContainText('Задача уже обновилась');
   await expect(page.getByRole('button', { name: 'Повторить тот же запрос' })).toHaveCount(0);
   await expect.poll(() => fixture.snapshotReads()).toBeGreaterThan(initialSnapshotReads);
   expect(fixture.calls.filter((call) => call.action === 'stop')).toHaveLength(1);
@@ -266,6 +360,7 @@ test('clears a stale Stop request after revision conflict before allowing a new 
 test('accepts a validated replan successor and resets run-scoped state', async ({ page }) => {
   const fixture = await mockApi(page);
   await page.goto(`/#session=${token}`);
+  await openGraph(page);
   await page.getByRole('tab', { name: 'Изменения' }).click();
   await expect(page.getByText('r3', { exact: true })).toBeVisible();
   await page.getByRole('tab', { name: 'Обзор' }).click();
@@ -288,6 +383,7 @@ test('loads immutable plan even when the initial snapshot becomes stale', async 
     eventsDelayMs: 3500,
   });
   await page.goto(`/#session=${token}`);
+  await openGraph(page);
   await expect(page.getByTestId('run-revision')).toHaveText('4', { timeout: 6000 });
   await page.getByRole('tab', { name: 'План' }).click();
   await expect(page.getByRole('heading', { name: 'План v1' })).toBeVisible();
@@ -317,6 +413,7 @@ test('ignores a delayed comparison response for a previous selection', async ({ 
     },
   });
   await page.goto(`/#session=${token}`);
+  await openGraph(page);
   await page.getByRole('tab', { name: 'План' }).click();
   const comparison = page.getByRole('combobox');
   await comparison.selectOption('run-b');
@@ -344,6 +441,7 @@ test('uses native modal lifecycle and keeps toolbar keyboard activation', async 
   await expect(createDialog).toHaveCount(0);
   await expect(create).toBeFocused();
 
+  await openGraph(page);
   await page.getByRole('button', { name: /Внесение изменений/ }).click();
   const toolbarRun = page.locator('.node-toolbar').getByRole('button', { name: 'Запустить' });
   await toolbarRun.focus();
@@ -356,6 +454,7 @@ test('draft and evidence dialogs are modal, closable with Escape, and labelled',
 }) => {
   await mockApi(page);
   await page.goto(`/#session=${token}`);
+  await openGraph(page);
 
   await page.getByRole('button', { name: 'Новая версия плана' }).click();
   const draft = page.getByRole('dialog', { name: 'Черновик новой версии' });
@@ -484,6 +583,7 @@ test('opens an eleven-node mobile graph on a readable active node and keeps fit-
   current.nodes[5] = { ...current.nodes[5], status: 'running' };
   await mockApi(page, current);
   await page.goto(`/#session=${token}`);
+  await openGraph(page);
   await expect(page.locator('.graph-node.status-running')).toHaveCount(1);
   await expect(page.locator('.react-flow__minimap')).toBeHidden();
   await readableInGraph(page, 'Этап 6');
@@ -589,10 +689,11 @@ test('mobile focuses active, waiting, failed, and completed nodes again on run s
   });
 
   await page.goto(`/#session=${token}`);
+  await openGraph(page);
   await readableInGraph(page, 'Этап 6');
-  await page.getByRole('button', { name: /TASK-WAITING/ }).click();
+  await selectMobileRun(page, /TASK-WAITING/);
   await readableInGraph(page, 'Этап 4');
-  await page.getByRole('button', { name: /TASK-FAILED/ }).click();
+  await selectMobileRun(page, /TASK-FAILED/);
   await readableInGraph(page, 'Этап 5');
   await page.getByRole('button', { name: 'Весь граф', exact: true }).click();
   await expect
@@ -602,7 +703,7 @@ test('mobile focuses active, waiting, failed, and completed nodes again on run s
     .toBeLessThan(100);
   await page.getByRole('button', { name: 'Текущий этап' }).click();
   await readableInGraph(page, 'Этап 5');
-  await page.getByRole('button', { name: /TASK-COMPLETED/ }).click();
+  await selectMobileRun(page, /TASK-COMPLETED/);
   await readableInGraph(page, 'Этап 11');
 });
 
@@ -611,6 +712,7 @@ test('polling revision and locale changes preserve the operator viewport', async
   current.nodes[5] = { ...current.nodes[5], status: 'running' };
   await mockApi(page, current, { advanceAfterFirstSnapshot: true });
   await page.goto(`/#session=${token}`);
+  await openGraph(page);
   await page.getByRole('button', { name: 'Текущий этап', exact: true }).click();
   await readableInGraph(page, 'Этап 6');
 
@@ -638,6 +740,7 @@ test('keeps graph cards visible and run list bounded on tablet with many runs', 
   );
   await mockApi(page, current, { extraRuns });
   await page.goto(`/#session=${token}`);
+  await openGraph(page);
   await expect(page.locator('.run-row')).toHaveCount(9);
   await expect(page.locator('.graph-node').first()).toBeAttached();
 
@@ -665,6 +768,7 @@ test('reduced motion disables graph animation', async ({ page }) => {
   current.nodes[1] = { ...current.nodes[1], status: 'running' };
   await mockApi(page, current);
   await page.goto(`/#session=${token}`);
+  await openGraph(page);
   const edge = page.locator('.react-flow__edge-path');
   await expect(edge).toHaveCount(1);
   const motion = await edge.evaluate((element) => {
@@ -678,6 +782,7 @@ test('reduced motion disables graph animation', async ({ page }) => {
 test('clears an expired gate request and refreshes capabilities', async ({ page }) => {
   const fixture = await mockApi(page, snapshot(), { gateErrorCode: 'GATE_EXPIRED' });
   await page.goto(`/#session=${token}`);
+  await openGraph(page);
   const readsBeforeGate = fixture.snapshotReads();
 
   await page.getByRole('button', { name: 'Подтвердить план' }).click();
@@ -686,7 +791,7 @@ test('clears an expired gate request and refreshes capabilities', async ({ page 
   await gate.getByRole('button', { name: 'Зафиксировать решение' }).click();
 
   const error = page.getByRole('alert');
-  await expect(error).toContainText('GATE_EXPIRED');
+  await expect(error).toContainText('Подтверждение устарело');
   await expect(error.getByRole('button', { name: 'Повторить тот же запрос' })).toHaveCount(0);
   await expect.poll(() => fixture.snapshotReads()).toBeGreaterThan(readsBeforeGate);
 });
@@ -748,6 +853,7 @@ test('renders a fail-closed snapshot when optional evidence reads fail', async (
     });
   });
   await page.goto(`/#session=${token}`);
+  await openGraph(page);
   await expect(page.locator('.run-health .negative')).toHaveText('Целостность данных не подтверждена');
   await expect(page.getByRole('heading', { name: 'Граф выполнения' }).first()).toBeVisible();
   await expect(page.locator('.error-banner')).toHaveCount(0);
@@ -758,7 +864,7 @@ test('keeps controls usable on mobile and supports RU/EN and dark mode', async (
   await mockApi(page);
   await page.goto(`/#session=${token}`);
   await page.getByRole('button', { name: 'На английском' }).click();
-  await expect(page.getByRole('heading', { name: 'Flowcairn' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'flowcairn' })).toBeVisible();
   expect(await page.locator('html').getAttribute('lang')).toBe('en');
   await page.getByRole('button', { name: 'Switch theme' }).click();
   await expect(page.locator('html')).toHaveAttribute('data-dark', '');
@@ -773,7 +879,7 @@ test('actual service fixture smoke', async ({ page }, testInfo) => {
   await page.goto(process.env.FLOWCAIRN_TEST_URL);
   await expect(
     page.getByRole('heading', {
-      name: 'Flowcairn',
+      name: 'flowcairn',
     }),
   ).toBeVisible();
   await expect(page.locator('.operator-layout')).toBeVisible();

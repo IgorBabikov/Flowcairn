@@ -127,6 +127,13 @@ test('conflicting state and linked local Git exclude are refused before creating
   assert.equal(existsSync(path.join(b.root, '.flowcairn.json')), false);
 });
 
+test('invalid existing profile is not adopted or overwritten', (t) => {
+  const project = fixture(t);
+  writeFileSync(path.join(project.root, '.flowcairn.json'), '{}\n');
+  assert.throws(() => initializeProject(project.root, options), { code: 'PROJECT_PROFILE_INVALID' });
+  assert.equal(readFileSync(path.join(project.root, '.flowcairn.json'), 'utf8'), '{}\n');
+});
+
 test('linked manifest parent and invalid profile fail without modifying owner files', (t) => {
   const { root } = fixture(t);
   mkdirSync(path.join(root, 'real'));
@@ -191,7 +198,6 @@ test('fresh clone adopts tracked profile without changing tracked files and can 
   assert.deepEqual(initializeProject(clone.root, { 'dry-run': true }).changes, [
     '.git/info/exclude (локально)',
     '.ai-orchestrator/flowcairn-install.json',
-    '.ai-orchestrator/task.example.json',
   ]);
   assert.equal(existsSync(path.join(clone.root, '.ai-orchestrator')), false);
   const adopted = initializeProject(clone.root);
@@ -584,7 +590,7 @@ test('actual npm tarball install provides executable bin and offline npx init/ta
   const help = run('init', '--help');
   assert.equal(help.status, 0, help.stderr);
   assert.match(help.stdout, /Быстрый старт/);
-  assert.match(help.stdout, /начать настройку и открыть Graph/);
+  assert.match(help.stdout, /начать настройку и открыть интерфейс/);
   assert.equal(existsSync(path.join(root, '.flowcairn.json')), false);
   const installed = run('init', '--provider', 'claude', '--provider-path', testClaude, '--json');
   assert.equal(installed.status, 0, installed.stderr);

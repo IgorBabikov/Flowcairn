@@ -33,7 +33,7 @@ export async function checkUpdate(currentVersion, { fetcher = fetch } = {}) {
   catch { throw new GraphError('UPDATE_METADATA', 'Некорректные метаданные registry.'); }
   if (!metadata || metadata.name !== 'flowcairn' || typeof metadata.version !== 'string' || metadata.version.length > 40 || !stable.test(metadata.version) ||
       typeof metadata.repository?.url !== 'string' || metadata.repository.url.replace(/^git\+/, '').replace(/\.git$/, '') !== REPOSITORY)
-    throw new GraphError('UPDATE_SOURCE', 'Метаданные не соответствуют доверенному репозиторию Flowcairn.');
+    throw new GraphError('UPDATE_SOURCE', 'Метаданные не соответствуют доверенному репозиторию flowcairn.');
   const current = currentVersion.split('-')[0].split('.').map(Number);
   const latest = metadata.version.split('.').map(Number);
   const order = latest.map((part, index) => part - current[index]).find((part) => part !== 0) ?? 0;

@@ -18,6 +18,24 @@ npm test
 
 Собранный интерфейс хранится в Git для установки без lifecycle scripts. После правки UI включите обновленный `tools/ai-graph-viewer/dist` в тот же diff; CI проверяет соответствие сборки исходникам.
 
+## Локальный пакет
+
+Для проверки текущих исходников до публикации выполните в репозитории Flowcairn:
+
+```bash
+npm ci --ignore-scripts
+npm run build
+npm pack --ignore-scripts
+```
+
+Затем установите созданный архив в отдельный тестовый проект:
+
+```bash
+npm install --ignore-scripts -D /path/to/package.tgz
+```
+
+Подставьте путь к архиву, созданному `npm pack`. Команда запуска указана в поле `bin` его `package.json`. Наличие архива не означает публикацию в npm.
+
 ## Архитектура и доказательства
 
 Executor владеет состоянием, permissions и допустимыми переходами. UI отображает snapshot/capabilities. Сохраняйте runtimeRoot/projectRoot, immutable hashes, CAS, idempotency, ограниченный контекст и доказательства остановки процесса.

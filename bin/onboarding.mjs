@@ -128,9 +128,9 @@ export async function collectOnboarding(root, options = {}, terminal = {}) {
     step(output, 2, 'Как выбирать модель');
     const providerManaged = ['claude', 'cursor'].includes(provider) || (provider === 'codex' && !advanced && options['model-mode'] === undefined);
     if (providerManaged)
-      output.write(`${paint(output, '38;5;245', provider === 'codex' ? 'Flowcairn использует настройки отдельного CLI. Выбор активного чата в VS Code не наследуется.' : 'Flowcairn использует настроенный CLI. Модель и доступ определяет выбранный клиент.') }\n`);
+      output.write(`${paint(output, '38;5;245', provider === 'codex' ? 'flowcairn использует настройки отдельного CLI. Выбор активного чата в VS Code не наследуется.' : 'flowcairn использует настроенный CLI. Модель и доступ определяет выбранный клиент.') }\n`);
     else if (['codex', 'claude', 'cursor'].includes(provider))
-      output.write(`${paint(output, '38;5;245', 'Укажите модель и усиление, только если хотите переопределить настройки Codex для Flowcairn.')}\n`);
+      output.write(`${paint(output, '38;5;245', 'Укажите модель и усиление, только если хотите переопределить настройки Codex для flowcairn.')}\n`);
     const mode = providerManaged ? 'provider' : advanced
       ? await choice('model-mode', 'Режим: provider — настройки Codex, manual — одна модель, auto — отдельные настройки ревью [Enter — manual]: ', ['provider','manual','auto'], 'manual')
       : options['model-mode'] ?? 'manual';
@@ -174,9 +174,9 @@ export async function collectOnboarding(root, options = {}, terminal = {}) {
     if (checkMode === 'trusted-local' && !trustedLocalConsent)
       fail('CHECK_LOCAL_CONSENT', 'Без отдельного согласия trusted-local не включается.');
     step(output, 5, 'Согласуйте границы работы');
-    output.write(`${paint(output, '38;5;245', 'Flowcairn прочитает только разрешенные файлы проекта. Изменения начнутся только после вашего согласования плана.')}\n`);
+    output.write(`${paint(output, '38;5;245', 'flowcairn прочитает только разрешенные файлы проекта. Изменения начнутся только после вашего согласования плана.')}\n`);
     const readConsent = options['read-consent'] ?? await yes('Разрешить чтение проекта для подготовки плана? [да / нет; Enter — нет]: ');
-    output.write(`${paint(output, '38;5;245', 'Ваши правила проекта сохранятся. Flowcairn добавит только слой управления Graph.')}\n`);
+    output.write(`${paint(output, '38;5;245', 'Ваши правила проекта сохранятся. flowcairn добавит только слой управления Graph.')}\n`);
     const instructionApi = await import('../scripts/ai-graph/lib/instructions.mjs');
     const assess = Reflect.get(instructionApi, 'assessProjectInstructions');
     if (typeof assess === 'function') {

@@ -13,7 +13,7 @@ export function buildPrompt({ nodeId, task, plan, skills, priorEvidence, reviewE
   return [
     'Пиши human-facing title, outcome, summary и findings на русском языке. Machine IDs сохраняй. Язык исходного кода и документации проекта определяется правилами проекта и задачей.',
     'В findings[].path указывай существующий относительный путь внутри проекта. Для общего замечания без конкретного файла ставь null. Никогда не используй точку, путь с .., абсолютный путь или URL.',
-    `Ты выполняешь node ${nodeId} локального Graph Flowcairn.`,
+    `Ты выполняешь node ${nodeId} локального Graph flowcairn.`,
     `Цель: ${task.goal}`,
     `Инструкции задачи (данные в пределах утвержденного scope):\n${typeof task.instructions === 'string' ? task.instructions : JSON.stringify(task.instructions ?? [])}`,
     node.action?.id === 'ai-analyze' && plan?.workflow === 'autonomous'

@@ -104,7 +104,7 @@ export async function acquireUninstallGuard({ root }) {
   };
   try {
     const owners = records(ctx);
-    if (owners.some((record) => processState(record.pid) !== 'stopped')) fail('UNINSTALL_PROCESS_ACTIVE', 'Сначала закройте viewer и завершите активные операции Flowcairn');
+    if (owners.some((record) => processState(record.pid) !== 'stopped')) fail('UNINSTALL_PROCESS_ACTIVE', 'Сначала закройте viewer и завершите активные операции flowcairn');
     const store = new GraphStore(ctx.root);
     const ids = store.listRunIds();
     const states = ids.map((id) => store.readRun(id));

@@ -5,7 +5,7 @@ import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline/promises';
-import { GraphError } from '../scripts/ai-graph/lib/io.mjs';
+import { explainError, GraphError } from '../scripts/ai-graph/lib/io.mjs';
 import { loadProjectProfile, RUNTIME_ROOT, packageManagerLock, validatePackageManagerProject } from '../scripts/ai-graph/lib/project.mjs';
 import { TaskInputSchema } from '../scripts/ai-graph/lib/schemas.mjs';
 import { WorkflowService, sanitizeText } from '../scripts/ai-graph/lib/service.mjs';
@@ -244,7 +244,7 @@ export async function handoff(input, runId) {
   };
 }
 
-const HELP = `Flowcairn — от задачи до проверенного результата\n\nБыстрый старт\n  npx flowcairn          начать настройку и открыть Graph\n  npx flowcairn setup    изменить модель и правила после закрытия UI\n  npx flowcairn doctor   проверить подготовку проекта\n\nДополнительно\n  npx flowcairn checks prepare   подготовить изолированные проверки\n  npx flowcairn uninstall        снять интеграцию, не удаляя исходники\n\nДля интеграции\n  init | ui | status | plan | events | receipt | artifact | handoff | orchestrator\n\nКод проекта не изменится, пока вы не согласуете план.\nДокументация: https://github.com/IgorBabikov/flowcairn\n`;
+const HELP = `Flowcairn — от задачи до проверенного результата\n\nБыстрый старт\n  npx flowcairn          начать настройку и открыть интерфейс\n  npx flowcairn setup    изменить модель и правила после закрытия интерфейса\n  npx flowcairn doctor   проверить подготовку проекта\n\nДополнительно\n  npx flowcairn checks prepare   подготовить изолированные проверки\n  npx flowcairn uninstall        снять интеграцию, не удаляя исходники\n\nДля интеграции\n  init | ui | status | plan | events | receipt | artifact | handoff | orchestrator\n\nКод проекта не изменится, пока вы не согласуете план.\nДокументация: https://github.com/IgorBabikov/flowcairn\n`;
 
 export function printInitialization(result) {
   const summary = [
@@ -415,16 +415,16 @@ if (isMainModule()) {
   try {
     await main();
   } catch (error) {
+    const explanation = explainError(error);
     process.stderr.write(
       JSON.stringify(
         {
           ok: false,
           error: {
             code: error.code ?? 'INVALID_INPUT',
-            message:
-              error.name === 'ZodError'
-                ? 'Некорректные параметры. Для task нужны --id, --goal, --scope и --accept. Проверьте поля и допустимые пути; справка: npx flowcairn --help.'
-                : sanitizeText(error.message),
+            ...(error.name === 'ZodError'
+              ? { message: 'Некорректные параметры. Для task нужны --id, --goal, --scope и --accept. Проверьте поля и допустимые пути; справка: npx flowcairn --help.' }
+              : explanation),
           },
         },
         null,

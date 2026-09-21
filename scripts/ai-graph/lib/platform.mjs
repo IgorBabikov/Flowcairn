@@ -36,5 +36,5 @@ export function assertProjectPlatform(root, { platform = process.platform, kerne
   }).filter(({ point }) => point && (canonical === point || canonical.startsWith(point.endsWith('/') ? point : point + '/')))
     .sort((a, b) => b.point.length - a.point.length)[0];
   if (!mount || /^\/mnt\/[a-z](?:\/|$)/i.test(canonical) || unsupported.has(Number(stat.type)) || /^(?:9p|drvfs|fuse.*|ntfs.*|vfat|exfat|cifs)$/i.test(mount.type ?? ''))
-    throw new GraphError('WSL_FILESYSTEM', 'Для Flowcairn нужен проект на Linux-файловой системе WSL2 (например ~/projects). Windows mounts и общие файловые системы не поддерживаются.');
+    throw new GraphError('WSL_FILESYSTEM', 'Для flowcairn нужен проект на Linux-файловой системе WSL2 (например ~/projects). Windows mounts и общие файловые системы не поддерживаются.');
 }

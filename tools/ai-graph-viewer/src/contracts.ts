@@ -125,6 +125,10 @@ export interface Snapshot {
   planHash?: string;
   revision?: number;
   status: RunStatus;
+  execution?: {
+    state: 'idle' | 'running' | 'stopping' | 'stopped' | 'stop-uncertain';
+    stopRequested: boolean;
+  };
   finalDisposition?: string | null;
   createdAt?: string;
   updatedAt?: string;

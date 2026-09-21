@@ -8,7 +8,7 @@ export function SetupPanel({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     let active = true;
     void api.onboarding().then(value => { if (active) setSetup(value); })
-      .catch(() => { if (active) setError('Настройки недоступны. Перезапустите Flowcairn и повторите.'); });
+      .catch(() => { if (active) setError('Настройки недоступны. Перезапустите flowcairn и повторите.'); });
     return () => { active = false; };
   }, []);
   const values = setup?.values;
@@ -18,7 +18,7 @@ export function SetupPanel({ onClose }: { onClose: () => void }) {
     {!setup && !error && <p role="status">Загружаем настройки…</p>}
     {error && <p role="alert">{error}</p>}
     {setup && values && <>
-      {retiredProvider && <p role="alert">OpenAI API больше не поддерживается. Закройте Flowcairn и выполните <code>npx flowcairn setup</code>, выбрав Codex, Claude Code или Cursor.</p>}
+      {retiredProvider && <p role="alert">OpenAI API больше не поддерживается. Закройте flowcairn и выполните <code>npx flowcairn setup</code>, выбрав Codex, Claude Code или Cursor.</p>}
       <p>{setup.configured ? 'Первоначальная настройка завершена.' : 'Перед первой задачей завершите настройку.'}</p>
       <dl className="fact-list">
         <dt>AI-инструмент</dt><dd>{setup.providers.find(item => item.id === values.provider)?.label ?? values.provider}</dd>
@@ -37,7 +37,7 @@ export function SetupPanel({ onClose }: { onClose: () => void }) {
       </ul>
       {setup.limitations.length > 0 && <ul>{setup.limitations.map(item => <li key={item}>{item}</li>)}</ul>}
     </>}
-    <p>Для настройки закройте интерфейс, остановите Flowcairn в терминале и выполните:</p>
+    <p>Для настройки закройте интерфейс, остановите flowcairn в терминале и выполните:</p>
     <code className="setup-command">npx flowcairn setup</code>
     <p>Существующие инструкции проекта сохраняются. Настройки выполняющихся задач не меняются.</p>
   </section>;

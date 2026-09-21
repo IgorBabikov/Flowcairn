@@ -133,6 +133,7 @@ export async function recoverRun(host, { state, task, plan, request, digest, act
       host.write(current, {
         activeOperation: null,
         stopRequested: false,
+        stopResult: null,
         operations: {
           ...current.operations,
           [request.operationId]: { digest, status: 'finished', resultRunId: next.runId },
@@ -208,7 +209,8 @@ export async function recoverRun(host, { state, task, plan, request, digest, act
       status: 'uncertain',
       activeOperation: null,
       stopRequested: false,
-      workspaceFingerprint: fingerprint ?? current.workspaceFingerprint,
+      stopResult: null,
+      workspaceFingerprint: fingerprint ? host.persistFingerprint(fingerprint) : current.workspaceFingerprint,
       operations,
       recovered: true,
     });
