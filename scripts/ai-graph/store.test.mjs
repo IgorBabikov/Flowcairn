@@ -295,6 +295,26 @@ test('rejects excessive JSON depth and container sizes without creating the stor
   assert.equal(existsSync(path.join(root, '.ai-orchestrator')), false);
 });
 
+test('stores a workspace fingerprint with more than ten thousand files outside run revisions', () => {
+  const root = fixture();
+  const store = new GraphStore(root);
+  const files = Array.from({ length: 10_001 }, (_, index) => ({
+    path: `src/file-${String(index).padStart(5, '0')}.ts`,
+    hash: sha256(`file-${index}`),
+    mode: '100644',
+    size: index,
+  }));
+  const git = { head: 'a'.repeat(40), indexHash: sha256('index') };
+  const fingerprint = { files, git, hash: sha256(canonicalJson({ files, git })) };
+
+  const reference = store.putFingerprint(fingerprint);
+  store.createRun('large-fingerprint-run', { initialFingerprint: reference, workspaceFingerprint: reference });
+
+  assert.deepEqual(reference, { hash: fingerprint.hash });
+  assert.deepEqual(store.readFingerprint(reference.hash), fingerprint);
+  assert.deepEqual(store.readRun('large-fingerprint-run').initialFingerprint, reference);
+});
+
 test('durability stages place the revision directory sync before pointer publication', () => {
   const root = fixture();
   const stages = [];

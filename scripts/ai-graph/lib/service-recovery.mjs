@@ -208,7 +208,7 @@ export async function recoverRun(host, { state, task, plan, request, digest, act
       status: 'uncertain',
       activeOperation: null,
       stopRequested: false,
-      workspaceFingerprint: fingerprint ?? current.workspaceFingerprint,
+      workspaceFingerprint: fingerprint ? host.persistFingerprint(fingerprint) : current.workspaceFingerprint,
       operations,
       recovered: true,
     });

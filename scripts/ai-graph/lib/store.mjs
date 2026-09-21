@@ -28,6 +28,9 @@ const MAX_TOTAL_VALUES = 100_000;
 const MAX_REVISIONS = 10_000;
 const MAX_HISTORY_LIMIT = 1_000;
 const MAX_UPDATER_MS = 1_000;
+const FINGERPRINT_VERSION = 1;
+const MAX_FINGERPRINT_FILES = 20_000;
+const MAX_FINGERPRINT_CHUNK_BYTES = 1024 * 1024;
 const HASH_PATTERN = /^[a-f0-9]{64}$/;
 const OWNER_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const PROCESS_START_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
@@ -81,6 +84,38 @@ function isPlainObject(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const prototype = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
+}
+
+function fingerprintChunks(files) {
+  const chunks = [];
+  let current = [], bytes = 0;
+  for (const file of files) {
+    const encoded = canonicalJson(file);
+    if (typeof encoded !== 'string') fail('INVALID_FINGERPRINT', 'Fingerprint содержит не-JSON файл');
+    const next = Buffer.byteLength(encoded) + (current.length ? 1 : 0);
+    if (current.length && bytes + next > MAX_FINGERPRINT_CHUNK_BYTES) {
+      chunks.push(current);
+      current = [];
+      bytes = 0;
+    }
+    current.push(file);
+    bytes += Buffer.byteLength(encoded) + (current.length > 1 ? 1 : 0);
+  }
+  if (current.length || files.length === 0) chunks.push(current);
+  return chunks;
+}
+
+function validateFingerprint(value, label) {
+  if (!isPlainObject(value)) fail('INVALID_FINGERPRINT', `${label} должен быть plain JSON object`);
+  exactKeys(value, ['files', 'git', 'hash'], label, 'INVALID_FINGERPRINT');
+  if (!Array.isArray(value.files) || value.files.length > MAX_FINGERPRINT_FILES)
+    fail('INVALID_FINGERPRINT', `${label}.files превышает лимит`);
+  if (!isPlainObject(value.git)) fail('INVALID_FINGERPRINT', `${label}.git должен быть object`);
+  assertHash(value.hash);
+  const body = { files: value.files, git: value.git };
+  if (sha256(canonicalJson(body)) !== value.hash)
+    fail('INVALID_FINGERPRINT', `${label}.hash не совпадает`);
+  return body;
 }
 
 function normalizedKey(key) {
@@ -513,6 +548,45 @@ export class GraphStore {
     return structuredClone(this.#readStoredObject(kind, hash, kindDirectory));
   }
 
+  /** Store large workspace descriptors once, outside the revision chain. */
+  putFingerprint(fingerprint) {
+    const body = validateFingerprint(fingerprint, 'Fingerprint');
+    const fingerprintHash = fingerprint.hash;
+    const directory = this.#ensureFingerprintsDirectory();
+    const chunksDirectory = ensurePrivateChild(directory, 'chunks');
+    const chunks = fingerprintChunks(body.files).map((files) => {
+      const clone = validatedClone({ files }, 'fingerprint chunk');
+      const hash = sha256(canonicalJson(clone));
+      const file = path.join(chunksDirectory, `${hash}.json`);
+      const wrapper = { version: FINGERPRINT_VERSION, hash, files: clone.files };
+      if (lstatMaybe(file)) {
+        const { value: existing } = readPrivateJson(file, { code: 'FINGERPRINT_TAMPERED' });
+        exactKeys(existing, ['files', 'hash', 'version'], 'fingerprint chunk', 'FINGERPRINT_TAMPERED');
+        if (existing.version !== FINGERPRINT_VERSION || existing.hash !== hash ||
+            sha256(canonicalJson({ files: existing.files })) !== hash)
+          fail('FINGERPRINT_TAMPERED', 'Fingerprint chunk не совпадает с контрольной суммой');
+      } else {
+        this.#writeDurableFile(chunksDirectory, file, wrapper, 'fingerprint-chunk', { hash });
+      }
+      return hash;
+    });
+    const file = path.join(directory, `${fingerprintHash}.json`);
+    const manifest = { version: FINGERPRINT_VERSION, hash: fingerprintHash, git: body.git, chunks };
+    if (lstatMaybe(file)) {
+      const existing = this.#readFingerprint(fingerprintHash, directory);
+      if (!sameJson(existing, { hash: fingerprintHash, ...body }))
+        fail('IMMUTABLE_CONFLICT', 'Fingerprint hash collision');
+    } else {
+      this.#writeDurableFile(directory, file, manifest, 'fingerprint', { hash: fingerprintHash });
+    }
+    return { hash: fingerprintHash };
+  }
+
+  readFingerprint(hash) {
+    assertHash(hash);
+    return structuredClone(this.#readFingerprint(hash, this.#fingerprintsDirectoryForRead()));
+  }
+
   history(runId, { afterRevision = -1, limit = 100 } = {}) {
     assertRunId(runId);
     if (!Number.isSafeInteger(afterRevision) || afterRevision < -1) {
@@ -583,6 +657,10 @@ export class GraphStore {
     return ensurePrivateChild(this.#ensureGraphDirectory(), 'runs');
   }
 
+  #ensureFingerprintsDirectory() {
+    return ensurePrivateChild(this.#ensureGraphDirectory(), 'fingerprints');
+  }
+
   #graphDirectoryForRead({ allowMissing = false } = {}) {
     this.#assertRoot();
     const control = path.join(this.root, '.ai-orchestrator');
@@ -615,6 +693,39 @@ export class GraphStore {
     }
     assertPrivateDirectory(runDirectory, 'Run directory');
     return runDirectory;
+  }
+
+  #fingerprintsDirectoryForRead() {
+    const graphDirectory = this.#graphDirectoryForRead();
+    const directory = path.join(graphDirectory, 'fingerprints');
+    assertPrivateDirectory(directory, 'Fingerprints directory');
+    return directory;
+  }
+
+  #readFingerprint(hash, directory) {
+    const file = path.join(directory, `${assertHash(hash)}.json`);
+    const { value: manifest } = readPrivateJson(file, { code: 'FINGERPRINT_TAMPERED' });
+    exactKeys(manifest, ['chunks', 'git', 'hash', 'version'], 'fingerprint manifest', 'FINGERPRINT_TAMPERED');
+    if (manifest.version !== FINGERPRINT_VERSION || manifest.hash !== hash ||
+        !Array.isArray(manifest.chunks) || manifest.chunks.length < 1 || manifest.chunks.length > MAX_CONTAINER_ENTRIES)
+      fail('FINGERPRINT_TAMPERED', 'Fingerprint manifest поврежден');
+    const chunksDirectory = path.join(directory, 'chunks');
+    assertPrivateDirectory(chunksDirectory, 'Fingerprint chunks directory');
+    const files = [];
+    for (const chunkHash of manifest.chunks) {
+      assertHash(chunkHash);
+      const { value: chunk } = readPrivateJson(path.join(chunksDirectory, `${chunkHash}.json`), { code: 'FINGERPRINT_TAMPERED' });
+      exactKeys(chunk, ['files', 'hash', 'version'], 'fingerprint chunk', 'FINGERPRINT_TAMPERED');
+      if (chunk.version !== FINGERPRINT_VERSION || chunk.hash !== chunkHash || !Array.isArray(chunk.files) ||
+          sha256(canonicalJson({ files: chunk.files })) !== chunkHash)
+        fail('FINGERPRINT_TAMPERED', 'Fingerprint chunk поврежден');
+      files.push(...chunk.files);
+      if (files.length > MAX_FINGERPRINT_FILES)
+        fail('FINGERPRINT_TAMPERED', 'Fingerprint содержит слишком много files');
+    }
+    const fingerprint = { hash, files, git: manifest.git };
+    validateFingerprint(fingerprint, 'Fingerprint');
+    return fingerprint;
   }
 
   #readChain(runId, runDirectory) {

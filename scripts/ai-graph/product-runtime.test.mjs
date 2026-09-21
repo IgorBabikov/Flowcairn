@@ -7,6 +7,10 @@ import { validateReviewEvidence } from './lib/review-evidence.mjs';
 import { SKILL_ROUTES } from './lib/config.mjs';
 import { GraphError, hashObject } from './lib/io.mjs';
 const hash = hashObject('product-runtime-fixture');
+const workspaceFingerprint = (files = [], indexHash = hash) => {
+ const git = { head: 'a'.repeat(40), indexHash };
+ return { hash: hashObject({ files, git }), files, git };
+};
 const skills = [...new Set(Object.values(SKILL_ROUTES).flat())].map(id => ({id,path:`skills/${id}/SKILL.md`,hash}));
 const context = {runtimeHash:hash,skills,workflow:'autonomous'};
 const task = TaskSpecSchema.parse({id:'TASK-PRODUCT',goal:'Форма регистрации',instructions:'Добавить проверку email',scope:['src'],acceptance:['Неверный email отклонен'],checks:['tests'],schemaVersion:2,sourceHash:hash});
@@ -42,7 +46,7 @@ async function fixture(t,{consent=true,reviewFails=0,implementationFails=0,check
  mkdirSync(worktree,{recursive:true,mode:0o700});
  const calls=[]; let reviews=0,implementations=0,checks=0,remainingPlannerUncertainty=plannerUncertain,remainingPlannerFailures=plannerFailures;
  let runtimeHash=hash;
- const fingerprint=()=>({hash,files:[],git:{head:'a'.repeat(40),indexHash:hash}});
+ const fingerprint=()=>workspaceFingerprint();
  const adapters={identity:()=>runtimeHash,skills:()=>skills,hasReadConsent:()=>consent,
  capture:()=>({manifest:{sourceHash:hash},bundlePath:'fixture-source'}),
  allocate:({task,runId})=>({worktree,taskId:task.id,attemptId:1,leaseId:'fixture',sourceHash:hash,runId}),
@@ -85,6 +89,19 @@ test('product intake accepts up to 64 safe project roots before planning', async
  assert.equal(f.service.close(),true);
 });
 
+test('planning continues when a project fingerprint has more than ten thousand files', async(t)=>{
+ const f=await fixture(t);
+ const files=Array.from({length:10_001},(_,index)=>({path:`src/generated/file-${index}.ts`,hash:hashObject(`file-${index}`),mode:'100644',size:index}));
+ const fingerprint=()=>workspaceFingerprint(files);
+ f.service.adapters.fingerprint=fingerprint;
+ f.service.adapters.capture=()=>({manifest:{sourceHash:fingerprint().hash},bundlePath:'fixture-large-source'});
+ const result=await f.settle(await f.intake());
+ const stored=f.service.store.readRun(result.runId);
+ assert.equal(result.status,'waiting-for-human');
+ assert.deepEqual(stored.initialFingerprint,{hash:fingerprint().hash});
+ assert.equal(f.service.store.readFingerprint(stored.initialFingerprint.hash).files.length,10_001);
+});
+
 test('product intake requires an explicit scope when a project exposes more than 64 roots', async(t)=>{
  const f=await fixture(t,{scopeCandidates:Array.from({length:65},(_,index)=>`area-${index}`)});
  await assert.rejects(
@@ -99,7 +116,7 @@ test('implementation receipt accepts a hash-bound large-file move as two declare
  const files=new Map([['src/dictionaries/tmg.ru.json','x'.repeat(256*1024)]]);
  const fingerprint=()=>{
   const entries=[...files].sort(([left],[right])=>left.localeCompare(right)).map(([path,content])=>({path,hash:hashObject(content),mode:'100644',size:content.length}));
-  return {hash:hashObject(entries),files:entries,git:{head:'a'.repeat(40),indexHash:hash}};
+  return workspaceFingerprint(entries);
  };
  const adapters=f.service.adapters;
  adapters.fingerprint=fingerprint;
@@ -295,7 +312,7 @@ test('an error after process start cannot fabricate proof that no process ran',a
 test('planner retry analyzes again when the previously observed workspace changed',async(t)=>{
  const f=await fixture(t,{plannerFailures:1});let s=await f.settle(await f.intake());
  const before=f.service.adapters.fingerprint();
- f.service.adapters.fingerprint=()=>({...before,hash:hashObject('changed source after analysis')});
+ f.service.adapters.fingerprint=()=>workspaceFingerprint(before.files,hashObject('changed source after analysis'));
  s=await f.settle(await f.service.command(s.runId,'replan',request(s)));
  assert.equal(s.status,'waiting-for-human');
  assert.deepEqual(f.calls.map(c=>c.action),['ai-analyze','ai-plan','ai-analyze','ai-plan']);
@@ -326,7 +343,7 @@ test('финальный review после no-op исправления полу
  const f=await fixture(t,{reviewFails:1});
  let content='export const valid = false;';let implementations=0;
  const a=f.service.adapters;
- const fingerprint=()=>({hash:hashObject(content),files:[{path:'src/form.mjs',hash:hashObject(content),mode:'100644',size:content.length}],git:{head:'a'.repeat(40),indexHash:hash}});
+ const fingerprint=()=>workspaceFingerprint([{path:'src/form.mjs',hash:hashObject(content),mode:'100644',size:content.length}]);
  a.fingerprint=fingerprint;
  a.capture=()=>({manifest:{sourceHash:fingerprint().hash},bundlePath:'fixture-source'});
  a.inspectChanges=(before,after)=>({allowed:true,changedFiles:before.hash===after.hash?[]:['src/form.mjs']});
@@ -355,7 +372,7 @@ test('ручной replan сохраняет полный diff исходной 
  const f=await fixture(t);
  let content='export const valid = false;';let implementations=0;
  const adapters=f.service.adapters;
- const fingerprint=()=>({hash:hashObject(content),files:[{path:'src/form.mjs',hash:hashObject(content),mode:'100644',size:content.length}],git:{head:'a'.repeat(40),indexHash:hash}});
+ const fingerprint=()=>workspaceFingerprint([{path:'src/form.mjs',hash:hashObject(content),mode:'100644',size:content.length}]);
  adapters.fingerprint=fingerprint;
  adapters.capture=()=>({manifest:{sourceHash:fingerprint().hash},bundlePath:'fixture-source'});
  adapters.inspectChanges=(before,after)=>({allowed:true,changedFiles:before.hash===after.hash?[]:['src/form.mjs']});
@@ -388,7 +405,7 @@ test('manual replan сохраняет historical evidence после обнов
  const f=await fixture(t);
  let content='export const valid = false;';let implementations=0;
  const adapters=f.service.adapters;
- const fingerprint=()=>({hash:hashObject(content),files:[{path:'src/form.mjs',hash:hashObject(content),mode:'100644',size:content.length}],git:{head:'a'.repeat(40),indexHash:hash}});
+ const fingerprint=()=>workspaceFingerprint([{path:'src/form.mjs',hash:hashObject(content),mode:'100644',size:content.length}]);
  adapters.fingerprint=fingerprint;
  adapters.capture=()=>({manifest:{sourceHash:fingerprint().hash},bundlePath:'fixture-source'});
  adapters.inspectChanges=(before,after)=>({allowed:true,changedFiles:before.hash===after.hash?[]:['src/form.mjs']});
@@ -428,7 +445,7 @@ test('final review сохраняет подтвержденные partial chang
  const files=new Map();
  const fingerprint=()=>{
    const entries=[...files].sort(([left],[right])=>left.localeCompare(right)).map(([path,content])=>({path,hash:hashObject(content),mode:'100644',size:content.length}));
-   return {hash:hashObject(entries),files:entries,git:{head:'a'.repeat(40),indexHash:hash}};
+   return workspaceFingerprint(entries);
  };
  const adapters=f.service.adapters;
  adapters.fingerprint=fingerprint;
@@ -551,7 +568,7 @@ test('recovered preflight uncertainty reanalyzes when the saved analysis source 
  const planner=s.nodes.find(n=>n.id==='plan-task');
  assert.equal(f.service.receipt(s.runId,planner.receiptIds.at(-1)).phase,'recovery');
  const before=f.service.adapters.fingerprint();
- f.service.adapters.fingerprint=()=>({...before,hash:hashObject('changed source after recovered preflight')});
+ f.service.adapters.fingerprint=()=>workspaceFingerprint(before.files,hashObject('changed source after recovered preflight'));
  s=await f.settle(await f.service.command(s.runId,'replan',request(s)));
  assert.equal(s.phase,'execution');assert.equal(s.status,'waiting-for-human');
  assert.equal(f.calls.filter(c=>c.action==='ai-analyze').length,2);
@@ -575,7 +592,7 @@ test('new source analysis reaches planner and final contract ahead of retained o
  let s=await f.settle(await f.intake());
  assert.equal(s.status,'failed');
  const before=f.service.adapters.fingerprint();
- f.service.adapters.fingerprint=()=>({...before,hash:hashObject('source changed before fresh analysis')});
+ f.service.adapters.fingerprint=()=>workspaceFingerprint(before.files,hashObject('source changed before fresh analysis'));
  s=await f.settle(await f.service.command(s.runId,'replan',request(s)));
  assert.equal(s.phase,'execution');assert.equal(s.status,'waiting-for-human');
  assert.equal(f.calls.filter(c=>c.action==='ai-analyze').length,2);

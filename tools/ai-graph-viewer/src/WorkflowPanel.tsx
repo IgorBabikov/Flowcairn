@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { GateSnapshot, GraphPlan, Snapshot } from './contracts';
-import { humanText, nodeTitle, StatusIcon } from './presentation';
+import { humanText, nodeTitle, runtimeProblem, StatusIcon } from './presentation';
 
 /** Пользователь видит только подтвержденное исполнителем состояние. */
 export function WorkflowPanel({ snapshot, plan, busy, stateUnavailable = false, onApprove, onRevise, onStart, onSetup }: {
@@ -22,27 +22,34 @@ export function WorkflowPanel({ snapshot, plan, busy, stateUnavailable = false, 
   const awaitingProof = snapshot.integrity.valid && executionDone && Boolean(snapshot.proof) && !done;
   const readyWithoutGate = snapshot.status === 'ready' && !gate;
   const waitingToStart = snapshot.phase === 'planning' && readyWithoutGate;
-  const unavailableReason = readyWithoutGate && snapshot.capabilities.run?.allowed === false
-    ? humanText(snapshot.runner?.ai.available === false ? snapshot.runner.ai.reason : snapshot.capabilities.run.reason) || 'Исполнитель сейчас недоступен.'
+  const unavailableRawReason = readyWithoutGate && snapshot.capabilities.run?.allowed === false
+    ? (snapshot.runner?.ai.available === false ? snapshot.runner.ai.reason : snapshot.capabilities.run.reason)
     : null;
+  const unavailableReason = humanText(unavailableRawReason) || (unavailableRawReason ? 'Исполнитель сейчас недоступен.' : null);
   const blocked = stateUnavailable || Boolean(snapshot.failureReason || unavailableReason) || ['failed', 'uncertain', 'stale'].includes(snapshot.status) || !snapshot.integrity.valid;
   const current = snapshot.nodes.find(node => node.id === snapshot.activeNodeId) ?? snapshot.nodes.find(node => ['failed', 'uncertain', 'running'].includes(node.status));
+  const problem = runtimeProblem(snapshot.failureReason || unavailableRawReason || current?.reason || snapshot.integrity.reason);
   const reviewable = !stateUnavailable && Boolean(plan && gate && snapshot.integrity.valid && gate.planHash === snapshot.planHash);
   const changes = [...new Set(snapshot.nodes.flatMap(node => node.changedFiles))];
   const checks = snapshot.nodes.flatMap(node => node.checks.map(check => ({ ...check, nodeId: node.id, receiptIds: node.receiptIds })));
   return <section className="workflow-panel" aria-label="План и результат">
-    <h2>{done ? 'Готово к вашему ревью' : blocked ? 'Работа приостановлена' : awaitingProof ? 'Осталось доказать результат' : gate?.type === 'provider-consent' ? 'Согласие на передачу данных' : gate ? 'План работы' : approved ? 'Выполняем задачу' : 'Разбираемся в задаче'}</h2>
+    <h2>{done ? 'Готово к вашему ревью' : blocked ? problem?.title ?? 'Работа приостановлена' : awaitingProof ? 'Осталось доказать результат' : gate?.type === 'provider-consent' ? 'Согласие на передачу данных' : gate ? 'План работы' : approved ? 'Выполняем задачу' : 'Разбираемся в задаче'}</h2>
     <p className="workflow-summary" role="status">{done
       ? snapshot.proof ? 'Все обязательные требования подтверждены. Откройте доказательства и результаты работы.' : 'Реализация и проверки завершены. Проверьте изменения, затем создайте коммит и PR.'
       : stateUnavailable ? 'Текущее состояние недоступно. Дождитесь успешного обновления перед продолжением.'
-      : blocked ? humanText(snapshot.failureReason || unavailableReason || current?.reason || snapshot.integrity.reason) || 'Откройте отчеты этапа: продолжение требует проверки.'
+      : blocked ? (problem?.summary ?? humanText(snapshot.failureReason || unavailableReason || current?.reason || snapshot.integrity.reason)) || 'Откройте отчеты этапа: продолжение требует проверки.'
       : awaitingProof ? 'Этапы исполнения завершены. Откройте требования: для завершения задачи нужны актуальные доказательства каждого обязательного результата.'
       : gate?.type === 'provider-consent' ? 'Проверьте, какие данные могут быть переданы выбранному AI. Без согласия передача не начнется.'
       : gate ? 'Проверьте шаги и границы изменений. Можно дополнить план перед разработкой.'
       : approved ? 'Реализация, проверки и исправления пройдут автоматически. Можно вернуться к результату позже.'
       : waitingToStart ? 'Анализ еще не начался. Начните работу, чтобы получить план для согласования.'
       : 'Изучаем проект и требования. Затем покажем план для согласования.'}</p>
-    {unavailableReason && <div className="workflow-start-help">
+    {blocked && problem && <section className="workflow-problem" role="alert">
+      <strong>Что делать дальше</strong>
+      <p>{problem.action}</p>
+      {unavailableReason && <p><button className="button compact" type="button" onClick={onSetup}>Настройки проекта</button></p>}
+    </section>}
+    {unavailableReason && !problem && <div className="workflow-start-help">
       <p>Проверьте выбранный AI-клиент в настройках проекта. После исправления установки перезапустите flowcairn.</p>
       <button className="button" type="button" onClick={onSetup}>Настройки проекта</button>
     </div>}

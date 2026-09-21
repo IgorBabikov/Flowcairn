@@ -13,6 +13,10 @@ import { SKILL_ROUTES } from './lib/config.mjs';
 import { hashObject } from './lib/io.mjs';
 
 const hash = hashObject('synthetic planning fixture');
+const workspaceFingerprint = (files = [], indexHash = hash) => {
+  const git = { head: 'a'.repeat(40), indexHash };
+  return { hash: hashObject({ files, git }), files, git };
+};
 const skills = [...new Set(Object.values(SKILL_ROUTES).flat())].sort().map((id) => ({ id, path: `skills/${id}/SKILL.md`, hash }));
 const context = { runtimeHash: hash, skills };
 const input = { id: 'TASK-PLAN', goal: 'Добавить экспорт заметок', instructions: 'Экспортировать заметки в текстовый файл с проверкой формата',
@@ -30,7 +34,7 @@ async function fixture(t, { output = proposal(steps), maxReplans = 2 } = {}) {
   t.after(() => rmSync(root, { recursive: true, force: true }));
   let identity = hash, calls = 0, registrations = 0;
   let currentOutput = output, reviewVerdict = 'pass', observedFeedback = null;
-  const fingerprint = () => ({ hash, files: [], git: { head: 'a'.repeat(40), indexHash: hash } });
+  const fingerprint = () => workspaceFingerprint();
   const adapters = {
     identity: () => identity, skills: () => skills,
     capture: () => ({ manifest: { sourceHash: hash }, bundlePath: 'synthetic-source' }),
