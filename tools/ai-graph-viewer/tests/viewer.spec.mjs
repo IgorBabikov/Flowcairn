@@ -252,7 +252,7 @@ test('clears a stale Stop request after revision conflict before allowing a new 
 
   const stop = page.getByRole('button', { name: 'Остановить', exact: true });
   await stop.click();
-  await expect(page.getByRole('alert')).toContainText('REVISION_CONFLICT');
+  await expect(page.getByRole('alert')).toContainText('Задача уже обновилась');
   await expect(page.getByRole('button', { name: 'Повторить тот же запрос' })).toHaveCount(0);
   await expect.poll(() => fixture.snapshotReads()).toBeGreaterThan(initialSnapshotReads);
   expect(fixture.calls.filter((call) => call.action === 'stop')).toHaveLength(1);
@@ -686,7 +686,7 @@ test('clears an expired gate request and refreshes capabilities', async ({ page 
   await gate.getByRole('button', { name: 'Зафиксировать решение' }).click();
 
   const error = page.getByRole('alert');
-  await expect(error).toContainText('GATE_EXPIRED');
+  await expect(error).toContainText('Подтверждение устарело');
   await expect(error.getByRole('button', { name: 'Повторить тот же запрос' })).toHaveCount(0);
   await expect.poll(() => fixture.snapshotReads()).toBeGreaterThan(readsBeforeGate);
 });
