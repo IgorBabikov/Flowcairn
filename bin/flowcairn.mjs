@@ -5,7 +5,7 @@ import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline/promises';
-import { GraphError } from '../scripts/ai-graph/lib/io.mjs';
+import { explainError, GraphError } from '../scripts/ai-graph/lib/io.mjs';
 import { loadProjectProfile, RUNTIME_ROOT, packageManagerLock, validatePackageManagerProject } from '../scripts/ai-graph/lib/project.mjs';
 import { TaskInputSchema } from '../scripts/ai-graph/lib/schemas.mjs';
 import { WorkflowService, sanitizeText } from '../scripts/ai-graph/lib/service.mjs';
@@ -415,16 +415,16 @@ if (isMainModule()) {
   try {
     await main();
   } catch (error) {
+    const explanation = explainError(error);
     process.stderr.write(
       JSON.stringify(
         {
           ok: false,
           error: {
             code: error.code ?? 'INVALID_INPUT',
-            message:
-              error.name === 'ZodError'
-                ? 'Некорректные параметры. Для task нужны --id, --goal, --scope и --accept. Проверьте поля и допустимые пути; справка: npx flowcairn --help.'
-                : sanitizeText(error.message),
+            ...(error.name === 'ZodError'
+              ? { message: 'Некорректные параметры. Для task нужны --id, --goal, --scope и --accept. Проверьте поля и допустимые пути; справка: npx flowcairn --help.' }
+              : explanation),
           },
         },
         null,

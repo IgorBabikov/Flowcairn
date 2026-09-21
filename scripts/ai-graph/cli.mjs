@@ -3,8 +3,8 @@ import path from 'node:path';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
-import { WorkflowService, sanitizeText } from './lib/service.mjs';
-import { GraphError } from './lib/io.mjs';
+import { WorkflowService } from './lib/service.mjs';
+import { explainError, GraphError } from './lib/io.mjs';
 import { prepareCheckImage } from './lib/docker-checks.mjs';
 
 const ALLOWED = new Set([
@@ -120,7 +120,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     process.stdout.write(`${JSON.stringify({ ok: true, command, result }, null, 2)}\n`);
   } catch (error) {
     process.stderr.write(
-      `${JSON.stringify({ ok: false, error: { code: error.code ?? 'INVALID_REQUEST', message: sanitizeText(error.message) } }, null, 2)}\n`,
+      `${JSON.stringify({ ok: false, error: { code: error.code ?? 'INVALID_REQUEST', ...explainError(error) } }, null, 2)}\n`,
     );
     process.exitCode = 2;
   }
