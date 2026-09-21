@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { inspectInstructions, readInstructionBundle, readInstructionFile, assessProjectInstructions } from '../scripts/ai-graph/lib/instructions.mjs';
-import { activateIntegration, inspectIntegration, INTEGRATION_JOURNAL, INTEGRATION_LOCK, replaceIntegrationFile } from '../scripts/ai-graph/lib/integration.mjs';
+import { activateIntegration, inspectIntegration, INTEGRATION_JOURNAL, INTEGRATION_LOCK, replaceIntegrationFile, WORKFLOW_PAYLOAD } from '../scripts/ai-graph/lib/integration.mjs';
+import { sha256 } from '../scripts/ai-graph/lib/io.mjs';
 import { uninstallIntegration, assertUninstallSafe } from '../scripts/ai-graph/lib/uninstall.mjs';
 function fixture(t) {
   const root = realpathSync(mkdtempSync(path.join(tmpdir(), 'flowcairn-instructions-')));
@@ -142,6 +143,22 @@ test('orphan override integration is adopted while the base AGENTS file stays un
   assert.equal(adopted.adopted, true);
   assert.deepEqual(f.read('AGENTS.md'), baseBefore);
   assert.match(f.read('AGENTS.override.md').toString(), /^personal override/);
+});
+test('valid older Flowcairn block migrates in place and preserves surrounding rules', (t) => {
+  const f = fixture(t);
+  const legacyPayload = WORKFLOW_PAYLOAD.replace('Каждое обязательное требование связано', 'Старый Flowcairn связывает каждое обязательное требование');
+  const legacyBlock = `<!-- FLOWCAIRN:WORKFLOW-START version=1 sha256=${sha256(legacyPayload)} -->\n${legacyPayload}<!-- FLOWCAIRN:WORKFLOW-END -->\n`;
+  f.write('AGENTS.override.md', `before\n${legacyBlock}after\n`);
+  const result = f.activate();
+  assert.equal(result.status, 'active');
+  assert.equal(result.adopted, true);
+  assert.equal(result.migrated, true);
+  const migrated = f.read('AGENTS.override.md').toString();
+  assert.match(migrated, /^before\n/);
+  assert.match(migrated, /flowcairn активирован/);
+  assert.match(migrated, /after\n$/);
+  f.uninstall();
+  assert.equal(f.read('AGENTS.override.md').toString(), 'before\nafter\n');
 });
 test('symlink files, parents and hardlinks are not read or overwritten', (t) => {
   const f = fixture(t), outside = fixture(t); outside.write('AGENTS.md', 'outside');

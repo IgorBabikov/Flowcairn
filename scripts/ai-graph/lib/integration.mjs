@@ -103,14 +103,7 @@ export function writeIntegrationJournal(root, value, expected) {
 }
 
 function currentWorkflowBlock(bytes) {
-  const block = integrationBlock(bytes);
-  if (!block) return null;
-  const text = bytes.toString('utf8');
-  const start = text.indexOf(START);
-  const markerEnd = text.indexOf('\n', start) + 1;
-  const end = text.indexOf(END, start);
-  if (start < 0 || markerEnd <= 0 || end < markerEnd || text.slice(markerEnd, end) !== WORKFLOW_PAYLOAD) return null;
-  return block;
+  return integrationBlock(bytes);
 }
 
 function adoptOrphanIntegration(root, candidates) {
@@ -120,7 +113,13 @@ function adoptOrphanIntegration(root, candidates) {
   // owns only the exact flowcairn block, so recovery cannot delete a user's
   // separator or surrounding rules when the original journal is missing.
   const before = data.bytes.subarray(0, block.start);
-  const owned = data.bytes.subarray(block.start, block.end);
+  const after = data.bytes.subarray(block.end);
+  const replacement = Buffer.concat([before, Buffer.from(CORE), after]);
+  const migrated = data.bytes.subarray(block.start, block.end).toString('utf8') !== CORE;
+  const current = migrated ? replaceIntegrationFile(root, target, replacement, data) : data;
+  const nextBlock = integrationBlock(current.bytes);
+  const nextBefore = current.bytes.subarray(0, nextBlock.start);
+  const owned = current.bytes.subarray(nextBlock.start, nextBlock.end);
   const journal = {
     version: 1,
     owner: 'flowcairn',
@@ -129,13 +128,13 @@ function adoptOrphanIntegration(root, candidates) {
     createdFile: false,
     separator: '',
     blockHash: sha256(owned),
-    beforeHash: sha256(before),
-    afterHash: data.sha256,
+    beforeHash: sha256(nextBefore),
+    afterHash: current.sha256,
   };
   writeIntegrationJournal(root, journal, null);
   const status = inspectIntegration({ projectRoot: root });
   if (status.status !== 'active') instructionError('INTEGRATION_VERIFY_FAILED', 'Existing flowcairn block was not adopted safely.');
-  return { ...status, changed: true, adopted: true };
+  return { ...status, changed: migrated, adopted: true, migrated };
 }
 export function ownedBlockRange(bytes, journal) {
   const block = integrationBlock(bytes);

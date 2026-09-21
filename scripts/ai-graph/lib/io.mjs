@@ -20,6 +20,67 @@ export class GraphError extends Error {
   }
 }
 
+const ERROR_GUIDANCE = Object.freeze({
+  INTEGRATION_CONFLICT: {
+    message: 'Flowcairn не смог безопасно подключить правила проекта: найден старый, измененный или неполный блок интеграции.',
+    where: 'AGENTS.md или AGENTS.override.md',
+    action: 'Сначала проверьте старый блок Flowcairn в этом файле. Не удаляйте весь файл с правилами проекта; после исправления повторите flowcairn setup.',
+  },
+  INTEGRATION_MODIFIED: {
+    message: 'Блок интеграции Flowcairn изменился после установки, поэтому он не был перезаписан.',
+    where: 'AGENTS.md или AGENTS.override.md',
+    action: 'Сохраните пользовательские изменения, восстановите целостный блок Flowcairn или удалите только старую интеграцию после проверки, затем повторите setup.',
+  },
+  INTEGRATION_INCOMPLETE_DISCOVERY: {
+    message: 'Flowcairn не смог полностью прочитать правила проекта и остановился до изменений.',
+    where: 'AGENTS.md, AGENTS.override.md и .agents/skills',
+    action: 'Исправьте ошибки чтения, ссылки или лимиты инструкций и повторите setup.',
+  },
+  INSTRUCTION_CHANGED: {
+    message: 'Правила проекта изменились после их проверки, поэтому старое согласие больше не подходит.',
+    where: 'Файл инструкции, указанный в сообщении проверки',
+    action: 'Повторите inspect/setup и подтвердите актуальный набор правил.',
+  },
+  PROJECT_PROFILE_INVALID: {
+    message: 'Профиль Flowcairn в проекте поврежден или не соответствует текущему формату.',
+    where: '.flowcairn.json',
+    action: 'Сохраните файл для разбора и не удаляйте его вслепую; проверьте конфликтующую установку и повторите setup.',
+  },
+  PROVIDER_AUTH_REQUIRED: {
+    message: 'Выбранный AI-клиент не авторизован.',
+    where: 'Локальный CLI выбранного AI-клиента',
+    action: 'Войдите в CLI напрямую и повторите flowcairn setup.',
+  },
+  PROVIDER_TOOLCHAIN_INVALID: {
+    message: 'Выбранный AI-клиент не найден или не прошел проверку версии.',
+    where: 'Установленный CLI и его версия',
+    action: 'Проверьте официальную установку CLI и повторите setup.',
+  },
+  PROVIDER_PLATFORM: {
+    message: 'Выбранный AI-клиент не поддерживается на этой платформе.',
+    where: 'Платформа запуска и выбранный provider',
+    action: 'Выберите поддерживаемый локальный CLI для этой ОС.',
+  },
+  CHECK_SCRIPT_MISSING: {
+    message: 'В проекте не найден script, необходимый для выбранной проверки.',
+    where: 'package.json → scripts',
+    action: 'Добавьте или выберите существующий script, затем повторите настройку проверок.',
+  },
+  PACKAGE_MANAGER: {
+    message: 'Flowcairn не смог однозначно определить менеджер пакетов проекта.',
+    where: 'package.json и lock-файлы проекта',
+    action: 'Оставьте один поддерживаемый lock-файл или укажите --package-manager npm|pnpm|yarn.',
+  },
+});
+
+/** Stable machine code plus a short explanation for a person running the CLI. */
+export function explainError(error) {
+  const code = error?.code ?? 'INVALID_INPUT';
+  const guidance = ERROR_GUIDANCE[code];
+  if (!guidance) return { message: error?.message ?? 'Операция не выполнена.' };
+  return { ...guidance, technical: error?.message && error.message !== guidance.message ? error.message : undefined };
+}
+
 export function sha256(value) {
   return createHash('sha256').update(value).digest('hex');
 }
