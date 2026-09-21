@@ -457,6 +457,15 @@ export const RunStateSchema = z.strictObject({
   createOperationId: Id,
   setupPending: z.boolean(),
   stopRequested: z.boolean().optional(),
+  stopResult: z
+    .strictObject({
+      operationId: Id,
+      requestedAt: z.iso.datetime(),
+      state: z.enum(['requested', 'stopped', 'uncertain']),
+      reason: z.string().max(1000).nullable(),
+    })
+    .nullable()
+    .optional(),
   recovered: z.boolean().optional(),
   failureReason: z.string().max(12000).optional(),
 });

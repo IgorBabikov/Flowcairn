@@ -6,7 +6,7 @@ Flowcairn распространяется по [MIT](LICENSE). Ниже сох�
 
 Состав соответствует текущим `package.json`, `package-lock.json` и production entrypoints интерфейса. Runtime-зависимости проверяются через `npm ls --omit=dev --all`, браузерные компоненты — через `inputs` esbuild metafile.
 
-Включены **4 runtime-зависимости и 17 компонентов браузерного bundle**. Runtime-пакеты устанавливает менеджер пакетов; браузерные компоненты входят в собранный интерфейс. Инструменты разработки вне распространяемого bundle здесь не перечисляются. Каталог `node_modules` в пакет Flowcairn не копируется.
+Включены **4 runtime-зависимости, 17 компонентов браузерного bundle и шрифт Manrope**. Runtime-пакеты устанавливает менеджер пакетов; браузерные компоненты и шрифт входят в собранный интерфейс. Инструменты разработки вне распространяемого bundle здесь не перечисляются. Каталог `node_modules` в пакет Flowcairn не копируется.
 
 | Компонент | Версия | Использование | Лицензия |
 | --- | --- | --- | --- |
@@ -31,8 +31,13 @@ Flowcairn распространяется по [MIT](LICENSE). Ниже сох�
 | `yaml` | 2.9.1 | Runtime | ISC |
 | `zod` | 4.4.3 | Runtime | MIT |
 | `zustand` | 4.5.7 | Браузерный bundle | MIT |
+| `Manrope` | v20 Google Fonts subset | Локальный шрифт интерфейса | SIL OFL-1.1 |
 
 При обновлении зависимостей или состава bundle нужно повторно сверить metafiles и оригинальные лицензии. Упоминания авторов и контактов ниже принадлежат соответствующим upstream-проектам.
+
+## Manrope
+
+Лицензия: SIL Open Font License 1.1. Источник: [Google Fonts, Manrope](https://github.com/google/fonts/tree/main/ofl/manrope). В пакет входят официальные variable WOFF2 subsets для Latin и Cyrillic из Google Fonts v20. Полный текст лицензии сохранен в `tools/ai-graph-viewer/src/assets/OFL-Manrope.txt` и копируется в `dist/fonts/OFL-Manrope.txt`.
 
 ## @xyflow/react 12.11.6
 

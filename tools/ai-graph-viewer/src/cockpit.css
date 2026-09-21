@@ -1,7 +1,26 @@
 .app-shell:has(.task-view-switch) { grid-template-columns: minmax(0, 1fr); }
+.operator-layout.task-layout { grid-template-columns: 232px minmax(0, 1fr); }
+.task-layout .main-content { display: block; overflow-y: auto; }
+.task-overview { min-width: 0; min-height: 100%; overflow: visible; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); }
+.task-heading { padding: 28px 28px 22px; border-bottom: 1px solid var(--border); }
+.task-number { margin: 0 0 8px; color: var(--muted); font-size: .78rem; font-weight: 650; letter-spacing: .04em; }
+.task-heading-line { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.task-heading h2 { max-width: 38ch; margin: 0; font-size: clamp(1.55rem, 2.4vw, 2rem); line-height: 1.18; letter-spacing: -.03em; text-wrap: balance; overflow-wrap: anywhere; }
+.collapsible-text { max-width: 72ch; margin-top: 16px; color: var(--muted); line-height: 1.6; }
+.collapsible-text p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.collapsible-text p.clamped { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 5; overflow: hidden; }
+.text-action { margin-top: 8px; padding: 4px 0; border: 0; background: transparent; color: var(--plum-strong); cursor: pointer; font: inherit; font-size: .82rem; font-weight: 650; }
+.task-technical { margin-top: 16px; color: var(--muted); font-size: .76rem; }
+.task-technical summary { width: fit-content; cursor: pointer; }
+.task-technical dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 12px; margin: 12px 0 0; }
+.task-technical dd { margin: 0; overflow-wrap: anywhere; }
+.task-overview > .execution-status { margin: 18px 28px 0; }
+.task-overview .workflow-panel.embedded { padding: 26px 28px 32px; }
+.task-overview .task-cockpit { overflow: visible; border: 0; border-radius: 0; }
+.task-overview .task-cockpit .cockpit-header { padding-top: 20px; }
 .cockpit-layout { min-width: 0; }
 .task-view-switch { display: flex; gap: 4px; padding: 3px; background: var(--soft); border-radius: 8px; }
-.task-view-switch button, .cockpit-nav button { min-height: 36px; border: 0; border-radius: 5px; background: transparent; padding: 7px 12px; cursor: pointer; }
+.task-view-switch button, .cockpit-nav button { min-height: 40px; border: 0; border-radius: 5px; background: transparent; padding: 7px 12px; cursor: pointer; }
 .task-view-switch button[aria-pressed="true"], .cockpit-nav button[aria-pressed="true"] { background: var(--surface); color: var(--plum-strong); box-shadow: 0 1px 3px rgb(0 0 0 / 8%); }
 .task-view-switch button:hover, .cockpit-nav button:hover { color: var(--plum-strong); }
 .task-cockpit { min-width: 0; overflow: auto; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
@@ -78,6 +97,7 @@
   .requirement-detail { border-top: 1px solid var(--border); margin-top: 10px; }
 }
 @media (max-width: 1100px) {
+  .operator-layout.task-layout { grid-template-columns: 208px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
   .cockpit-layout { grid-template-rows: auto auto; }
   .cockpit-layout .task-cockpit { min-height: 520px; max-height: none; }
   .cockpit-layout .detail-panel { grid-column: 2; min-height: 0; }
@@ -85,6 +105,11 @@
   .cockpit-layout .detail-scroll { max-height: none; }
 }
 @media (max-width: 720px) {
+  .operator-layout.task-layout { display: flex; }
+  .task-heading { padding: 22px 18px 18px; }
+  .task-heading-line { flex-direction: column; gap: 10px; }
+  .task-overview > .execution-status { margin: 14px 16px 0; }
+  .task-overview .workflow-panel.embedded { padding: 20px 18px 26px; }
   .task-view-switch { width: 100%; }
   .task-view-switch button { flex: 1; min-height: 44px; }
   .cockpit-layout .task-cockpit { order: 0; }

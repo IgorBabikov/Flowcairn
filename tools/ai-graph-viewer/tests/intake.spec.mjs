@@ -1,6 +1,10 @@
 import { expect, test } from '@playwright/test';
 import { mockApi, snapshot, projectContext, allowed, allDenied, graphNode, token } from './fixtures.mjs';
 
+async function openGraph(page) {
+  await page.getByRole('button', { name: 'Граф · детали исполнения', exact: true }).click();
+}
+
 test('pending intake shows progress and a timeout preserves the same request for retry', async ({ page }) => {
   await mockApi(page, snapshot(), { emptyUntilIntake: true });
   let release;
@@ -45,6 +49,7 @@ test('compiles planning successor through backend without a client draft or auto
   current.capabilities = {...allDenied, requestReplan: {...allowed, label:'Показать план реализации'}};
   const fixture = await mockApi(page, current);
   await page.goto(`/#session=${token}`);
+  await openGraph(page);
   await page.getByRole('button', {name: 'Показать план реализации'}).click();
   await expect(page.getByTestId('plan-version')).toHaveText('2');
   const request = fixture.calls.find(call => call.action === 'replan').body;
@@ -70,6 +75,49 @@ test('first-run composer remains readable on desktop, mobile, light and dark', a
   }
 });
 
+test('keeps the same application geometry while initial data loads', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1366, height: 768 });
+  await mockApi(page, snapshot(), {
+    emptyFirstList: true,
+    projectDelayMs: 900,
+    listDelayMs: 900,
+  });
+  await page.goto(`/#session=${token}`);
+
+  const frame = page.locator('[data-testid="app-frame"]');
+  const geometry = async () => frame.evaluate((element) => {
+    const topbar = element.querySelector('.topbar')?.getBoundingClientRect();
+    const rail = element.querySelector('[data-testid="run-rail"]')?.getBoundingClientRect();
+    const content = element.querySelector('[data-testid="main-content"]')?.getBoundingClientRect();
+    return {
+      topbarHeight: topbar?.height,
+      railX: rail?.x,
+      railWidth: rail?.width,
+      contentX: content?.x,
+      contentTop: content?.y,
+    };
+  });
+  const before = await geometry();
+  await page.screenshot({ path: testInfo.outputPath('stable-loading-shell.png') });
+  await expect(page.getByRole('heading', { name: 'Новая задача' })).toBeVisible();
+  expect(await geometry()).toEqual(before);
+});
+
+test('keeps loader text and disables spinner motion for reduced motion', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await mockApi(page, snapshot(), {
+    emptyFirstList: true,
+    projectDelayMs: 900,
+    listDelayMs: 900,
+  });
+  await page.goto(`/#session=${token}`);
+
+  const loader = page.locator('.status-loader', { hasText: 'Загружаем данные Flowcairn' });
+  await expect(loader).toBeVisible();
+  expect(await loader.locator('.status-loader-mark').evaluate((element) =>
+    getComputedStyle(element).animationName)).toBe('none');
+});
+
 
 test('stale context requires a refresh and new request while preserving the task text', async ({page}) => {
   const options = { emptyUntilIntake: true, intakeError: {code:'STALE_CONTEXT', message:'Контекст изменился'} };
@@ -86,6 +134,7 @@ test('stale context requires a refresh and new request while preserving the task
   await page.getByRole('button', {name:'Обновить контекст'}).click();
   await expect(page.getByLabel('Полное описание задачи', {exact:true})).toHaveValue('Исправить поиск');
   await page.getByRole('button', {name:'Запустить'}).click();
+  await openGraph(page);
   await expect(page.locator('.react-flow')).toBeVisible();
   const requests = fixture.calls.filter(call => call.action === 'intake').map(call => call.body);
   expect(requests).toHaveLength(2);
@@ -111,8 +160,33 @@ test('failed registration refreshes changed bootstrap metadata without hiding th
   await expect(page.locator('.dialog-error')).toContainText('выбранные правила не помещаются в безопасный контекст');
   await expect(page.getByLabel('Полное описание задачи', { exact: true })).toHaveValue('Проверить пустой запрос');
   await page.getByRole('button', { name: 'Запустить', exact: true }).click();
+  await openGraph(page);
   await expect(page.locator('.react-flow')).toBeVisible();
   expect(fixture.calls.find(call => call.action === 'intake').body.contextHash).toBe('d'.repeat(64));
+});
+
+test('unknown error keeps English diagnostics inside technical details', async ({ page }) => {
+  await mockApi(page, snapshot(), {
+    emptyUntilIntake: true,
+    intakeError: {
+      code: 'SOME_NEW_INTERNAL_FAILURE',
+      message: 'unexpected response parser failed',
+    },
+  });
+  await page.goto(`/#session=${token}`);
+  await page.getByLabel('Заголовок задачи', { exact: true }).fill('Проверить ошибку');
+  await page.getByLabel('Полное описание задачи', { exact: true }).fill('Показать понятное сообщение');
+  await page.getByLabel('Номер задачи', { exact: true }).fill('ERROR-1');
+  await page.getByRole('button', { name: 'Запустить', exact: true }).click();
+
+  const error = page.locator('.dialog-error');
+  await expect(error).toContainText('Не удалось продолжить работу');
+  const technical = error.locator('.technical-details');
+  await expect(technical).not.toHaveAttribute('open', '');
+  await expect(technical.getByText('unexpected response parser failed', { exact: true })).not.toBeVisible();
+  await technical.locator('summary').click();
+  await expect(technical).toContainText('SOME_NEW_INTERNAL_FAILURE');
+  await expect(technical).toContainText('unexpected response parser failed');
 });
 
 
@@ -121,6 +195,7 @@ test('approval shows only the skills and checks actually present in the backend 
   current.nodes.push(graphNode({id:'check-existing', title:'Проверить существующие тесты', action:{id:'check-tests', kind:'checks'}, skills:[], capabilities:allDenied}));
   await mockApi(page, current);
   await page.goto(`/#session=${token}`);
+  await openGraph(page);
   await page.getByRole('button', {name:'Подтвердить план'}).click();
   const dialog = page.getByRole('dialog', {name:'Подтвердите решение'});
   await expect(dialog).toContainText('project-context · 111111111111');
@@ -142,6 +217,7 @@ test('task form has exactly three fields even with a large or dirty project', as
   await form.getByLabel('Полное описание задачи').fill('Сделать валидацию полей');
   await form.getByLabel('Номер задачи').fill('FORM-12');
   await form.getByRole('button', {name:'Запустить'}).click();
+  await openGraph(page);
   await expect(page.locator('.react-flow')).toBeVisible();
   const body = fixture.calls.find(call => call.action === 'intake').body;
   expect(Object.keys(body).sort()).toEqual(['contextHash','description','operationId','taskNumber','title']);
@@ -154,6 +230,7 @@ test('replan labels and visibility come from backend capabilities', async ({page
   current.capabilities = allDenied;
   const fixture = await mockApi(page, current);
   await page.goto(`/#session=${token}`);
+  await openGraph(page);
   await expect(page.locator('.graph-node').first()).toBeVisible();
   await expect(page.getByRole('button', {name:'Новая версия плана'})).toHaveCount(0);
   await expect(page.locator('.next-action')).toHaveCount(0);
@@ -174,6 +251,7 @@ test('long task gets the full graph header width and expands with keyboard on de
   for (const width of [1440, 390]) {
     await page.setViewportSize({width, height:900});
     await page.goto(`/#session=${token}`);
+    await openGraph(page);
     const header = page.locator('.graph-header');
     const summary = page.locator('.graph-goal summary');
     await expect(summary).toBeVisible();

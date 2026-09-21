@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   realpathSync,
+  readFileSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -39,6 +40,15 @@ test('real viewer build is independent of cwd and preserves the running viewer a
     assert.equal(result.status, 0, result.error?.message ?? result.stderr ?? 'build failed');
     for (const name of ['app.js', 'app.css', 'index.html'])
       assert.ok(statSync(path.join(dist, name)).size > 0, `${name} must be built`);
+    for (const name of [
+      'Manrope-Cyrillic-Variable.woff2',
+      'Manrope-Latin-Variable.woff2',
+      'OFL-Manrope.txt',
+    ])
+      assert.ok(statSync(path.join(dist, 'fonts', name)).size > 0, `${name} must be built`);
+    const css = readFileSync(path.join(dist, 'app.css'), 'utf8');
+    assert.match(css, /Manrope-Cyrillic-Variable\.woff2/);
+    assert.match(css, /Manrope-Latin-Variable\.woff2/);
   }
   assert.equal(existsSync(path.join(other, 'dist')), false);
 });

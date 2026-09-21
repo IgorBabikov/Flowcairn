@@ -254,6 +254,8 @@ export async function mockApi(page, initial = snapshot(), options = {}) {
       await route.fulfill({json: {configured:true, profileHash:hash('a'), providers:[{id:'codex',label:'Codex',supported:true,state:'available',reason:null},{id:'claude',label:'Claude Code',supported:true,state:'available',reason:null},{id:'cursor',label:'Cursor',supported:true,state:'available',reason:null}], values:{provider:'codex',model:'gpt-test',modelMode:'manual',reasoningEffort:'high',testPolicy:'keep',coverage:false,readConsent:true}, limitations:[]}}); return;
     }
     if (url.pathname === '/api/project') {
+      if (options.projectDelayMs)
+        await new Promise((resolve) => setTimeout(resolve, options.projectDelayMs));
       await route.fulfill({ json: options.projectContext ?? projectContext }); return;
     }
     if (url.pathname.endsWith('/stream')) {
@@ -286,6 +288,8 @@ export async function mockApi(page, initial = snapshot(), options = {}) {
     }
     if (url.pathname === '/api/runs' && request.method() === 'GET') {
       listReads += 1;
+      if (options.listDelayMs)
+        await new Promise((resolve) => setTimeout(resolve, options.listDelayMs));
       await route.fulfill({
         json: {
           runs:
@@ -512,8 +516,18 @@ export async function mockApi(page, initial = snapshot(), options = {}) {
         ...current,
         revision: current.revision + 1,
         status: 'uncertain',
+        execution: {
+          state: options.stopResponseState ?? 'stopping',
+          stopRequested: true,
+        },
         capabilities: allDenied,
       };
+      if (options.stopDelayMs)
+        await new Promise((resolve) => setTimeout(resolve, options.stopDelayMs));
+      if (options.loseStopResponse) {
+        await route.abort('connectionreset');
+        return;
+      }
       await route.fulfill({ json: { result: current } });
       return;
     }

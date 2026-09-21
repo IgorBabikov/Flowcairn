@@ -474,6 +474,16 @@ export async function executeNode(host, state, task, plan, definition, signal) {
         nodes: finalNodes,
         workspaceFingerprint: after ? host.persistFingerprint(after) : current.workspaceFingerprint,
         status: verdict === 'uncertain' ? 'uncertain' : 'running',
+        ...(current.stopRequested
+          ? {
+              stopResult: {
+                operationId: current.activeOperation.id,
+                requestedAt: current.stopResult?.requestedAt ?? finishedAt,
+                state: result?.stopped === true ? 'stopped' : 'uncertain',
+                reason: result?.stopped === true ? null : 'PROCESS_STOP_UNCONFIRMED',
+              },
+            }
+          : {}),
       },
       plan,
     );

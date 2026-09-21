@@ -44,6 +44,11 @@ async function capture(page, name) {
   await mkdir('output/playwright', { recursive: true });
   await page.screenshot({ path: `output/playwright/${name}.png`, fullPage: true });
 }
+async function openGraph(page) {
+  await page.getByRole('button', { name: 'Граф · детали исполнения', exact: true }).click();
+  const closeDetails = page.getByRole('button', { name: 'Закрыть детали', exact: true });
+  if (await closeDetails.isVisible()) await closeDetails.click();
+}
 
 test('native nodes follow backend transitions and only passed incoming dependencies animate', async ({
   page,
@@ -53,6 +58,7 @@ test('native nodes follow backend transitions and only passed incoming dependenc
   await page.setViewportSize({ width: 1440, height: 1000 });
   const fixture = await mockApi(page, executionSnapshot());
   await page.goto(`/#session=${token}`);
+  await openGraph(page);
   const node = page.locator('.react-flow__node-operator[data-id="implement"] .graph-node');
   await expect(node).toContainText('Готов к запуску');
   await expect(page.locator('.dependency-active')).toHaveCount(0);
@@ -114,6 +120,7 @@ test('ready active ID remains static across polling and predecessor changes revo
 }) => {
   const fixture = await mockApi(page, executionSnapshot());
   await page.goto(`/#session=${token}`);
+  await openGraph(page);
   const node = page.locator('[data-id="implement"] .graph-node');
   await expect(node).toContainText('Готов к запуску');
   const reads = fixture.snapshotReads();
@@ -136,6 +143,7 @@ for (const dark of [false, true]) {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await mockApi(page, executionSnapshot('running'));
     await page.goto(`/#session=${token}`);
+    await openGraph(page);
     if (dark) await page.getByRole('button', { name: 'Сменить тему' }).click();
     const node = page.locator('[data-id="implement"] .graph-node');
     await expect(node).toContainText('Выполняется');

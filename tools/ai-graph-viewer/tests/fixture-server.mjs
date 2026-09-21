@@ -9,6 +9,9 @@ const files = new Map([
   ['/index.html', ['index.html', 'text/html; charset=utf-8']],
   ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
   ['/app.css', ['app.css', 'text/css; charset=utf-8']],
+  ['/fonts/Manrope-Cyrillic-Variable.woff2', ['fonts/Manrope-Cyrillic-Variable.woff2', 'font/woff2']],
+  ['/fonts/Manrope-Latin-Variable.woff2', ['fonts/Manrope-Latin-Variable.woff2', 'font/woff2']],
+  ['/fonts/OFL-Manrope.txt', ['fonts/OFL-Manrope.txt', 'text/plain; charset=utf-8']],
 ]);
 
 const server = createServer((request, response) => {

@@ -39,7 +39,9 @@ flowchart TD
 | `docker-checks.mjs`, `docker-stop-proof.mjs` | Исполнение контейнера отделено от хранения и проверки доказательств остановки |
 | `orchestrator-*.mjs` | Отдельные границы registry/locks, Git, Graph leases, delivery, integration, inspection и source bootstrap Orchestrator |
 | `bin/installation.mjs`, `bin/project-files.mjs` | Установка и безопасные операции с проектом отделены от CLI dispatch |
-| `TaskCockpit.tsx`, `ResourcePanel.tsx`, `ExecutionGraph.tsx`, `ExecutionDetails.tsx`, `ExecutionDialogs.tsx` | Задача, ресурсы и граф; семантика PROVEN не вычисляется в React |
+| `AppFrame.tsx`, `TaskOverview.tsx`, `TaskCockpit.tsx`, `ResourcePanel.tsx` | Стабильный каркас, основной экран задачи, требования, evidence и ресурсы; семантика PROVEN не вычисляется в React |
+| `ExecutionStatus.tsx`, `execution-presentation.ts`, `StatusLoader.tsx`, `TechnicalDetails.tsx` | Человекочитаемая проекция состояния исполнения, loaders и отделение пользовательского сообщения от диагностики |
+| `ExecutionGraph.tsx`, `ExecutionDetails.tsx`, `ExecutionDialogs.tsx` | Расширенное представление графа, выбранного узла, immutable receipts и управляющих диалогов |
 
 Модули выполняют конкретные обязанности; универсального plugin framework и второго хранилища состояния нет. Compiler, service и verifier используют один immutable contract. Разделение файлов не дает модулю новые права.
 
@@ -58,6 +60,8 @@ Human acceptance хранится отдельным immutable receipt по од
 Snapshot проверяет живую рабочую копию и toolchain. Изменившиеся исходники делают прежние доказательства stale. Ошибка чтения или integrity блокирует актуальное подтверждение. При потере связи UI скрывает прежний сертификат до успешного refresh.
 
 Replan создает новую версию; предыдущие receipts остаются доступны. Исправление сохраняет контракт, права и разрешенный контекст чтения. Checks и review выполняются заново. Findings закрываются только более поздними связанными проверками. Автоматический цикл ограничен двумя исправлениями; срок плана определяется числом этапов и ограничен двумя часами. Неопределенная остановка процесса требует восстановления.
+
+Durable state хранит `stopRequested` и связанный `stopResult`. `task-snapshot.mjs` проецирует их вместе с `activeOperation` в `Snapshot.execution`: `running`, `stopping`, `stopped`, `stop-uncertain` или `idle`. `stopped` выводится только после подтвержденного termination либо подтвержденной отмены до запуска дочернего процесса. Эта проекция не меняет verdict узла и не превращает прерванный результат в PASS.
 
 Store использует CAS, locks, durable revisions и fsync. Текущие требования, findings, evidence и следующая допустимая работа восстанавливаются из сохраненных объектов, а не из чата модели. Это локальное файловое хранилище, не распределенная очередь.
 

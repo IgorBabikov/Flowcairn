@@ -3,8 +3,7 @@ import { MarkerType, type ReactFlowInstance, type Edge } from '@xyflow/react';
 import { api, sessionToken, watchRevisions } from './api';
 import { humanText } from './presentation';
 import { TaskComposer } from './TaskComposer';
-import { WorkflowPanel } from './WorkflowPanel';
-import { TaskCockpit } from './TaskCockpit';
+import { TaskOverview } from './TaskOverview';
 import { ExecutionGraph } from './ExecutionGraph';
 import type { ProofEvidence } from './proof-contracts';
 import { SetupPanel } from './SetupPanel';
@@ -18,6 +17,10 @@ import { NODE_TYPES, layoutNodes } from './GraphNodes';
 import { ActionButton, RunButton, RunHealth, ErrorNotice, LoadingState, MissingSession, EmptyGraph, getCapability } from './ui-controls';
 import { NodeDetails, EvidenceList, HistoryPanel, PlanPanel } from './ExecutionDetails';
 import { DraftDialog, GateDialog, EvidenceDialog, type Evidence } from './ExecutionDialogs';
+import { ExecutionStatus } from './ExecutionStatus';
+import { executionPresentation } from './execution-presentation';
+import { AppFrame, InitialLoadingFrame } from './AppFrame';
+import { StatusLoader } from './StatusLoader';
 export { AppErrorBoundary } from './ui-controls';
 
 type SnapshotRefresh = {
@@ -64,9 +67,14 @@ export function App() {
   const [showCreate, setShowCreate] = useState(false);
   const [showSetup, setShowSetup] = useState(false);
   const [showDraft, setShowDraft] = useState(false);
+  const [planFeedbackDraft, setPlanFeedbackDraft] = useState('');
+  const [runsOpen, setRunsOpen] = useState(false);
+  const [compactDetails, setCompactDetails] = useState(false);
   const [gate, setGate] = useState<GateSnapshot | null>(null);
   const [flowInstance, setFlowInstance] = useState<ReactFlowInstance | null>(null);
   const gateDialog = useRef<HTMLDialogElement>(null);
+  const runsButton = useRef<HTMLButtonElement>(null);
+  const mobileRunsDialog = useRef<HTMLDialogElement>(null);
   const selectedRunRef = useRef<string | null>(null);
   const snapshotRef = useRef<Snapshot | null>(null);
   const historyRevisionRef = useRef(-1);
@@ -78,6 +86,42 @@ export function App() {
   const snapshotRefreshesRef = useRef(new Map<string, SnapshotRefresh>());
   const visibleRuns = useMemo(() => newestRunsByTask(runs), [runs]);
 
+  useEffect(() => {
+    const query = window.matchMedia('(max-width: 1179px)');
+    const update = () => setCompactDetails(query.matches);
+    update();
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
+
+  useEffect(() => {
+    if (runsOpen) {
+      const dialog = mobileRunsDialog.current;
+      if (dialog && !dialog.open) dialog.showModal();
+      dialog?.querySelector<HTMLButtonElement>('button')?.focus();
+    }
+  }, [runsOpen]);
+
+  const dismissRuns = useCallback(() => {
+    if (mobileRunsDialog.current?.open) mobileRunsDialog.current.close();
+    setRunsOpen(false);
+  }, []);
+
+  const closeRuns = useCallback(() => {
+    dismissRuns();
+    queueMicrotask(() => runsButton.current?.focus());
+  }, [dismissRuns]);
+
+  useEffect(() => {
+    const query = window.matchMedia('(max-width: 720px)');
+    const closeOnDesktop = () => {
+      if (!query.matches && runsOpen) dismissRuns();
+    };
+    closeOnDesktop();
+    query.addEventListener('change', closeOnDesktop);
+    return () => query.removeEventListener('change', closeOnDesktop);
+  }, [dismissRuns, runsOpen]);
+
   const selectRun = useCallback((runId: string | null) => {
     if (selectedRunRef.current !== runId) {
       snapshotRef.current = null;
@@ -88,7 +132,6 @@ export function App() {
       setEvents([]);
       setSelectedNodeId(null);
       setTab('overview');
-      setTaskView('overview');
       setEvidence(null);
       setCompareRunId('');
       setComparePlan(null);
@@ -96,6 +139,7 @@ export function App() {
       setCompareError(null);
       comparisonRequestRef.current += 1;
       setShowDraft(false);
+      setPlanFeedbackDraft('');
       setFlowInstance(null);
     }
     selectedRunRef.current = runId;
@@ -403,14 +447,6 @@ export function App() {
     });
   }, [snapshot, visualSnapshot]);
   const currentGraphNodeId = snapshot ? relevantNodeId(snapshot) : null;
-  const autonomousRecoveryNode =
-    snapshot?.workflow === 'autonomous' &&
-    (Boolean(snapshot.failureReason) || ['failed', 'uncertain', 'stale'].includes(snapshot.status)) &&
-    selectedNode &&
-    !selectedNode.sourceRunId
-      ? selectedNode
-      : null;
-
   const focusGraphNode = useCallback(
     (nodeId: string) => {
       if (!flowInstance) return Promise.resolve(false);
@@ -491,6 +527,22 @@ export function App() {
       await refreshRuns();
     } catch (reason) {
       const apiError = reason as ApiError;
+      if (apiError.code === 'NETWORK_UNCERTAIN') {
+        setInterruptPending(null);
+        setStopError(null);
+        setNotice('Проверяем, была ли принята команда…');
+        await refreshSnapshot(operation.runId, true);
+        const refreshed = snapshotRef.current;
+        if (refreshed?.runId !== operation.runId || refreshed.execution?.stopRequested !== true) {
+          setNotice('');
+          setStopError({
+            code: 'STOP_ACCEPTANCE_UNKNOWN',
+            message: 'Не удалось подтвердить, принята ли команда остановки.',
+            retryable: true,
+          });
+        } else setNotice('');
+        return;
+      }
       setStopError(apiError);
       if (
         apiError.code === 'REVISION_CONFLICT' ||
@@ -691,8 +743,10 @@ export function App() {
   }
 
   const planningActionLabel = getCapability(snapshot?.capabilities ?? {}, 'requestReplan').label ?? labels.replan;
+  const execution = executionPresentation(snapshot, stopBusy);
+  const isStopping = execution.kind === 'stopping';
   const composing = showCreate || (!snapshot && !selectedRunId);
-  const showingCockpit = !composing && Boolean(snapshot?.proof) && taskView === 'overview';
+  const showingTask = !composing && Boolean(snapshot) && taskView === 'overview';
   const composer = <TaskComposer
     capability={project?.capabilities.intake ?? null}
     busy={busy} pending={pending?.kind === 'create'} error={error}
@@ -705,12 +759,12 @@ export function App() {
   />;
 
   if (!authenticated) return <MissingSession labels={labels} />;
-  if (loading && runs.length === 0) return <LoadingState label={labels.loading} />;
+  if (loading && runs.length === 0) return <InitialLoadingFrame label={labels.loading} />;
 
   return (
-    <main className={`app-shell${snapshot?.workflow === 'autonomous' ? ' autonomous' : ''}`}>
-      <a className="skip-link" href="#graph-canvas">
-        {labels.graph}
+    <AppFrame className={snapshot?.workflow === 'autonomous' ? 'autonomous' : ''}>
+      <a className="skip-link" href="#main-content">
+        {locale === 'ru' ? 'Перейти к задаче' : 'Skip to task'}
       </a>
       <header className="topbar">
         <div className="brand">
@@ -726,7 +780,7 @@ export function App() {
         </div>
         <div className="topbar-actions">
           <button className="button quiet" type="button" aria-expanded={showSetup} onClick={() => setShowSetup(!showSetup)}>Настройки проекта</button>
-          {runs.length === 0 && <button type="button" className="button quiet" onClick={() => void load()}>{labels.refresh}</button>}
+          <button ref={runsButton} className="button quiet mobile-runs-button" type="button" aria-expanded={runsOpen} onClick={() => setRunsOpen(true)}>Показать запуски</button>
           <span className={streamConnected ? 'connection live' : 'connection'}>
             {streamConnected ? labels.live : labels.disconnected}
           </span>
@@ -746,16 +800,23 @@ export function App() {
           >
             {labels.theme}
           </button>
-          <ActionButton
-            capability={
-              snapshot
-                ? getCapability(snapshot.capabilities, 'stop')
-                : { allowed: false, reason: labels.unavailable }
-            }
-            onClick={() => void execute('stop')}
-          >
-            {stopBusy ? '…' : labels.stop}
-          </ActionButton>
+          {isStopping ? (
+            <button className="button stop-action" type="button" disabled>
+              <span className="button-spinner" aria-hidden="true" />
+              Останавливаем…
+            </button>
+          ) : (
+            <ActionButton
+              capability={
+                snapshot
+                  ? getCapability(snapshot.capabilities, 'stop')
+                  : { allowed: false, reason: labels.unavailable }
+              }
+              onClick={() => void execute('stop')}
+            >
+              {labels.stop}
+            </ActionButton>
+          )}
           <ActionButton
             capability={
               snapshot
@@ -764,7 +825,7 @@ export function App() {
             }
             onClick={() => void execute('run')}
           >
-            {busy ? '…' : labels.run}
+            {busy ? <StatusLoader kind="button" label={labels.loading} inline announce={false} /> : labels.run}
           </ActionButton>
         </div>
       </header>
@@ -800,12 +861,12 @@ export function App() {
       )}
 
       {showSetup && <SetupPanel onClose={() => setShowSetup(false)} />}
-      {snapshot?.proof && !composing && <nav className="task-view-switch" aria-label="Представление задачи">
-        <button type="button" aria-pressed={taskView === 'overview'} onClick={() => { setTaskView('overview'); setTab('overview'); }}>Задача</button>
-        <button type="button" aria-pressed={taskView === 'graph'} onClick={() => setTaskView('graph')}>Граф · детали исполнения</button>
-      </nav>}
-      <section className={`operator-layout${composing ? ' composing' : ''}${runs.length === 0 ? ' no-runs' : ''}${showingCockpit ? ' cockpit-layout' : ''}`}>
-        {runs.length > 0 && <aside className="run-rail" aria-label={labels.runs}>
+      <nav className="task-view-switch" aria-label="Представление задачи">
+        <button type="button" aria-pressed={composing || taskView === 'overview'} onClick={() => { setTaskView('overview'); setTab('overview'); }} disabled={composing}>Задача</button>
+        <button type="button" aria-pressed={!composing && taskView === 'graph'} onClick={() => setTaskView('graph')} disabled={composing || !snapshot}>Граф · детали исполнения</button>
+      </nav>
+      <section className={`operator-layout${composing ? ' composing' : ''}${runs.length === 0 ? ' no-runs' : ''}${showingTask ? ' task-layout' : ''}`}>
+        <aside className="run-rail desktop-run-rail" aria-label={labels.runs} data-testid="run-rail">
           <div className="rail-heading">
             <h2>{labels.runs}</h2>
             <div className="rail-actions">
@@ -841,9 +902,29 @@ export function App() {
             {runs.length === 0 && <p className="empty-copy">{labels.noRuns}</p>}
           </div>
           {snapshot && <details className="health-details"><summary>Состояние проекта</summary><RunHealth snapshot={snapshot} locale={locale} /></details>}
-        </aside>}
+        </aside>
 
-        {composing ? composer : showingCockpit && snapshot ? <TaskCockpit key={snapshot.runId} snapshot={snapshot} busy={busy || Boolean(pending)} unavailable={snapshotUnavailable} onOpenEvidence={openProofEvidence} onOpenArtifact={openProofArtifact} onAcceptRequirement={acceptRequirement} /> : <section className="graph-region" id="graph-canvas" aria-label={labels.graph}>
+        <div className="main-content" data-testid="main-content" id="main-content">
+        {composing ? composer : showingTask && snapshot ? <TaskOverview
+          key={snapshot.runId}
+          snapshot={snapshot}
+          plan={plan}
+          busy={busy || Boolean(pending)}
+          unavailable={snapshotUnavailable}
+          execution={execution}
+          feedback={planFeedbackDraft}
+          onFeedbackChange={setPlanFeedbackDraft}
+          actions={{
+            onApprove: approveWorkflow,
+            onRevise: reviseWorkflow,
+            onStart: () => void execute('run'),
+            onSetup: () => setShowSetup(true),
+            onOpenEvidence: openProofEvidence,
+            onOpenArtifact: openProofArtifact,
+            onAcceptRequirement: acceptRequirement,
+          }}
+        /> : <section className="graph-region" id="graph-canvas" aria-label={labels.graph}>
+          <ExecutionStatus value={execution} />
           {snapshot?.workflow !== 'autonomous' && snapshot?.phase === 'planning' && getCapability(snapshot.capabilities, 'requestReplan').allowed && (
             <div className="next-action"><p>Следующая версия плана будет проверена сервером. Новые права потребуют вашего решения.</p>
               <button className="button primary" type="button" disabled={busy} onClick={requestReplan}>{planningActionLabel}</button></div>
@@ -918,8 +999,14 @@ export function App() {
             )}
           </div>
         </section>}
+        </div>
 
-        {!composing && <aside className="detail-panel" aria-label={labels.details}>
+        {!composing && taskView === 'graph' && selectedNode && <aside
+          className="detail-panel"
+          aria-label={compactDetails ? 'Детали исполнения' : labels.details}
+          role={compactDetails ? 'dialog' : undefined}
+        >
+          {compactDetails && <button className="button quiet detail-close" type="button" onClick={() => setSelectedNodeId(null)}>Закрыть детали</button>}
           <nav className="detail-tabs" aria-label={labels.details}>
             {(['overview', 'evidence', 'history', 'plan'] as const).map((name) => (
               <button
@@ -935,22 +1022,7 @@ export function App() {
             ))}
           </nav>
           <div className="detail-scroll">
-            {snapshot?.workflow === 'autonomous' ? (
-              <>
-                <div hidden={tab !== 'overview' && tab !== 'plan'}><WorkflowPanel key={snapshot.runId} snapshot={snapshot} plan={plan} busy={busy || Boolean(pending) || snapshotUnavailable} stateUnavailable={snapshotUnavailable} onApprove={approveWorkflow} onRevise={reviseWorkflow} onStart={() => void execute('run')} onSetup={() => setShowSetup(true)} /></div>
-                {tab === 'overview' && autonomousRecoveryNode && (
-                  <NodeDetails
-                    node={autonomousRecoveryNode}
-                    locale={locale}
-                    busy={busy}
-                    onAction={(action) => void execute(action, autonomousRecoveryNode.id)}
-                    onGate={() => undefined}
-                    onReplan={requestReplan}
-                    replanLabel={getCapability(autonomousRecoveryNode.capabilities, 'requestReplan').label ?? labels.replan}
-                  />
-                )}
-              </>
-            ) : tab === 'overview' &&
+            {tab === 'overview' &&
               (selectedNode ? (
                 <NodeDetails
                   node={selectedNode}
@@ -992,6 +1064,28 @@ export function App() {
           </div>
         </aside>}
       </section>
+
+      {runsOpen && <dialog
+        ref={mobileRunsDialog}
+        className="mobile-runs-dialog"
+        aria-labelledby="mobile-runs-title"
+        onCancel={(event) => { event.preventDefault(); closeRuns(); }}
+      >
+        <header><h2 id="mobile-runs-title">Запуски</h2><button className="button quiet" type="button" onClick={closeRuns}>Закрыть</button></header>
+        <div className="run-list">
+          {visibleRuns.map((run) => <RunButton
+            key={run.runId}
+            run={run}
+            locale={locale}
+            proof={run.runId === snapshot?.runId ? snapshot.proof : undefined}
+            proofUnavailable={run.runId === snapshot?.runId && snapshotUnavailable}
+            active={run.runId === selectedRunId}
+            onClick={() => { selectRun(run.runId); closeRuns(); }}
+          />)}
+          {visibleRuns.length === 0 && <p className="empty-copy">{labels.noRuns}</p>}
+          {snapshot && <details className="health-details"><summary>Состояние проекта</summary><RunHealth snapshot={snapshot} locale={locale} /></details>}
+        </div>
+      </dialog>}
 
       {showDraft && snapshot && plan && (
         <DraftDialog
@@ -1067,6 +1161,6 @@ export function App() {
       {evidence && (
         <EvidenceDialog evidence={evidence} locale={locale} onClose={() => setEvidence(null)} />
       )}
-    </main>
+    </AppFrame>
   );
 }

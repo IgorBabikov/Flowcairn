@@ -2,6 +2,17 @@ import { hashObject } from './io.mjs';
 
 const unique = (values) => [...new Set(values)];
 
+function executionSnapshot(state) {
+  const stopRequested = state.stopRequested === true;
+  if (state.activeOperation)
+    return { state: stopRequested ? 'stopping' : 'running', stopRequested };
+  if (!stopRequested) return { state: 'idle', stopRequested: false };
+  return {
+    state: state.stopResult?.state === 'stopped' ? 'stopped' : 'stop-uncertain',
+    stopRequested: true,
+  };
+}
+
 // Read model for UI/HTTP: state and allowed actions always come from WorkflowService.
 export function projectSnapshot(host, runId, verifySource) {
     let loaded,
@@ -166,6 +177,7 @@ export function projectSnapshot(host, runId, verifySource) {
       planHash: state.planHash,
       revision: state.revision,
       status: driftReason ? 'stale' : state.status,
+      execution: executionSnapshot(state),
       finalDisposition: state.finalDisposition,
       createdAt: state.createdAt,
       updatedAt: state.updatedAt,

@@ -8,6 +8,7 @@ const excluded = new Set([
   '.git',
   'node_modules',
   '.ai-orchestrator',
+  '.superpowers',
   'output',
   'test-results',
   'playwright-report',

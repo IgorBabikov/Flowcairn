@@ -4,6 +4,7 @@ import type { TaskProof } from './proof-contracts';
 import type { PendingOperation } from './control-operations';
 import { humanText, runtimeProblem } from './presentation';
 import { COPY, STATUS, formatDate, type Locale } from './ui-copy';
+import { TechnicalDetails } from './TechnicalDetails';
 
 export function getCapability(set: Partial<Record<CapabilityName, Capability>>, name: CapabilityName) {
   return set[name] ?? { allowed: false, reason: 'Сервер не сообщил о доступности действия' };
@@ -126,6 +127,7 @@ export function ErrorNotice({
           {(problem?.summary ?? humanText(error.message)) || 'Не удалось завершить действие.'}
         </p>
         {problem && <p className="error-next-step"><strong>Что делать:</strong> {problem.action}</p>}
+        <TechnicalDetails code={error.code} message={error.message} />
       </div>
       <div>
         {(pending || error.retryable) && (

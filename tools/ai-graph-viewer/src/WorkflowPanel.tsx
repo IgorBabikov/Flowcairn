@@ -1,19 +1,25 @@
 import { useState } from 'react';
 import type { GateSnapshot, GraphPlan, Snapshot } from './contracts';
-import { humanText, nodeTitle, runtimeProblem, StatusIcon } from './presentation';
+import { humanText, nodeTitle, runtimeProblem, StatusIcon, technicalProblem } from './presentation';
+import { TechnicalDetails } from './TechnicalDetails';
 
 /** Пользователь видит только подтвержденное исполнителем состояние. */
-export function WorkflowPanel({ snapshot, plan, busy, stateUnavailable = false, onApprove, onRevise, onStart, onSetup }: {
+export function WorkflowPanel({ snapshot, plan, busy, stateUnavailable = false, embedded = false, feedbackValue, onFeedbackChange, onApprove, onRevise, onStart, onSetup }: {
   snapshot: Snapshot;
   plan: GraphPlan | null;
   busy: boolean;
   stateUnavailable?: boolean;
+  embedded?: boolean;
+  feedbackValue?: string;
+  onFeedbackChange?: (value: string) => void;
   onApprove: (gate: GateSnapshot) => void;
   onRevise: (feedback: string) => void;
   onStart: () => void;
   onSetup: () => void;
 }) {
-  const [feedback, setFeedback] = useState('');
+  const [internalFeedback, setInternalFeedback] = useState('');
+  const feedback = feedbackValue ?? internalFeedback;
+  const setFeedback = onFeedbackChange ?? setInternalFeedback;
   const gate = snapshot.gates.find(item => item.type === 'provider-consent') ?? snapshot.gates.find(item => item.type === 'approve-plan');
   const gateNode = snapshot.nodes.find(node => node.id === gate?.nodeId);
   const approved = Boolean(snapshot.nodes.find(node => node.id === 'approve-plan' && node.status === 'passed'));
@@ -28,11 +34,13 @@ export function WorkflowPanel({ snapshot, plan, busy, stateUnavailable = false, 
   const unavailableReason = humanText(unavailableRawReason) || (unavailableRawReason ? 'Исполнитель сейчас недоступен.' : null);
   const blocked = stateUnavailable || Boolean(snapshot.failureReason || unavailableReason) || ['failed', 'uncertain', 'stale'].includes(snapshot.status) || !snapshot.integrity.valid;
   const current = snapshot.nodes.find(node => node.id === snapshot.activeNodeId) ?? snapshot.nodes.find(node => ['failed', 'uncertain', 'running'].includes(node.status));
-  const problem = runtimeProblem(snapshot.failureReason || unavailableRawReason || current?.reason || snapshot.integrity.reason);
+  const problemSource = snapshot.failureReason || unavailableRawReason || current?.reason || snapshot.integrity.reason;
+  const problem = runtimeProblem(problemSource);
+  const technical = technicalProblem(problemSource);
   const reviewable = !stateUnavailable && Boolean(plan && gate && snapshot.integrity.valid && gate.planHash === snapshot.planHash);
   const changes = [...new Set(snapshot.nodes.flatMap(node => node.changedFiles))];
   const checks = snapshot.nodes.flatMap(node => node.checks.map(check => ({ ...check, nodeId: node.id, receiptIds: node.receiptIds })));
-  return <section className="workflow-panel" aria-label="План и результат">
+  return <section className={`workflow-panel${embedded ? ' embedded' : ''}`} aria-label="План и результат">
     <h2>{done ? 'Готово к вашему ревью' : blocked ? problem?.title ?? 'Работа приостановлена' : awaitingProof ? 'Осталось доказать результат' : gate?.type === 'provider-consent' ? 'Согласие на передачу данных' : gate ? 'План работы' : approved ? 'Выполняем задачу' : 'Разбираемся в задаче'}</h2>
     <p className="workflow-summary" role="status">{done
       ? snapshot.proof ? 'Все обязательные требования подтверждены. Откройте доказательства и результаты работы.' : 'Реализация и проверки завершены. Проверьте изменения, затем создайте коммит и PR.'
@@ -48,6 +56,7 @@ export function WorkflowPanel({ snapshot, plan, busy, stateUnavailable = false, 
       <strong>Что делать дальше</strong>
       <p>{problem.action}</p>
       {unavailableReason && <p><button className="button compact" type="button" onClick={onSetup}>Настройки проекта</button></p>}
+      {technical && <TechnicalDetails code={technical.code} message={technical.message} />}
     </section>}
     {unavailableReason && !problem && <div className="workflow-start-help">
       <p>Проверьте выбранный AI-клиент в настройках проекта. После исправления установки перезапустите flowcairn.</p>
