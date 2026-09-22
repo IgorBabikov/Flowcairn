@@ -17,6 +17,9 @@ function git(root, args) {
   return result.stdout;
 }
 const safe = (file) => RelativePath.safeParse(file).success && !isSensitivePath(file);
+export function taskContextInventory(root) {
+  return { files: git(root, ['ls-files', '-z']).split('\0').filter(Boolean).filter(safe) };
+}
 function sourceIdentity(root, file) {
   const target = path.join(root, file);
   for (let cursor = path.dirname(target); cursor !== root; cursor = path.dirname(cursor)) {

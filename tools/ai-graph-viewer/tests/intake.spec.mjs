@@ -5,6 +5,10 @@ async function openGraph(page) {
   await page.getByRole('button', { name: 'Граф · детали исполнения', exact: true }).click();
 }
 
+async function startTask(page) {
+  await page.getByRole('button', { name: 'Запустить', exact: true }).click();
+}
+
 test('pending intake shows progress and a timeout preserves the same request for retry', async ({ page }) => {
   await mockApi(page, snapshot(), { emptyUntilIntake: true });
   let release;
@@ -19,7 +23,7 @@ test('pending intake shows progress and a timeout preserves the same request for
   await page.getByLabel('Заголовок задачи', { exact: true }).fill('Исправить поиск');
   await page.getByLabel('Полное описание задачи', { exact: true }).fill('Проверить пустой запрос');
   await page.getByLabel('Номер задачи', { exact: true }).fill('TASK-101');
-  await page.getByRole('button', { name: 'Запустить', exact: true }).click();
+  await startTask(page);
   await expect(page.locator('.intake-progress')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Запускаем…', exact: true })).toBeDisabled();
   release();
@@ -39,7 +43,7 @@ test('unavailable planner stays fail-closed with a visible reason', async ({ pag
   await page.getByLabel('Номер задачи', {exact:true}).fill('TASK-101');
   await page.getByLabel('Полное описание задачи', {exact:true}).fill('Добавить проверку');
   await expect(page.getByText('Подключите планировщик проекта')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Запустить' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Запустить', exact: true })).toBeDisabled();
 });
 
 test('compiles planning successor through backend without a client draft or automatic write', async ({ page }) => {
@@ -70,7 +74,7 @@ test('first-run composer remains readable on desktop, mobile, light and dark', a
     await expect(page.getByLabel('Полное описание задачи', {exact:true})).toBeVisible();
     await page.evaluate(value => document.documentElement.toggleAttribute('data-dark', value), dark);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-    await expect(page.getByRole('button', {name:'Запустить'})).toBeVisible();
+    await expect(page.getByRole('button', {name:'Запустить', exact:true})).toBeVisible();
     await page.screenshot({path: testInfo.outputPath(`intake-${name}.png`), fullPage:true});
   }
 });
@@ -126,14 +130,14 @@ test('stale context requires a refresh and new request while preserving the task
   await page.getByLabel('Заголовок задачи', {exact:true}).fill('Исправить поиск');
   await page.getByLabel('Номер задачи', {exact:true}).fill('TASK-101');
   await page.getByLabel('Полное описание задачи', {exact:true}).fill('Исправить поиск');
-  await page.getByRole('button', {name:'Запустить'}).click();
+  await startTask(page);
   await expect(page.getByRole('alert').filter({hasText:'Данные задачи устарели'}).last()).toBeVisible();
   await expect(page.getByRole('button', {name:'Повторить тот же запрос'})).toHaveCount(0);
   options.intakeError = null;
   options.projectContext = {...projectContext, contextHash:'b'.repeat(64)};
   await page.getByRole('button', {name:'Обновить контекст'}).click();
   await expect(page.getByLabel('Полное описание задачи', {exact:true})).toHaveValue('Исправить поиск');
-  await page.getByRole('button', {name:'Запустить'}).click();
+  await startTask(page);
   await openGraph(page);
   await expect(page.locator('.react-flow')).toBeVisible();
   const requests = fixture.calls.filter(call => call.action === 'intake').map(call => call.body);
@@ -156,10 +160,10 @@ test('failed registration refreshes changed bootstrap metadata without hiding th
   await page.getByLabel('Заголовок задачи', { exact: true }).fill('Исправить поиск');
   await page.getByLabel('Полное описание задачи', { exact: true }).fill('Проверить пустой запрос');
   await page.getByLabel('Номер задачи', { exact: true }).fill('TASK-101');
-  await page.getByRole('button', { name: 'Запустить', exact: true }).click();
+  await startTask(page);
   await expect(page.locator('.dialog-error')).toContainText('выбранные правила не помещаются в безопасный контекст');
   await expect(page.getByLabel('Полное описание задачи', { exact: true })).toHaveValue('Проверить пустой запрос');
-  await page.getByRole('button', { name: 'Запустить', exact: true }).click();
+  await startTask(page);
   await openGraph(page);
   await expect(page.locator('.react-flow')).toBeVisible();
   expect(fixture.calls.find(call => call.action === 'intake').body.contextHash).toBe('d'.repeat(64));
@@ -177,7 +181,7 @@ test('unknown error keeps English diagnostics inside technical details', async (
   await page.getByLabel('Заголовок задачи', { exact: true }).fill('Проверить ошибку');
   await page.getByLabel('Полное описание задачи', { exact: true }).fill('Показать понятное сообщение');
   await page.getByLabel('Номер задачи', { exact: true }).fill('ERROR-1');
-  await page.getByRole('button', { name: 'Запустить', exact: true }).click();
+  await startTask(page);
 
   const error = page.locator('.dialog-error');
   await expect(error).toContainText('Не удалось продолжить работу');
@@ -216,7 +220,7 @@ test('task form has exactly three fields even with a large or dirty project', as
   await form.getByLabel('Заголовок задачи').fill('Новая форма');
   await form.getByLabel('Полное описание задачи').fill('Сделать валидацию полей');
   await form.getByLabel('Номер задачи').fill('FORM-12');
-  await form.getByRole('button', {name:'Запустить'}).click();
+  await startTask(page);
   await openGraph(page);
   await expect(page.locator('.react-flow')).toBeVisible();
   const body = fixture.calls.find(call => call.action === 'intake').body;

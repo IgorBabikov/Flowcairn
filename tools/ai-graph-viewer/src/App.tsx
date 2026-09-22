@@ -3,6 +3,7 @@ import { MarkerType, type ReactFlowInstance, type Edge } from '@xyflow/react';
 import { api, sessionToken, watchRevisions } from './api';
 import { humanText } from './presentation';
 import { TaskComposer } from './TaskComposer';
+import { TaskClarification } from './TaskClarification';
 import { TaskOverview } from './TaskOverview';
 import { ExecutionGraph } from './ExecutionGraph';
 import type { ProofEvidence } from './proof-contracts';
@@ -65,6 +66,7 @@ export function App() {
   const [compareLoading, setCompareLoading] = useState(false);
   const [compareError, setCompareError] = useState<ApiError | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [clarifying, setClarifying] = useState<Snapshot | null>(null);
   const [showSetup, setShowSetup] = useState(false);
   const [showDraft, setShowDraft] = useState(false);
   const [planFeedbackDraft, setPlanFeedbackDraft] = useState('');
@@ -139,6 +141,7 @@ export function App() {
       setCompareError(null);
       comparisonRequestRef.current += 1;
       setShowDraft(false);
+      setClarifying(null);
       setPlanFeedbackDraft('');
       setFlowInstance(null);
     }
@@ -587,6 +590,7 @@ export function App() {
           : { expectedRunId: operation.runId },
       );
       if (operation.kind === 'create') setShowCreate(false);
+      if (operation.kind === 'control' && operation.request.contextSelection) setClarifying(null);
       setPending(null);
       setError(null);
       setNotice('');
@@ -601,7 +605,10 @@ export function App() {
         !apiError.retryable
       ) {
         setPending(null);
-        if (operation.kind === 'control') await refreshSnapshot(operation.runId, true);
+        if (operation.kind === 'control') {
+          if (operation.request.contextSelection) setClarifying(null);
+          await refreshSnapshot(operation.runId, true);
+        }
         else {
           // Registration may have changed bootstrap state before failing.
           // Refresh metadata for the next manual attempt, preserving the
@@ -693,6 +700,7 @@ export function App() {
 
   function requestReplan() {
     if (!snapshot?.planHash || snapshot.revision == null || !getCapability(snapshot.capabilities, 'requestReplan').allowed) return;
+    if (snapshot.contextClarification) { setClarifying(snapshot); return; }
     if (snapshot.phase !== 'planning') { setShowDraft(true); return; }
     const id = operationId('replan');
     void sendOperation({kind: 'control', key: `${snapshot.runId}:replan`, operationId: id,
@@ -873,7 +881,7 @@ export function App() {
         <button type="button" aria-pressed="false" onClick={() => { setTaskView('overview'); setTab('overview'); }}>Задача</button>
         <button type="button" aria-pressed="true">Граф · детали исполнения</button>
       </nav>}
-      <section className={`operator-layout${composing ? ' composing' : ''}${runs.length === 0 ? ' no-runs' : ''}${showingTask ? ' task-layout' : ''}`}>
+      <section className={`operator-layout${composing ? ' composing' : ''}${runs.length === 0 ? ' no-runs' : ''}${showingTask || clarifying ? ' task-layout' : ''}`}>
         <aside className="run-rail desktop-run-rail" aria-label={labels.runs} data-testid="run-rail">
           <div className="rail-heading">
             <h2>{labels.runs}</h2>
@@ -918,7 +926,17 @@ export function App() {
         </aside>
 
         <div className="main-content" data-testid="main-content" id="main-content">
-        {composing ? composer : showingTask && snapshot ? <TaskOverview
+        {composing ? composer : clarifying ? <TaskClarification key={`${clarifying.runId}:${clarifying.planHash}:${clarifying.revision}`}
+          snapshot={clarifying} busy={busy || Boolean(pending)} onClose={() => setClarifying(null)}
+          onSubmit={(contextSelection, feedback) => {
+            if (busy || pending || !clarifying.planHash || clarifying.revision == null) return;
+            const id = operationId('replan');
+            void sendOperation({ kind: 'control', key: `${clarifying.runId}:replan`, operationId: id,
+              runId: clarifying.runId, action: 'replan', request: { operationId: id,
+                expectedRevision: clarifying.revision, planHash: clarifying.planHash, contextSelection,
+                ...(feedback ? { feedback } : {}),
+              } });
+          }} /> : showingTask && snapshot ? <TaskOverview
           key={snapshot.runId}
           snapshot={snapshot}
           plan={plan}
@@ -932,6 +950,7 @@ export function App() {
             onRevise: reviseWorkflow,
             onStart: () => void execute('run'),
             onSetup: () => setShowSetup(true),
+            onClarify: requestReplan,
             onOpenEvidence: openProofEvidence,
             onOpenArtifact: openProofArtifact,
             onAcceptRequirement: acceptRequirement,
@@ -939,7 +958,7 @@ export function App() {
           }}
         /> : <section className="graph-region" id="graph-canvas" aria-label={labels.graph}>
           <ExecutionStatus value={execution} />
-          {snapshot?.workflow !== 'autonomous' && snapshot?.phase === 'planning' && getCapability(snapshot.capabilities, 'requestReplan').allowed && (
+          {(snapshot?.workflow !== 'autonomous' || snapshot?.contextClarification) && snapshot?.phase === 'planning' && getCapability(snapshot.capabilities, 'requestReplan').allowed && (
             <div className="next-action"><p>Следующая версия плана будет проверена сервером. Новые права потребуют вашего решения.</p>
               <button className="button primary" type="button" disabled={busy} onClick={requestReplan}>{planningActionLabel}</button></div>
           )}
@@ -1015,7 +1034,7 @@ export function App() {
         </section>}
         </div>
 
-        {!composing && taskView === 'graph' && selectedNode && <aside
+        {!composing && !clarifying && taskView === 'graph' && selectedNode && <aside
           className="detail-panel"
           aria-label={compactDetails ? 'Детали исполнения' : labels.details}
           role={compactDetails ? 'dialog' : undefined}

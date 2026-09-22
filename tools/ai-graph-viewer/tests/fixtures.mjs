@@ -271,6 +271,15 @@ export async function mockApi(page, initial = snapshot(), options = {}) {
       });
       return;
     }
+    if (url.pathname === '/api/intake/preview' && request.method() === 'POST') {
+      const body = request.postDataJSON();
+      calls.push({ action: 'preview', body });
+      const context = options.projectContext ?? projectContext;
+      await route.fulfill({ json: { contextHash: context.contextHash, previewHash: hash('e'),
+        scope: body.selection?.scope ?? ['src'], candidates: context.scopeCandidates,
+        references: [], issues: [], feedback: [], ready: true } });
+      return;
+    }
     if (url.pathname === '/api/intake' && request.method() === 'POST') {
       const body = request.postDataJSON();
       calls.push({ action: 'intake', body });

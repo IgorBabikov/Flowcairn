@@ -57,6 +57,7 @@ export interface CheckResult {
 }
 
 export interface GraphNodeSnapshot {
+  resolutionKind?: 'semantic' | 'process' | null;
   sourceRunId?: string;
   sourcePlanHash?: string;
   id: string;
@@ -110,6 +111,8 @@ export interface WorkflowProgress {
   artifacts: ArtifactSummary[];
 }
 export interface Snapshot {
+  contextClarification?: boolean;
+  resolutionKind?: 'semantic' | 'process' | null;
   proof?: TaskProof;
   failureReason?: string | null;
   workflowProgress?: WorkflowProgress[];
@@ -147,6 +150,8 @@ export interface Snapshot {
 }
 
 export interface RunSummary {
+  resolutionKind?: 'semantic' | 'process' | null;
+  contextClarification?: boolean;
   runId: string;
   task: Snapshot['task'] | null;
   status: RunStatus;
@@ -254,6 +259,7 @@ export interface Artifact {
 }
 
 export interface ControlRequest {
+  contextSelection?: ContextSelection & { contextHash: string };
   operationId: string;
   expectedRevision: number;
   planHash: string;
@@ -336,7 +342,25 @@ export interface TaskFields {
 export interface IntakeInput extends TaskFields {
   operationId: string;
   contextHash: string;
+  selection?: ContextSelection;
 }
+
+export interface ContextSelection {
+  previewHash: string;
+  scope: string[];
+  resolutions: Array<{ reference: string; kind: 'existing' | 'create' | 'example'; path?: string }>;
+}
+export interface IntakePreview {
+  contextHash: string;
+  previewHash: string;
+  scope: string[];
+  candidates: string[];
+  references: Array<{ reference: string; status: 'resolved' | 'missing' | 'ambiguous' | 'unavailable'; matches: string[] }>;
+  issues: string[];
+  ready: boolean;
+  feedback: string[];
+}
+export type PreviewInput = TaskFields & { contextHash: string; selection?: ContextSelection; runId?: string };
 
 export interface OnboardingStatus {
   configured: boolean;

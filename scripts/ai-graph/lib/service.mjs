@@ -10,6 +10,9 @@ import { defaultAdapters, privateDirectory, sanitizeText } from './service-adapt
 export { runtimeIdentity, sanitizeText } from './service-adapters.mjs';
 import { compilePlanningPlan } from './planning.mjs';
 import { projectSummary } from './intake.mjs';
+import { buildTaskContext, initialTaskContext } from './task-context.mjs';
+import { resolveContextRequests } from './context-discovery.mjs';
+import { resultKind } from './result-classification.mjs';
 import { buildTaskContract } from './task-contract.mjs';
 import { createTaskProofService } from './task-proof-service.mjs';
 import { executeNode } from './node-execution.mjs';
@@ -28,7 +31,10 @@ import {
   RunStateSchema,
   ArtifactSchema,
   NaturalIntakeSchema,
+  IntakePreviewSchema,
   AIReviewResultSchema,
+  AIAnalysisResultSchema,
+  AIPlanningResultSchema,
   assertJsonBounds,
   Id,
 } from './schemas.mjs';
@@ -93,6 +99,25 @@ export class WorkflowService {
   project() {
     return this.adapters.projectSummary ? this.adapters.projectSummary() : projectSummary(this);
   }
+  previewIntake(input) {
+    this.#assertOpen();
+    assertJsonBounds(input);
+    const body = IntakePreviewSchema.parse(input);
+    if (body.runId) {
+      const { task } = this.#read(body.runId, { current: false });
+      Object.assign(body, { title: task.goal, description: task.instructions, taskNumber: task.taskNumber ?? task.id });
+    }
+    return this.#intakeContext(body, this.project());
+  }
+  #intakeContext(body, project, forbiddenPaths = []) {
+    if (body.contextHash !== project.contextHash) fail('STALE_CONTEXT', 'Файлы или настройки изменились. Проверьте область задачи заново.');
+    const inventory = this.adapters.taskContextInventory?.();
+    if (project.sourceHash && inventory?.sourceHash !== project.sourceHash)
+      fail('STALE_CONTEXT', 'Файлы изменились во время проверки области задачи. Повторите проверку.');
+    return buildTaskContext({ fields: { title: body.title, description: body.description, taskNumber: body.taskNumber },
+      project, files: inventory?.files ?? null, outputPaths: this.adapters.project?.outputPaths ?? [],
+      forbiddenPaths, selection: body.selection });
+  }
   async intake(input, options = {}) {
     this.#assertOpen(); this.pendingMutations++;
     try { return await this.#intake(input, options); } finally { this.pendingMutations--; }
@@ -120,14 +145,16 @@ export class WorkflowService {
     if (product && !this.#hasReadConsent()) fail('ONBOARDING_REQUIRED', 'Завершите настройку и разрешите чтение выбранным AI');
     if (snapshotRequested && legacy?.snapshotHash !== project.bootstrap?.snapshotHash) fail('STALE_CONTEXT', 'Исходный снимок изменился; подтвердите актуальные файлы');
     if (untracked.some((file) => !project.bootstrap?.untrackedCandidates.includes(file))) fail('INTAKE_SCOPE', 'Файл не входит в текущий список snapshot candidates');
-    if (!requestedScope && project.scopeCandidates.length > 64) fail('INTAKE_SCOPE_LIMIT', 'Выберите не более 64 областей задачи');
-    const inferredScope = product && this.adapters.selectTaskScope
-      ? this.adapters.selectTaskScope(body.description, project.scopeCandidates)
-      : unique([...project.scopeCandidates, ...untracked.filter((file) => file !== '.flowcairn.json').map((file) => file.includes('/') ? file.split('/')[0] : file)]);
+    if (!product && !requestedScope && project.scopeCandidates.length > 64) fail('INTAKE_SCOPE_LIMIT', 'Выберите не более 64 областей задачи');
+    const preview = product ? this.#intakeContext(body, project) : null;
+    if (preview && product && body.selection && !preview.ready) fail('INTAKE_CONTEXT_REQUIRED', preview.issues.join('\n'));
+    const initial = preview ? initialTaskContext(preview, project, product && Boolean(body.selection)) : null;
+    const inferredScope = initial?.scope ?? unique([...project.scopeCandidates, ...untracked.filter((file) => file !== '.flowcairn.json').map((file) => file.includes('/') ? file.split('/')[0] : file)]);
     const task = TaskInputSchema.parse({ id: `TASK-${suffix.toUpperCase()}`, goal: product ? body.title : body.prompt.slice(0, 4000),
       ...(product ? { intakeKind: 'natural' } : {}),
       ...(product ? { taskNumber: body.taskNumber } : {}),
       instructions: product ? body.description : body.prompt, scope: product ? inferredScope : requestedScope ?? inferredScope,
+      ...(initial ? { contextDiscovery: true, contextNotes: initial.notes } : {}),
       contextPaths: project.contextPaths, includeUntracked: untracked, acceptance: [product ? body.description.slice(0, 4000) : body.prompt.slice(0, 4000)], checks: project.checks });
     if (task.scope.some((file) => !pathAllowed(file, task))) fail('INTAKE_SCOPE', 'Недопустимый scope');
     const pending = this.intakes.get(runId);
@@ -157,7 +184,7 @@ export class WorkflowService {
         const { createTask } = await import('./task-registration.mjs');
         const register = this.adapters.registerTask ?? createTask;
         const snapshot = await register(this.root, task, { run: runId, operation: body.operationId, service: this,
-          stage: 'planning', ...(product ? { workflow: 'autonomous' } : {}), naturalIntakeHash: requestHash, actor, contextHash: body.contextHash, snapshot: product ? true : snapshotRequested, includeUntracked: untracked });
+          stage: 'planning', ...(product ? { workflow: 'autonomous', expectedSourceHash: project.sourceHash } : {}), naturalIntakeHash: requestHash, actor, contextHash: body.contextHash, snapshot: product ? true : snapshotRequested, includeUntracked: untracked });
         this.store.updateRun(reservationId, reservation.revision, (current) => ({ ...current, status: 'finished' }));
         if (product) this.#schedule(snapshot.runId);
         return snapshot;
@@ -311,6 +338,63 @@ export class WorkflowService {
       }
     });
   }
+  #contextClarification(state, plan) {
+    if (plan.workflow !== 'autonomous' || plan.stage !== 'planning' ||
+        !['failed', 'uncertain'].includes(state.status) || state.activeOperation || state.finalDisposition || state.setupPending ||
+        state.permissions.some((permission) => permission.includes('write')) ||
+        (state.status === 'uncertain' && !this.#semanticUncertainty(state))) return false;
+    return Object.values(state.nodes).every((node) => {
+      if (!node.attempts) return true;
+      try {
+        const receipt = this.store.readObject('receipts', node.receipts.at(-1));
+        return receipt.phase === 'gate' || (receipt.phase === 'finished' &&
+          receipt.termination?.stopped === true && receipt.termination.uncertain === false &&
+          receipt.beforeFingerprint === receipt.afterFingerprint && !receipt.changedFiles.length);
+      } catch { return false; }
+    });
+  }
+  #resolveContextSelection(task, selection) {
+    const { contextHash, ...choices } = selection;
+    const project = this.project();
+    const preview = this.#intakeContext({ title: task.goal, description: task.instructions,
+      taskNumber: task.taskNumber ?? task.id, contextHash, selection: choices }, project);
+    if (!preview.ready) fail('INTAKE_CONTEXT_REQUIRED', preview.issues.join('\n'));
+    if (preview.scope.some((file) => !pathAllowed(file, { ...task, scope: preview.scope })))
+      fail('INTAKE_SCOPE', 'Выбранные пути запрещены исходной задачей');
+    return { ...preview, sourceHash: project.sourceHash };
+  }
+  async #discoverPlanningContext(state, task, plan, request, caps) {
+    if (!task.contextDiscovery || !this.#contextClarification(state, plan)) return null;
+    const definition = plan.nodes.find((node) => ['ai-analyze', 'ai-plan'].includes(node.action.id) &&
+      resultKind(state.nodes[node.id], (id) => this.store.readObject('receipts', id)) === 'semantic');
+    if (!definition) return null;
+    const artifactId = state.nodes[definition.id].artifacts.find((id) => this.#artifact(id).kind === 'analysis');
+    if (!artifactId) return null;
+    const data = JSON.parse(this.#artifact(artifactId).content);
+    const output = (definition.action.id === 'ai-analyze' ? AIAnalysisResultSchema : AIPlanningResultSchema).parse(data);
+    if (!output.contextRequests?.length) return null;
+    if ((state.contextDiscoveryRound ?? 0) >= 4) {
+      this.#write(state, { failureReason: 'Не удалось собрать достаточный контекст за четыре этапа исследования. Откройте причину анализа и уточните недостающие исходные данные.' });
+      return null;
+    }
+    const fingerprint = await this.#assertWorkspace(state);
+    let discovery;
+    try {
+      discovery = resolveContextRequests({ task, requests: output.contextRequests, files: fingerprint.files,
+        outputPaths: this.adapters.project?.outputPaths ?? [], provider: this.adapters.project?.ai.provider ?? 'codex' });
+      if (hashObject(discovery.scope) === hashObject([...task.scope].sort()) &&
+          hashObject(discovery.contextPaths) === hashObject([...task.contextPaths].sort()))
+        discovery.notes = ['Запрошенные пути уже доступны. Продолжи анализ в объявленном read context; повтор того же запроса не добавляет информации.'];
+    } catch (error) {
+      if (!['CONTEXT_REQUEST_INVALID', 'CONTEXT_REQUEST_LIMIT'].includes(error.code)) throw error;
+      discovery = { scope: task.scope, contextPaths: task.contextPaths, notes: [
+        `Executor отклонил contextRequests: ${sanitizeText(error.message)}. Запроси более точные доступные пути либо объясни, каких данных действительно не хватает.`] };
+    }
+    const discoveryChange = { ...discovery, feedback: [...(task.contextNotes ?? []).slice(0, 31),
+      ...discovery.notes.slice(0, 1)], sourceHash: this.adapters.project?.workspaceMode === 'direct' ? fingerprint.hash : undefined };
+    return this.#replan({ state, task, plan, request, actor: state.actor, caps, discoveryChange,
+      digest: hashObject({ name: 'context-discovery', request, artifactId }) });
+  }
 
   async onboarding() {
     const { inspectOnboarding } = await import(new URL('../../../bin/onboarding.mjs', import.meta.url).href);
@@ -355,6 +439,8 @@ export class WorkflowService {
         await this.command(runId, 'run', request, { actor: state.actor });
         continue;
       }
+      const discovered = await this.#discoverPlanningContext(state, task, plan, request, caps);
+      if (discovered) { runId = discovered.runId; continue; }
       if (plan.stage === 'planning' && state.status === 'passed') {
         const next = await this.command(runId, 'replan', request, { actor: state.actor });
         runId = next.runId;
@@ -541,7 +627,9 @@ export class WorkflowService {
       retainedArtifacts = [],
       policyGrant = undefined,
       planningTransitions = 0,
+      contextDiscoveryRound = 0,
       naturalIntakeHash = undefined,
+      expectedSourceHash = undefined,
     } = {},
   ) {
     this.#assertOpen();
@@ -576,6 +664,7 @@ export class WorkflowService {
       retainedArtifacts,
       policyGrant: policyGrant ?? null,
       planningTransitions,
+      contextDiscoveryRound,
       naturalIntakeHash: naturalIntakeHash ?? null,
       actor,
     });
@@ -587,6 +676,8 @@ export class WorkflowService {
     }
     const source = sourceOverride ?? (await this.adapters.capture(taskInput));
     const sourceHash = source.manifest.sourceHash;
+    if (expectedSourceHash && sourceHash !== expectedSourceHash)
+      fail('STALE_CONTEXT', 'Снимок изменился после выбора файлов. Подтвердите актуальную область задачи.');
     const task = TaskSpecSchema.parse({ ...taskInput, schemaVersion: 2, sourceHash });
     const taskHash = this.store.putObject('tasks', task);
     const context = {
@@ -642,6 +733,7 @@ export class WorkflowService {
         planVersion: version,
         maxReplans: task.limits.maxReplans,
         planningTransitions,
+        contextDiscoveryRound,
         ...(naturalIntakeHash ? { naturalIntakeHash } : {}),
         supersedesRunId,
         createdAt: now(),
@@ -994,6 +1086,8 @@ export class WorkflowService {
       delivery: this.#delivery.bind(this),
       read: this.#read.bind(this),
       taskProof: this.#taskProof.bind(this),
+      contextClarification: this.#contextClarification.bind(this),
+      resultKind: (node) => resultKind(node, (id) => this.store.readObject('receipts', id)),
       workflowProgress: this.#workflowProgress.bind(this)
     }, runId, verifySource);
   }
@@ -1040,6 +1134,10 @@ export class WorkflowService {
               }
             : null,
           status: reason ? 'stale' : state.status,
+          resolutionKind: state?.status === 'uncertain'
+            ? (Object.values(state.nodes).filter((node) => node.status === 'uncertain')
+              .every((node) => resultKind(node, (id) => this.store.readObject('receipts', id)) === 'semantic') ? 'semantic' : 'process')
+            : null,
           revision: state?.revision ?? null,
           planVersion: state?.planVersion ?? null,
           planHash: state?.planHash ?? null,
@@ -1204,6 +1302,7 @@ export class WorkflowService {
     this.#assertOpen();
     assertJsonBounds(input);
     const request = ControlRequestSchema.parse(input);
+    if (request.contextSelection && name !== 'replan') fail('INVALID_CONTROL', 'Уточнение контекста допустимо только для новой версии плана');
     if (!['run', 'retry', 'rerun-check', 'gate', 'recover', 'stop', 'replan', 'revise-plan', 'verify-requirement'].includes(name))
       fail('UNKNOWN_CONTROL', 'Control action не разрешен');
     let { state, task, plan } = this.#read(runId, {
@@ -1560,9 +1659,10 @@ export class WorkflowService {
       assertConfiguredChecks, write: this.#write.bind(this), create: this.create.bind(this),
       persistFingerprint: this.#persistFingerprint.bind(this), resolveFingerprint: this.#resolveFingerprint.bind(this),
       snapshot: this.snapshot.bind(this), schedule: this.#schedule.bind(this),
+      resolveContextSelection: this.#resolveContextSelection.bind(this),
     };
   }
-  async #replan({ state, task, plan, request, digest, actor, caps, policyGrant = undefined }) {
+  async #replan({ state, task, plan, request, digest, actor, caps, policyGrant = undefined, discoveryChange = null }) {
     if (
       state.activeOperation ||
       Object.values(state.nodes).some((node) => node.status === 'running') ||
@@ -1571,8 +1671,10 @@ export class WorkflowService {
       fail('RECOVERY_REQUIRED', 'Перед replan требуется доказанное recovery');
     if (!caps.run.requestReplan.allowed)
       fail('REPLAN_DENIED', 'Replan недоступен или бюджет исчерпан');
+    if (request.contextSelection && (policyGrant || request.draft || !this.#contextClarification(state, plan)))
+      fail('CONTEXT_CLARIFICATION_DENIED', 'Область можно уточнить после остановленного анализа, до согласования реализации');
     if (policyGrant && state.binding) await this.#assertWorkspace(state);
-    return replanRun(this.#replanHost(), { state, task, plan, request, digest, actor, policyGrant });
+    return replanRun(this.#replanHost(), { state, task, plan, request, digest, actor, policyGrant, discoveryChange });
   }
   async #finishReplan(state, request, digest, actor, prior) {
     return finishReplan(this.#replanHost(), state, request, digest, actor, prior);

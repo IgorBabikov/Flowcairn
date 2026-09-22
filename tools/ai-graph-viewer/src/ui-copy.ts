@@ -187,6 +187,12 @@ export const STATUS: Record<Locale, Record<RunStatus, string>> = {
   },
 };
 
+export function statusLabel(status: RunStatus, locale: Locale, resolutionKind?: 'semantic' | 'process' | null): string {
+  return status === 'uncertain' && resolutionKind === 'semantic'
+    ? locale === 'ru' ? 'Нужно уточнение' : 'Clarification needed'
+    : STATUS[locale][status];
+}
+
 export function formatDuration(value: number | null | undefined, locale: Locale = 'ru'): string {
   if (value == null) return '—';
   if (value < 1000) return `${Math.round(value)} ${locale === 'ru' ? 'мс' : 'ms'}`;

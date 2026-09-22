@@ -11,7 +11,11 @@ const fail = (code, message) => { throw new GraphError(code, message); };
 const unique = (values) => [...new Set(values)];
 
 // Prepare and resume immutable successor runs; the service owns authorization and CAS writes.
-export async function replanRun(host, { state, task, plan, request, digest, actor, policyGrant = undefined }) {
+export async function replanRun(host, { state, task, plan, request, digest, actor, policyGrant = undefined, discoveryChange = null }) {
+  const originalTask = task;
+  const contextChange = discoveryChange ?? (request.contextSelection ? host.resolveContextSelection(task, request.contextSelection) : null);
+  if (contextChange) task = { ...task, scope: contextChange.scope,
+    contextNotes: contextChange.feedback, contextPaths: contextChange.contextPaths ?? originalTask.contextPaths };
   const context = {
     runtimeHash: host.adapters.identity(),
     skills: host.adapters.skills(task),
@@ -22,19 +26,19 @@ export async function replanRun(host, { state, task, plan, request, digest, acto
     parentPlanHash: state.planHash,
     workflow: plan.workflow,
     provider: host.adapters.project?.ai.provider,
-    analysis: host.analysis(state, plan),
+    analysis: contextChange ? null : host.analysis(state, plan),
     ...(plan.stage === 'execution' && plan.taskContract ? { taskContract: plan.taskContract } : {}),
   };
   let nextContract = plan.stage === 'execution' ? plan.taskContract : null;
   let nextDraft = request.draft ?? null;
   let nextStage = plan.stage;
-  let planningTransitions = state.planningTransitions ?? 0;
+  let planningTransitions = (state.planningTransitions ?? 0) + (discoveryChange ? 1 : 0);
   let planningEvidence = null;
   let analysisArtifact = null;
   if (plan.stage === 'planning') {
     if (request.draft) fail('PLANNING_DRAFT_DENIED', 'Planning компилирует только сохраненный AI proposal');
     const planner = plan.nodes.find((node) => node.action.id === 'ai-plan');
-    if (state.nodes[planner.id].status === 'passed') {
+    if (!contextChange && state.nodes[planner.id].status === 'passed') {
       // A stale context cannot promote an old planning receipt into new write policyGrant.
       host.read(state.runId);
       await host.assertWorkspace(state);
@@ -47,7 +51,7 @@ export async function replanRun(host, { state, task, plan, request, digest, acto
       nextStage = 'execution';
       planningTransitions = (state.planningTransitions ?? 0) + 1;
       planningEvidence = { artifactId, receiptIds: state.nodes[planner.id].receipts, steps: output.steps };
-    } else if (state.nodes[planner.id].status === 'failed' || (state.nodes[planner.id].status === 'uncertain' && (state.recovered === true || host.semanticUncertainty(state)))) {
+    } else if (!contextChange && (state.nodes[planner.id].status === 'failed' || (state.nodes[planner.id].status === 'uncertain' && (state.recovered === true || host.semanticUncertainty(state))))) {
       const analyzer = plan.nodes.find((node) => node.action.id === 'ai-analyze');
       if (state.binding) {
         host.adapters.verifyBinding(state.binding);
@@ -104,6 +108,7 @@ export async function replanRun(host, { state, task, plan, request, digest, acto
     );
   }
   const { schemaVersion: _, sourceHash: __, ...input } = task;
+  if (nextStage === 'planning' && plan.workflow === 'autonomous' && task.intakeKind === 'natural') input.contextDiscovery = true;
   if (request.feedback)
     input.planningFeedback = [...(task.planningFeedback ?? []), request.feedback];
   let fingerprint = null;
@@ -112,10 +117,10 @@ export async function replanRun(host, { state, task, plan, request, digest, acto
     fingerprint = host.adapters.fingerprint(state.binding.worktree, state.toolchain);
     const scopeNode = {
       permissions: ['workspace.source.write'],
-      resources: { writes: policyGrant ? unique(plan.nodes.flatMap((node) => node.resources.writes)) : task.scope },
+      resources: { writes: policyGrant ? unique(plan.nodes.flatMap((node) => node.resources.writes)) : originalTask.scope },
     };
     if (
-      !host.adapters.inspectChanges(host.resolveFingerprint(state.initialFingerprint), fingerprint, scopeNode, task)
+      !host.adapters.inspectChanges(host.resolveFingerprint(state.initialFingerprint), fingerprint, scopeNode, originalTask)
         .allowed
     )
       fail('REPLAN_SCOPE', 'Нельзя включить изменения вне утвержденного scope в новый план');
@@ -124,6 +129,8 @@ export async function replanRun(host, { state, task, plan, request, digest, acto
     input,
     state.binding ? { worktree: state.binding.worktree } : {},
   );
+  if (contextChange?.sourceHash && source.manifest.sourceHash !== contextChange.sourceHash)
+    fail('STALE_CONTEXT', 'Файлы изменились после уточнения задачи. Проверьте выбранную область заново.');
   const newRunId = `run-${randomUUID()}`;
   const preparationHash = host.store.putObject('operations', {
     input,
@@ -138,10 +145,13 @@ export async function replanRun(host, { state, task, plan, request, digest, acto
     workflow: plan.workflow ?? null,
     ...(nextContract ? { taskContract: nextContract } : {}),
     ...(analysisArtifact ? { analysisArtifact } : {}),
-    retainedArtifacts: unique([...state.planningArtifacts, ...plan.nodes.filter((node) => node.success.kind === 'analysis').flatMap((node) => state.nodes[node.id].artifacts)]),
+    retainedArtifacts: contextChange ? [] : unique([...state.planningArtifacts, ...plan.nodes.filter((node) => node.success.kind === 'analysis').flatMap((node) => state.nodes[node.id].artifacts)]),
     planningTransitions,
+    contextDiscoveryRound: (state.contextDiscoveryRound ?? 0) + (discoveryChange ? 1 : 0),
     feedback: {
       planningEvidence,
+      ...(contextChange ? { ...(request.contextSelection ? { contextSelection: request.contextSelection } : {}), contextNotes: contextChange.feedback,
+        previousScope: originalTask.scope, scope: task.scope } : {}),
       previousRunId: state.runId,
       previousPlanHash: state.planHash,
       nodes: plan.nodes
@@ -196,6 +206,7 @@ export async function finishReplan(host, state, request, digest, actor, prior) {
     retainedArtifacts: preparation.retainedArtifacts ?? [],
     policyGrant: preparation.policyGrant ?? undefined,
     planningTransitions: preparation.planningTransitions ?? 0,
+    contextDiscoveryRound: preparation.contextDiscoveryRound ?? 0,
     sourceOverride: source,
     replanEvidence: preparation.feedback ?? null,
     setupPending: true,

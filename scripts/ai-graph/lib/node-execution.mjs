@@ -10,6 +10,7 @@ import { buildReviewEvidence } from './review-evidence.mjs';
 import { boundPriorEvidence } from './bounded-context.mjs';
 import { selectAnalysisEvidence } from './analysis-evidence.mjs';
 import { normalizeRequirementReview, validateRequirementAssessments } from './requirement-verification.mjs';
+import { projectContextMap } from './project-context-map.mjs';
 
 const fail = (code, message) => { throw new GraphError(code, message); };
 const unique = (values) => [...new Set(values)];
@@ -129,6 +130,7 @@ export async function executeNode(host, state, task, plan, definition, signal) {
         const analysisEvidence = selectAnalysisEvidence({ state, plan, readArtifact: host.artifact,
           readReceipt: (id) => host.store.readObject('receipts', id) });
         let priorEvidence = {
+          ...(task.contextDiscovery && plan.stage === 'planning' ? { contextInventory: projectContextMap(before.files, task, host.adapters.project?.outputPaths ?? [], state.contextDiscoveryRound ?? 0) } : {}),
           ...(analysisEvidence ? { analysis: analysisEvidence } : {}),
           feedback: task.planningFeedback ?? [],
           reviewFindings: fixFindings,
@@ -215,7 +217,7 @@ export async function executeNode(host, state, task, plan, definition, signal) {
       ) {
         assertJsonBounds(result.output);
         aiOutput = (definition.action.id === 'ai-plan' ? AIPlanningResultSchema : definition.action.id === 'ai-analyze' && plan.workflow === 'autonomous' ? AIAnalysisResultSchema : reviewBundle ? AIReviewResultSchema : AIResultSchema).parse(result.output);
-        if (definition.action.id === 'ai-plan' && aiOutput.verdict === 'pass')
+        if (definition.action.id === 'ai-plan' && aiOutput.verdict === 'pass' && !Reflect.get(aiOutput, 'contextRequests')?.length)
           compileTaskProposal(task, aiOutput, { runtimeHash: host.adapters.identity(), skills: host.adapters.skills(task), resolveSkills: host.adapters.resolveSkills, resolveReadPaths: host.adapters.resolveReadPaths, contextHash: host.adapters.contextHash?.(task), provider: host.adapters.project?.ai.provider, analysis: host.analysis(state, plan), workflow: plan.workflow });
         if (reviewBundle) {
           const verified = buildReviewEvidence({
@@ -305,10 +307,13 @@ export async function executeNode(host, state, task, plan, definition, signal) {
           definition.action.id === 'ai-analyze' &&
           plan.workflow === 'autonomous' &&
           output.verdict === 'uncertain' &&
+          !output.contextRequests?.length &&
           !output.findings.some((finding) => finding.severity === 'blocking');
         const safe = {
           ...output,
           ...(continuableAnalysis ? { verdict: 'pass' } : {}),
+          ...(output.contextRequests?.length ? { verdict: 'uncertain' } : {}),
+          ...(output.contextRequests ? { contextRequests: output.contextRequests.map((item) => ({ ...item, reason: host.sanitizeText(item.reason) })) } : {}),
           summary: host.sanitizeText(output.summary),
           findings: output.findings.map((f) => ({ ...f, message: host.sanitizeText(f.message) })),
           plan: output.plan.map((p) => ({ ...p, outcome: host.sanitizeText(p.outcome) })),

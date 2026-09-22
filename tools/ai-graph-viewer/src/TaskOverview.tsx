@@ -12,6 +12,7 @@ type TaskOverviewActions = {
   onRevise: (feedback: string) => void;
   onStart: () => void;
   onSetup: () => void;
+  onClarify: () => void;
   onOpenEvidence: (evidence: ProofEvidence, artifactId?: string) => void;
   onOpenArtifact: (artifactId: string) => void;
   onAcceptRequirement?: (requirementId: string, reason: string) => void;
@@ -51,6 +52,8 @@ export function TaskOverview({
   const executionFocused = !snapshot.proof && execution.kind !== 'idle';
   const status = unavailable || !snapshot.integrity.valid
     ? 'Состояние недоступно'
+    : snapshot.status === 'uncertain' && snapshot.resolutionKind === 'semantic'
+      ? 'Нужно уточнение'
     : snapshot.proof
       ? proofLabels[snapshot.proof.status]
       : execution.kind === 'idle'
@@ -77,6 +80,11 @@ export function TaskOverview({
         </details>
       </header>
       <ExecutionStatus value={execution} />
+      {snapshot.contextClarification && <div className="context-recovery">
+        <p>Уточните файлы и папки задачи, чтобы продолжить анализ.</p>
+        <button className="button primary" type="button" disabled={busy || !snapshot.capabilities.requestReplan?.allowed}
+          onClick={actions.onClarify}>Уточнить контекст</button>
+      </div>}
       {executionFocused ? (
         <TaskProgress snapshot={snapshot} execution={execution} />
       ) : snapshot.proof ? (

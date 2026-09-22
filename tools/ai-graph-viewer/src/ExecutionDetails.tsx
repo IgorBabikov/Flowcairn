@@ -1,6 +1,6 @@
 import type { ApiError, ArtifactSummary, CapabilityName, GraphNodeSnapshot, GraphPlan, HistoryEvent, RunSummary } from './contracts';
 import { humanText, nodeTitle } from './presentation';
-import { COPY, STATUS, formatDate, formatDuration, type Locale } from './ui-copy';
+import { COPY, STATUS, statusLabel, formatDate, formatDuration, type Locale } from './ui-copy';
 import { ActionButton, getCapability } from './ui-controls';
 
 export function NodeDetails({
@@ -21,6 +21,11 @@ export function NodeDetails({
   replanLabel: string;
 }) {
   const labels = COPY[locale];
+  const actionKinds: Record<string, string> = {
+    analysis: 'Анализ', planning: 'Планирование', implementation: 'Внесение изменений',
+    checks: 'Проверки', review: 'Проверка изменений', gate: 'Согласование', handoff: 'Передача результата',
+    deterministic: 'Детерминированная проверка', ai: 'AI-исполнитель',
+  };
   const actions: Array<['run' | 'retry' | 'rerun-check' | 'recover', CapabilityName, string]> = [
     ['run', 'run', labels.run],
     ['retry', 'retry', labels.retry],
@@ -35,7 +40,7 @@ export function NodeDetails({
   return (
     <article className="node-details">
       <header>
-        <span className={`status-chip status-${node.status}`}>{STATUS[locale][node.status]}</span>
+        <span className={`status-chip status-${node.status}`}>{statusLabel(node.status, locale, node.resolutionKind)}</span>
         <h2>{nodeTitle(node, locale)}</h2>
         <p>{humanText(node.outcome, locale)}</p>
       </header>
@@ -71,7 +76,7 @@ export function NodeDetails({
         <dt>{locale === 'ru' ? 'Действие' : 'Action'}</dt>
         <dd>{node.action.id}</dd>
         <dt>{locale === 'ru' ? 'Тип действия' : 'Action type'}</dt>
-        <dd>{humanText(node.action.kind, locale)}</dd>
+        <dd>{locale === 'ru' ? actionKinds[node.action.kind] ?? node.action.kind : node.action.kind}</dd>
         <dt>{labels.mode}</dt>
         <dd>{node.mode === 'write' ? labels.write : labels.read}</dd>
         <dt>{labels.attempt}</dt>

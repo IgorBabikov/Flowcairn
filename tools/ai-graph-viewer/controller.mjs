@@ -64,6 +64,8 @@ export function sendError(response, error) {
 /** HTTP adapter only: all permission, state, gate and retry rules live in WorkflowService. */
 export async function control(service, request, response, url) {
   const body = await readBody(request);
+  if (url.pathname === '/api/intake/preview')
+    return send(response, 200, await service.previewIntake(body));
   if (url.pathname === '/api/intake') {
     return send(response, 201, {
       ok: true,

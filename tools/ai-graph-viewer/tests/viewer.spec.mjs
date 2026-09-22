@@ -126,11 +126,11 @@ test('creates a task from ordinary text without ids, permissions or external cal
   await expect(composer).toBeVisible();
   await expect(page.getByText('flowcairn task --file task.json')).toHaveCount(0);
   await expect(page.getByLabel('ID зарегистрированной задачи')).toHaveCount(0);
-  await expect(composer.getByRole('button', { name: 'Запустить' })).toBeDisabled();
+  await expect(composer.getByRole('button', { name: 'Запустить', exact: true })).toBeDisabled();
   await composer.getByLabel('Заголовок задачи', {exact:true}).fill('Исправить поиск');
   await composer.getByLabel('Номер задачи', {exact:true}).fill('TASK-101');
   await composer.getByLabel('Полное описание задачи', {exact:true}).fill('Исправить поиск и добавить проверку пустого ввода');
-  await composer.getByRole('button', { name: 'Запустить' }).click();
+  await composer.getByRole('button', { name: 'Запустить', exact: true }).click();
   await openGraph(page);
   await expect(page.locator('.react-flow')).toBeVisible();
   const request = fixture.calls.find(call => call.action === 'intake').body;
@@ -182,7 +182,7 @@ test('replays a lost intake response with the exact same request', async ({ page
   await composer.getByLabel('Заголовок задачи', {exact:true}).fill('Исправить поиск');
   await composer.getByLabel('Номер задачи', {exact:true}).fill('TASK-101');
   await composer.getByLabel('Полное описание задачи', {exact:true}).fill('Проверить стабильный intake');
-  await composer.getByRole('button', { name: 'Запустить' }).click();
+  await composer.getByRole('button', { name: 'Запустить', exact: true }).click();
   await expect(composer.getByRole('alert')).toContainText('Результат операции неизвестен');
   await expect(composer.getByLabel('Полное описание задачи', {exact:true})).toBeDisabled();
   await expect(composer.getByRole('button', {name:'Закрыть', exact:true})).toHaveCount(0);

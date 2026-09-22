@@ -3,7 +3,7 @@ import { Handle, useUpdateNodeInternals, NodeToolbar, Position, type Node, type 
 import type { CapabilityName, GraphNodeSnapshot, Snapshot } from './contracts';
 import { graphLayout } from './graph-layout';
 import { nodeTitle, statusHint, StatusIcon } from './presentation';
-import { COPY, STATUS, formatDuration, type Locale } from './ui-copy';
+import { COPY, statusLabel, formatDuration, type Locale } from './ui-copy';
 import { getCapability } from './ui-controls';
 
 type GraphNodeData = GraphNodeSnapshot &
@@ -39,7 +39,7 @@ function GraphNodeCard({ data }: NodeProps<Node<GraphNodeData, 'operator'>>) {
           data.onOpen();
         }
       }}
-      aria-label={`${nodeTitle(data, data.locale)}: ${STATUS[data.locale][data.status]}`}
+      aria-label={`${nodeTitle(data, data.locale)}: ${statusLabel(data.status, data.locale, data.resolutionKind)}`}
       role="button"
       tabIndex={0}
     >
@@ -87,8 +87,10 @@ function GraphNodeCard({ data }: NodeProps<Node<GraphNodeData, 'operator'>>) {
         <span className="node-mode">{data.mode === 'write' ? labels.write : labels.read}</span>
       </div>
       <strong>{nodeTitle(data, data.locale)}</strong>
-      <span className="node-status">{STATUS[data.locale][data.status]}</span>
-      <span className="node-hint">{statusHint(data.status, data.locale)}</span>
+      <span className="node-status">{statusLabel(data.status, data.locale, data.resolutionKind)}</span>
+      <span className="node-hint">{data.status === 'uncertain' && data.resolutionKind === 'semantic'
+        ? data.locale === 'ru' ? 'Уточните задачу перед продолжением' : 'Clarify the task before continuing'
+        : statusHint(data.status, data.locale)}</span>
       {!data.sourceRunId && <div className="node-meta">
         <span>
           {labels.attempt}: {data.attempt}

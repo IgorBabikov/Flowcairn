@@ -3,7 +3,7 @@ import type { ApiError, Capability, CapabilityName, RunSummary, Snapshot } from 
 import type { TaskProof } from './proof-contracts';
 import type { PendingOperation } from './control-operations';
 import { humanText, runtimeProblem } from './presentation';
-import { COPY, STATUS, formatDate, type Locale } from './ui-copy';
+import { COPY, statusLabel, formatDate, type Locale } from './ui-copy';
 import { TechnicalDetails } from './TechnicalDetails';
 
 export function getCapability(set: Partial<Record<CapabilityName, Capability>>, name: CapabilityName) {
@@ -63,7 +63,7 @@ export function RunButton({
         <small>{run.task?.goal ?? run.integrity.reason ?? run.runId}</small>
         <small title={run.runId}>Версия плана {run.planVersion ?? '—'}</small>
       </span>
-      <em>{proofUnavailable ? (locale === 'ru' ? 'Состояние недоступно' : 'State unavailable') : proof?.status === 'PROVEN' ? (locale === 'ru' ? 'Результат подтвержден' : 'Result confirmed') : run.status === 'passed' ? (locale === 'ru' ? proof ? 'Не подтверждено' : 'Исполнение завершено' : proof ? 'Not confirmed' : 'Execution finished') : STATUS[locale][run.status] ?? run.status}</em>
+      <em>{proofUnavailable ? (locale === 'ru' ? 'Состояние недоступно' : 'State unavailable') : proof?.status === 'PROVEN' ? (locale === 'ru' ? 'Результат подтвержден' : 'Result confirmed') : run.status === 'passed' ? (locale === 'ru' ? proof ? 'Не подтверждено' : 'Исполнение завершено' : proof ? 'Not confirmed' : 'Execution finished') : statusLabel(run.status, locale, run.resolutionKind) ?? run.status}</em>
     </button>
   );
 }
