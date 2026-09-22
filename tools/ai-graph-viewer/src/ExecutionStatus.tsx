@@ -1,15 +1,16 @@
 import type { ExecutionPresentation } from './execution-presentation';
-import { StatusLoader } from './StatusLoader';
 
 export function ExecutionStatus({ value }: { value: ExecutionPresentation }) {
   if (value.kind === 'idle') return null;
   if (value.kind === 'running' || value.kind === 'stopping')
     return (
-      <StatusLoader
-        className="execution-status"
-        kind={value.kind === 'stopping' ? 'stop' : 'stage'}
-        label={`${value.title} ${value.description}`}
-      />
+      <section className={`execution-status ${value.kind === 'stopping' ? 'stop' : 'stage'}`} role="status" aria-live="polite">
+        <span className="status-loader-mark" aria-hidden="true" />
+        <div>
+          <strong>{value.title}</strong>
+          <p>{value.description}</p>
+        </div>
+      </section>
     );
   return (
     <section

@@ -4,6 +4,7 @@ import type { ExecutionPresentation } from './execution-presentation';
 import { CollapsibleText } from './CollapsibleText';
 import { ExecutionStatus } from './ExecutionStatus';
 import { TaskCockpit } from './TaskCockpit';
+import { TaskProgress } from './TaskProgress';
 import { WorkflowPanel } from './WorkflowPanel';
 
 type TaskOverviewActions = {
@@ -15,6 +16,7 @@ type TaskOverviewActions = {
   onOpenEvidence: (evidence: ProofEvidence, artifactId?: string) => void;
   onOpenArtifact: (artifactId: string) => void;
   onAcceptRequirement?: (requirementId: string, reason: string) => void;
+  onOpenTechnical: () => void;
 };
 
 const proofLabels = {
@@ -47,6 +49,7 @@ export function TaskOverview({
 }) {
   const title = snapshot.task?.title || snapshot.task?.goal || 'Задача';
   const description = snapshot.task?.description || snapshot.task?.goal || '';
+  const executionFocused = !snapshot.proof && execution.kind !== 'idle';
   const status = unavailable || !snapshot.integrity.valid
     ? 'Состояние недоступно'
     : snapshot.status === 'uncertain' && snapshot.resolutionKind === 'semantic'
@@ -79,10 +82,12 @@ export function TaskOverview({
       <ExecutionStatus value={execution} />
       {snapshot.contextClarification && <div className="context-recovery">
         <p>Уточните файлы и папки задачи, чтобы продолжить анализ.</p>
-        <button className="button primary" type="button" disabled={busy || unavailable || !snapshot.capabilities.requestReplan?.allowed}
+        <button className="button primary" type="button" disabled={busy || !snapshot.capabilities.requestReplan?.allowed}
           onClick={actions.onClarify}>Уточнить контекст</button>
       </div>}
-      {snapshot.proof ? (
+      {executionFocused ? (
+        <TaskProgress snapshot={snapshot} execution={execution} />
+      ) : snapshot.proof ? (
         <TaskCockpit
           snapshot={snapshot}
           busy={busy}
@@ -107,6 +112,15 @@ export function TaskOverview({
           onSetup={actions.onSetup}
         />
       )}
+      <footer className="task-overview-footer">
+        <button className="technical-view-link" type="button" aria-label="Граф · детали исполнения" onClick={actions.onOpenTechnical}>
+          <svg aria-hidden="true" viewBox="0 0 24 24" width="20" height="20">
+            <circle cx="5" cy="18" r="2" /><circle cx="12" cy="6" r="2" /><circle cx="19" cy="18" r="2" />
+            <path d="M6.4 16.4 10.8 8M13.2 8l4.4 8.4M7 18h10" />
+          </svg>
+          Граф и технические детали
+        </button>
+      </footer>
     </article>
   );
 }

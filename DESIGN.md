@@ -1,0 +1,192 @@
+---
+name: Flowcairn
+description: Спокойный task-first интерфейс от задачи до проверенного результата
+colors:
+  signal-indigo: "#5664f5"
+  signal-indigo-strong: "#4452df"
+  cool-canvas: "#f5f7fb"
+  working-surface: "#ffffff"
+  soft-surface: "#f1f4fa"
+  selected-surface: "#e9edff"
+  ink-navy: "#101b3f"
+  secondary-ink: "#65718f"
+  quiet-ink: "#8390ac"
+  divider: "#dde3ef"
+  divider-strong: "#c9d2e4"
+typography:
+  display:
+    fontFamily: "Manrope, Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+    fontSize: "clamp(2rem, 3.1vw, 2.8rem)"
+    fontWeight: 780
+    lineHeight: 1.08
+    letterSpacing: "-0.04em"
+  title:
+    fontFamily: "Manrope, Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+    fontSize: "1.45rem"
+    fontWeight: 700
+    lineHeight: 1.3
+    letterSpacing: "-0.03em"
+  body:
+    fontFamily: "Manrope, Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+    fontSize: "1rem"
+    fontWeight: 450
+    lineHeight: 1.6
+    letterSpacing: "-0.008em"
+  label:
+    fontFamily: "Manrope, Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+    fontSize: "0.84rem"
+    fontWeight: 650
+    lineHeight: 1.4
+rounded:
+  control: "11px"
+  card: "16px"
+  status: "9px"
+  circle: "999px"
+spacing:
+  xs: "6px"
+  sm: "12px"
+  md: "20px"
+  lg: "32px"
+  xl: "48px"
+components:
+  button-primary:
+    background: "{colors.signal-indigo-strong}"
+    color: "{colors.working-surface}"
+    borderColor: "{colors.signal-indigo-strong}"
+    borderRadius: "{rounded.control}"
+    padding: "8px 13px"
+    fontWeight: 650
+  input:
+    background: "{colors.working-surface}"
+    color: "{colors.ink-navy}"
+    borderColor: "{colors.divider-strong}"
+    borderRadius: "12px"
+    padding: "14px 16px"
+  task-card:
+    background: "{colors.working-surface}"
+    color: "{colors.ink-navy}"
+    borderColor: "{colors.divider}"
+    borderRadius: "{rounded.card}"
+---
+
+# Design System: Flowcairn
+
+## Overview
+
+**Creative North Star: "Проверяемый маршрут"**
+
+Flowcairn выглядит как спокойное рабочее пространство, где цель, текущий этап и доказанный прогресс читаются раньше внутренней механики. Визуальная система не изображает AI как магию: она показывает последовательный маршрут, реальные состояния и границы действий.
+
+Плотность умеренная. Крупные заголовки закрепляют цель, а техническая информация уходит в раскрытия или отдельное представление. Светлая тема использует холодный почти белый фон; темная сохраняет тот же контраст и иерархию.
+
+**Key Characteristics:**
+
+- один широкий task-first столбец рядом с компактной панелью запусков;
+- индиго используется для действия, текущего этапа и выбранного состояния;
+- тонкие холодные границы вместо декоративных теней;
+- честные подписи loading, stopping и uncertainty без выдуманных процентов;
+- граф и диагностика являются осознанным drill-down.
+
+## Colors
+
+Холодная нейтральная основа удерживает внимание на задаче; индиго работает как редкий сигнал действия и активного состояния.
+
+### Primary
+
+- **Signal Indigo:** основное действие, текущий этап, selected state и фактический прогресс.
+- **Deep Signal Indigo:** текстовые ссылки, hover и сильное primary-действие.
+
+### Neutral
+
+- **Cool Canvas:** общий фон приложения.
+- **Working Surface:** карточки, поля и панели.
+- **Soft Surface:** вторичные контролы, дорожки и спокойные состояния.
+- **Ink Navy:** основной текст и крупные заголовки.
+- **Secondary Ink:** описания и пояснения.
+- **Divider / Divider Strong:** структурные линии и границы полей.
+
+**The Honest Signal Rule.** Акцентный цвет показывает действие или подтвержденное состояние; он не создает декоративный шум.
+
+## Typography
+
+**Display Font:** Manrope с системным sans-serif fallback
+**Body Font:** Manrope с системным sans-serif fallback
+
+**Character:** широкая, ясная и дружелюбная техническая типографика. Крупные заголовки плотные, основной текст сохраняет спокойный ритм и высокую читаемость кириллицы.
+
+### Hierarchy
+
+- **Display** (780, `clamp(2rem, 3.1vw, 2.8rem)`, 1.08): цель задачи и название первого экрана.
+- **Title** (700, `1.45rem`, 1.3): текущая рабочая секция.
+- **Body** (450, `1rem`, 1.6): описание и основное содержание, обычно до 74ch.
+- **Label** (650, `0.84rem`, 1.4): статусы, поля и компактная навигация.
+
+**The Goal First Rule.** Самый крупный текст всегда называет задачу или текущее решение человека, а не внутренний модуль.
+
+## Layout
+
+Desktop и laptop используют стабильную шапку, панель запусков шириной 260px и один широкий контентный столбец до 1180px. Между 721px и 1100px панель уменьшается до 220px. На mobile панель запусков становится dialog, верхние действия превращаются в компактные иконки, а контент получает 12px внешнего поля.
+
+Основной ритм строится на 12, 20, 32 и 48px. Документ не скроллится на laptop: независимо прокручиваются список запусков и основная задача. Длинное описание ограничено и раскрывается по запросу.
+
+## Elevation & Depth
+
+Система плоская по умолчанию. Глубину создают разница холодных тонов и тонкие границы. Мягкая ambient-тень используется только для выбранного активного маркера, modal/drawer и редких поднятых состояний.
+
+### Shadow Vocabulary
+
+- **Ambient panel** (`0 18px 46px rgba(46, 58, 104, 0.1)`): modal и действительно поднятая поверхность.
+- **Active signal** (`0 7px 18px rgba(68, 82, 223, 0.2)`): текущий этап в timeline.
+
+**The Flat-by-Default Rule.** Обычная рабочая карточка использует границу без тени; тень означает реальное поднятие или текущий активный сигнал.
+
+## Shapes
+
+Рабочие поверхности имеют спокойные углы 14–16px, контролы — 9–12px. Полный pill используется только для маленьких статусных меток и линейного прогресса. Круг обозначает точку этапа, статус или компактное действие.
+
+## Components
+
+### Buttons
+
+- **Shape:** компактный прямоугольник с радиусом 11px и минимальной высотой 40px; главное действие — 44px.
+- **Primary:** Deep Signal Indigo с белым текстом, заметнее служебных действий.
+- **Hover / Focus:** смена поверхности или индиго и трехпиксельный видимый focus-ring.
+- **Quiet:** прозрачный фон и текст основной или вторичной контрастности.
+
+### Cards / Containers
+
+- **Corner Style:** 16px у task-first карточек и основных панелей.
+- **Background:** Working Surface на Cool Canvas.
+- **Shadow Strategy:** без тени в покое.
+- **Border:** один холодный divider.
+- **Internal Padding:** 20–38px в зависимости от иерархии.
+
+### Inputs / Fields
+
+- **Style:** белая поверхность, сильная холодная граница, радиус 12px, минимум 54px по высоте.
+- **Focus:** контрастный индиговый outline с внешним offset.
+- **Error / Disabled:** текст объясняет проблему; диагностический код раскрывается отдельно.
+
+### Navigation
+
+Панель запусков показывает короткую цель, версию плана и человекочитаемый статус. Выбранный запуск получает мягкую индиговую поверхность. На mobile список открывается отдельным dialog; служебные действия в шапке становятся SVG-иконками с сохраненными accessible names.
+
+### Task Progress
+
+Фактический прогресс строится из серверных этапов: сегменты отражают завершенные узлы, рядом показывается счет `готово/всего`, но неизвестная длительность не превращается в процент. Текущий этап выделяется индиговым кругом; следующие остаются нейтральными.
+
+## Do's and Don'ts
+
+### Do:
+
+- **Do** ставить цель, текущий этап и одно основное действие выше графа и машинных данных.
+- **Do** связывать loader с конкретной операцией и сохранять shell без layout jump.
+- **Do** использовать реальные counts или backend status вместо оценочной готовности.
+- **Do** сохранять одинаковую информационную иерархию в светлой и темной теме.
+
+### Don't:
+
+- **Don't** открывать граф, логи или receipts как стартовую поверхность.
+- **Don't** показывать `stopped`, пока завершение процесса не подтверждено.
+- **Don't** повторять длинное описание в нескольких панелях.
+- **Don't** использовать декоративные градиенты, стекло, icon-card сетки или технический monospace как стиль продукта.

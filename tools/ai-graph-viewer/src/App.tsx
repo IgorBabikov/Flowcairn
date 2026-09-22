@@ -787,26 +787,34 @@ export function App() {
           </div>
         </div>
         <div className="topbar-actions">
-          <button className="button quiet" type="button" aria-expanded={showSetup} onClick={() => setShowSetup(!showSetup)}>Настройки проекта</button>
-          <button ref={runsButton} className="button quiet mobile-runs-button" type="button" aria-expanded={runsOpen} onClick={() => setRunsOpen(true)}>Показать запуски</button>
+          <button className="button quiet project-settings-button" type="button" aria-expanded={showSetup} onClick={() => setShowSetup(!showSetup)}>
+            <svg className="mobile-action-icon" aria-hidden="true" viewBox="0 0 24 24" width="20" height="20"><circle cx="12" cy="12" r="3" /><path d="M19 13.5v-3l-2-.7-.8-1.9.9-1.9-2.1-2.1-1.9.9-1.9-.8-.7-2h-3l-.7 2-1.9.8-1.9-.9L1.6 6l.9 1.9-.8 1.9-2 .7v3l2 .7.8 1.9-.9 1.9 2.1 2.1 1.9-.9 1.9.8.7 2h3l.7-2 1.9-.8 1.9.9 2.1-2.1-.9-1.9.8-1.9z" /></svg>
+            <span className="button-label">Настройки проекта</span>
+          </button>
+          <button ref={runsButton} className="button quiet mobile-runs-button" type="button" aria-expanded={runsOpen} onClick={() => setRunsOpen(true)}>
+            <svg className="mobile-action-icon" aria-hidden="true" viewBox="0 0 24 24" width="20" height="20"><path d="M6 7h13M6 12h13M6 17h13" /><circle cx="3" cy="7" r="1" /><circle cx="3" cy="12" r="1" /><circle cx="3" cy="17" r="1" /></svg>
+            <span className="button-label">Показать запуски</span>
+          </button>
           <span className={streamConnected ? 'connection live' : 'connection'}>
             {streamConnected ? labels.live : labels.disconnected}
           </span>
           {!composing && snapshot?.workflow !== 'autonomous' && <>
           <button
-            className="button quiet"
+            className="button quiet locale-button"
             onClick={() => setLocale(locale === 'ru' ? 'en' : 'ru')}
             type="button"
           >
-            {labels.language}
+            <span className="button-label">{labels.language}</span>
+            <span className="mobile-action-text" aria-hidden="true">{locale === 'ru' ? 'EN' : 'RU'}</span>
           </button>
           </>}
           <button
-            className="button quiet"
+            className="button quiet theme-button"
             onClick={() => document.documentElement.toggleAttribute('data-dark')}
             type="button"
           >
-            {labels.theme}
+            <svg className="mobile-action-icon" aria-hidden="true" viewBox="0 0 24 24" width="20" height="20"><path d="M20 15.5A8 8 0 0 1 8.5 4 8.1 8.1 0 1 0 20 15.5z" /></svg>
+            <span className="button-label">{labels.theme}</span>
           </button>
           {isStopping ? (
             <button className="button stop-action" type="button" disabled>
@@ -869,10 +877,10 @@ export function App() {
       )}
 
       {showSetup && <SetupPanel onClose={() => setShowSetup(false)} />}
-      <nav className="task-view-switch" aria-label="Представление задачи">
-        <button type="button" aria-pressed={composing || taskView === 'overview'} onClick={() => { setTaskView('overview'); setTab('overview'); }} disabled={composing}>Задача</button>
-        <button type="button" aria-pressed={!composing && taskView === 'graph'} onClick={() => setTaskView('graph')} disabled={composing || !snapshot}>Граф · детали исполнения</button>
-      </nav>
+      {!composing && taskView === 'graph' && <nav className="task-view-switch" aria-label="Представление задачи">
+        <button type="button" aria-pressed="false" onClick={() => { setTaskView('overview'); setTab('overview'); }}>Задача</button>
+        <button type="button" aria-pressed="true">Граф · детали исполнения</button>
+      </nav>}
       <section className={`operator-layout${composing ? ' composing' : ''}${runs.length === 0 ? ' no-runs' : ''}${showingTask || clarifying ? ' task-layout' : ''}`}>
         <aside className="run-rail desktop-run-rail" aria-label={labels.runs} data-testid="run-rail">
           <div className="rail-heading">
@@ -884,7 +892,12 @@ export function App() {
                 onClick={() => void refreshRuns()}
                 title={labels.refresh}
                 type="button"
-              >↻</button>
+              >
+                <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18">
+                  <path d="M20 7v5h-5M4 17v-5h5" />
+                  <path d="M6.2 8.2A7 7 0 0 1 18.7 10M17.8 15.8A7 7 0 0 1 5.3 14" />
+                </svg>
+              </button>
               <button
                 id="new-task"
                 aria-label={labels.create}
@@ -941,6 +954,7 @@ export function App() {
             onOpenEvidence: openProofEvidence,
             onOpenArtifact: openProofArtifact,
             onAcceptRequirement: acceptRequirement,
+            onOpenTechnical: () => setTaskView('graph'),
           }}
         /> : <section className="graph-region" id="graph-canvas" aria-label={labels.graph}>
           <ExecutionStatus value={execution} />

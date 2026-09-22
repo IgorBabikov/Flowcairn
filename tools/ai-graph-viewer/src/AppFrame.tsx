@@ -18,10 +18,20 @@ export function AppFrame({
 export function ShellSkeleton() {
   return (
     <section className="shell-skeleton" aria-busy="true" data-testid="main-content">
-      <StatusLoader kind="stage" label="Загружаем данные Flowcairn" />
-      <div className="shell-title-skeleton" aria-hidden="true" />
-      <div className="shell-card-skeleton" aria-hidden="true" />
-      <div className="shell-card-skeleton short" aria-hidden="true" />
+      <div className="shell-summary-skeleton" aria-hidden="true">
+        <span className="shell-avatar-skeleton" />
+        <span className="shell-title-skeleton" />
+      </div>
+      <div className="shell-loading-focus">
+        <span className="brand-mark loading-brand-mark" aria-hidden="true"><i /><i /><i /></span>
+        <StatusLoader kind="stage" label="Загружаем данные Flowcairn. Проверяем состояние и доступные действия…" />
+        <span className="shell-loading-track" aria-hidden="true"><i /></span>
+      </div>
+      <div className="shell-list-skeleton" aria-hidden="true">
+        <div className="shell-card-skeleton" />
+        <div className="shell-card-skeleton" />
+        <div className="shell-card-skeleton short" />
+      </div>
     </section>
   );
 }
@@ -38,10 +48,6 @@ export function InitialLoadingFrame({ label }: { label: string }) {
           <span /><span /><span />
         </div>
       </header>
-      <nav className="task-view-switch" aria-label="Представление задачи">
-        <button type="button" aria-pressed="true" disabled>Задача</button>
-        <button type="button" aria-pressed="false" disabled>Граф · детали исполнения</button>
-      </nav>
       <section className="operator-layout composing loading-layout" aria-label={label}>
         <aside className="run-rail" data-testid="run-rail">
           <div className="rail-heading"><h2>Запуски</h2></div>

@@ -28,18 +28,27 @@ export function TaskComposer({ capability, busy, pending, error, onSubmit, onRet
           onSubmit({ title: title.trim(), description: description.trim(), taskNumber: taskNumber.trim() });
       }}>
         <header>
-          <h2 id="task-heading">Новая задача</h2>
+          <div>
+            <h2 id="task-heading">Новая задача</h2>
+            <p>Flowcairn сначала изучит проект и покажет план. Изменения начнутся только после вашего согласия.</p>
+          </div>
           {onClose && <button className="button quiet" type="button" onClick={onClose}>Закрыть</button>}
         </header>
         <label htmlFor="task-title">Заголовок задачи</label>
         <input id="task-title" name="title" required maxLength={160} autoFocus
+          placeholder="Кратко опишите, что нужно сделать"
           value={title} disabled={busy || pending} onChange={event => setTitle(event.target.value)} />
+        <p className="field-hint">Например: «Добавить локализацию для модуля платежей».</p>
         <label htmlFor="task-description">Полное описание задачи</label>
         <textarea id="task-description" name="description" required minLength={3} maxLength={16000}
+          placeholder="Опишите задачу, цели и важные детали…"
           value={description} disabled={busy || pending} onChange={event => setDescription(event.target.value)} />
+        <p className="field-hint">Укажите, что нужно изменить, где находятся файлы и какие есть ограничения.</p>
         <label htmlFor="task-number">Номер задачи</label>
         <input id="task-number" name="taskNumber" required maxLength={80}
+          placeholder="Например, PROJ-123"
           value={taskNumber} disabled={busy || pending} onChange={event => setTaskNumber(event.target.value)} />
+        <p className="field-hint">Используйте номер из вашей системы трекинга.</p>
         {!allowed && <p role="status" className="field-error">{humanText(capability?.reason) || 'Не удалось загрузить проект. Повторите загрузку.'}</p>}
         {error && <div className="dialog-error" role="alert"><strong>{problem?.title ?? 'Не удалось подготовить задачу'}</strong><p>{(problem?.summary ?? humanText(error.message)) || 'Не удалось подготовить задачу.'}</p>
           {problem && <p>{problem.action}</p>}
@@ -48,8 +57,9 @@ export function TaskComposer({ capability, busy, pending, error, onSubmit, onRet
         </div>}
         {busy && pending && <p className="intake-progress" role="status">Подготавливаем снимок проекта и граф задачи. Для большого проекта это может занять до двух минут.</p>}
         <footer>
-          <button className="button primary" type="submit" disabled={busy || pending || !allowed || !valid}>
-            {busy ? <StatusLoader kind="button" label="Запускаем…" inline announce={false} /> : 'Запустить'}
+          {onClose && <button className="button secondary" type="button" onClick={onClose}>Отмена</button>}
+          <button className="button primary" type="submit" aria-label={busy ? 'Запускаем…' : 'Запустить'} disabled={busy || pending || !allowed || !valid}>
+            {busy ? <StatusLoader kind="button" label="Начинаем анализ…" inline announce={false} /> : 'Начать анализ'}
           </button>
         </footer>
       </form>

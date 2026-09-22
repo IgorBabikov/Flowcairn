@@ -50,6 +50,43 @@ async function openGraph(page) {
   if (await closeDetails.isVisible()) await closeDetails.click();
 }
 
+async function expectExecutionBorderContained(node) {
+  const geometry = await node.evaluate((element) => {
+    const card = element.getBoundingClientRect();
+    const svg = element.querySelector('.execution-border');
+    const track = svg?.querySelector('rect');
+    if (!svg || !track) return null;
+    const border = svg.getBoundingClientRect();
+    const line = track.getBoundingClientRect();
+    const svgStyle = getComputedStyle(svg);
+    const trackStyle = getComputedStyle(track);
+    return {
+      card: { left: card.left, top: card.top, right: card.right, bottom: card.bottom },
+      border: { left: border.left, top: border.top, right: border.right, bottom: border.bottom },
+      line: { left: line.left, top: line.top, right: line.right, bottom: line.bottom },
+      overflow: svgStyle.overflow,
+      filter: trackStyle.filter,
+      vectorEffect: trackStyle.vectorEffect,
+    };
+  });
+  expect(geometry).not.toBeNull();
+  expect(geometry.overflow).toBe('hidden');
+  expect(geometry.filter).toBe('none');
+  expect(geometry.vectorEffect).toBe('non-scaling-stroke');
+  expect(geometry.border.left).toBeGreaterThanOrEqual(geometry.card.left);
+  expect(geometry.border.top).toBeGreaterThanOrEqual(geometry.card.top);
+  expect(geometry.border.right).toBeLessThanOrEqual(geometry.card.right);
+  expect(geometry.border.bottom).toBeLessThanOrEqual(geometry.card.bottom);
+  expect(geometry.border.left - geometry.card.left).toBeLessThanOrEqual(2.1);
+  expect(geometry.border.top - geometry.card.top).toBeLessThanOrEqual(2.1);
+  expect(geometry.card.right - geometry.border.right).toBeLessThanOrEqual(2.1);
+  expect(geometry.card.bottom - geometry.border.bottom).toBeLessThanOrEqual(2.1);
+  expect(geometry.line.left).toBeGreaterThanOrEqual(geometry.border.left);
+  expect(geometry.line.top).toBeGreaterThanOrEqual(geometry.border.top);
+  expect(geometry.line.right).toBeLessThanOrEqual(geometry.border.right);
+  expect(geometry.line.bottom).toBeLessThanOrEqual(geometry.border.bottom);
+}
+
 test('native nodes follow backend transitions and only passed incoming dependencies animate', async ({
   page,
 }) => {
@@ -86,9 +123,7 @@ test('native nodes follow backend transitions and only passed incoming dependenc
       expect(await snake.evaluate((el) => getComputedStyle(el).animationName)).toBe(
         'execution-snake',
       );
-      expect(await node.evaluate((el) => getComputedStyle(el, '::after').animationName)).toBe(
-        'execution-pulse',
-      );
+      await expectExecutionBorderContained(node);
       const initialSnakePosition = await snake.evaluate((el) => getComputedStyle(el).strokeDashoffset);
       await expect
         .poll(
@@ -99,6 +134,24 @@ test('native nodes follow backend transitions and only passed incoming dependenc
       await page.getByRole('button', { name: 'Весь граф', exact: true }).click();
       await capture(page, 'execution-desktop-light-running');
       await page.getByRole('button', { name: 'Сменить тему' }).click();
+      const darkContrast = await page.locator('.graph-node').evaluateAll((nodes) => {
+        const rgb = (value) => (value.match(/[\d.]+/g) ?? []).slice(0, 3).map(Number);
+        const luminance = (value) => rgb(value)
+          .map(channel => channel / 255)
+          .map(channel => channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4)
+          .reduce((sum, channel, index) => sum + channel * [0.2126, 0.7152, 0.0722][index], 0);
+        const ratio = (foreground, background) => {
+          const front = luminance(foreground), back = luminance(background);
+          return (Math.max(front, back) + 0.05) / (Math.min(front, back) + 0.05);
+        };
+        return nodes.flatMap(node => {
+          const background = getComputedStyle(node).backgroundColor;
+          return [node.querySelector('strong'), node.querySelector('.node-status'), node.querySelector('.node-hint')]
+            .filter(Boolean)
+            .map(text => ratio(getComputedStyle(text).color, background));
+        });
+      });
+      expect(Math.min(...darkContrast)).toBeGreaterThanOrEqual(4.5);
       await capture(page, 'execution-desktop-dark-running');
       await page.getByRole('button', { name: 'Сменить тему' }).click();
     }
@@ -156,6 +209,7 @@ for (const dark of [false, true]) {
     expect(motion.glow).toBe('none');
     expect(motion.border).toBe('solid');
     expect(motion.color).not.toBe('rgba(0, 0, 0, 0)');
+    await expectExecutionBorderContained(node);
     expect(
       await page
         .locator('.dependency-active path.react-flow__edge-path')
