@@ -6,6 +6,7 @@ import { ExecutionStatus } from './ExecutionStatus';
 import { TaskCockpit } from './TaskCockpit';
 import { TaskProgress } from './TaskProgress';
 import { WorkflowPanel } from './WorkflowPanel';
+import { runtimeProblem } from './presentation';
 
 type TaskOverviewActions = {
   onApprove: (gate: GateSnapshot) => void;
@@ -13,6 +14,7 @@ type TaskOverviewActions = {
   onStart: () => void;
   onSetup: () => void;
   onClarify: () => void;
+  onReplan: () => void;
   onOpenEvidence: (evidence: ProofEvidence, artifactId?: string) => void;
   onOpenArtifact: (artifactId: string) => void;
   onAcceptRequirement?: (requirementId: string, reason: string) => void;
@@ -23,7 +25,7 @@ const proofLabels = {
   PROVEN: 'Результат подтвержден',
   UNPROVEN: 'Результат пока не подтвержден',
   STALE: 'Нужна повторная проверка',
-  FAILED: 'Обнаружена проблема',
+  FAILED: 'Проверка не пройдена',
   BLOCKED: 'Работа заблокирована',
   RUNNING: 'Работа продолжается',
 };
@@ -50,8 +52,14 @@ export function TaskOverview({
   const title = snapshot.task?.title || snapshot.task?.goal || 'Задача';
   const description = snapshot.task?.description || snapshot.task?.goal || '';
   const executionFocused = !snapshot.proof && execution.kind !== 'idle';
+  const failedNode = snapshot.nodes.find(node => node.status === 'failed');
+  const failure = runtimeProblem(snapshot.failureReason || failedNode?.reason);
   const status = unavailable || !snapshot.integrity.valid
     ? 'Состояние недоступно'
+    : snapshot.status === 'cancelled'
+      ? 'Остановлено пользователем'
+    : snapshot.status === 'failed'
+      ? failure?.title ?? 'Ошибка выполнения'
     : snapshot.status === 'uncertain' && snapshot.resolutionKind === 'semantic'
       ? 'Нужно уточнение'
     : snapshot.proof
@@ -80,6 +88,16 @@ export function TaskOverview({
         </details>
       </header>
       <ExecutionStatus value={execution} />
+      {snapshot.status === 'cancelled' && <div className="context-recovery">
+        <p>Предыдущий процесс завершен. Новый план начнет отдельную подтверждаемую попытку.</p>
+        <button className="button primary" type="button" disabled={busy || !snapshot.capabilities.requestReplan?.allowed}
+          onClick={actions.onReplan}>Подготовить новый план</button>
+      </div>}
+      {snapshot.status === 'failed' && snapshot.capabilities.requestReplan?.allowed && <div className="context-recovery">
+        <p>Ошибка сохранена в отчете. Новая версия плана начнет отдельную попытку без повторного использования неизвестного результата.</p>
+        <button className="button primary" type="button" disabled={busy}
+          onClick={actions.onReplan}>Повторить с новым планом</button>
+      </div>}
       {snapshot.contextClarification && <div className="context-recovery">
         <p>Уточните файлы и папки задачи, чтобы продолжить анализ.</p>
         <button className="button primary" type="button" disabled={busy || !snapshot.capabilities.requestReplan?.allowed}

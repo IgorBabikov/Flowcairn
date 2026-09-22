@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { once } from 'node:events';
+import { EventEmitter, once } from 'node:events';
+import { PassThrough } from 'node:stream';
 import {
   chmodSync,
   closeSync,
@@ -266,6 +267,30 @@ test('supervisor records parent disconnect before GO without starting the action
   assert.equal(final.failureReason, 'START_NOT_ACKNOWLEDGED');
   assert.equal(existsSync(marker), false);
   await closeSupervisor(subject);
+});
+
+test('nested macOS sandbox refusal is classified without storing raw stderr', () => {
+  assert.equal(classifyAiFailure('', 'sandbox-exec: sandbox_apply: Operation not permitted\n'), 'AI_SANDBOX_DENIED');
+  assert.equal(classifyAiFailure('', 'unrecognized private diagnostic'), 'NON_ZERO_EXIT');
+});
+
+test('control handshake accepts ready after the former five-second cutoff and fails on closed channel', async () => {
+  const { RUNNER_TESTING } = await import('./lib/runner.mjs');
+  const stream = new PassThrough();
+  const child = new EventEmitter();
+  const pending = RUNNER_TESTING.waitForControl(stream, 'ready', 30_000, {
+    child,
+    timeoutCode: 'RUNNER_READY_TIMEOUT',
+    timeoutMessage: 'delayed fixture',
+  });
+  setTimeout(() => stream.write(`${JSON.stringify({ type: 'ready', pid: 42 })}\n`), 5_100);
+  assert.deepEqual(await pending, { type: 'ready', pid: 42 });
+  stream.destroy();
+
+  const closed = new PassThrough();
+  const rejected = RUNNER_TESTING.waitForControl(closed, 'ready', 250, { child: new EventEmitter() });
+  closed.end();
+  await assert.rejects(rejected, { code: 'RUNNER_CONTROL_CLOSED' });
 });
 
 test('supervisor records timeout and stops the owned process group', async () => {

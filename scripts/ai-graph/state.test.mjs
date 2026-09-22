@@ -103,6 +103,15 @@ test('stale, active operation and missing integrity suppress controls', () => {
   );
 });
 
+test('cancelled run cannot resume the old plan but can prepare a new one', () => {
+  const { state: cancelled, plan } = fixture();
+  cancelled.status = 'cancelled';
+  const capabilities = calculateCapabilities(cancelled, plan, { runner });
+  assert.equal(capabilities.run.run.allowed, false);
+  assert.equal(capabilities.run.retry.allowed, false);
+  assert.equal(capabilities.run.requestReplan.allowed, true);
+});
+
 test('orphan ownership allows only recovery until stop proof is persisted', () => {
   const { state, plan } = fixture();
   const waiting = reconcile(state, plan);

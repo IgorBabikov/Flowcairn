@@ -73,7 +73,7 @@ export function allocateDirectBinding({ root, task, runId, sourceHash, owner, ex
   if (prior) {
     const store = new GraphStore(root), state = store.readRun(prior.runId);
     const plan = store.readObject('plans', state.planHash);
-    if (state.activeOperation || !['passed', 'failed', 'stale'].includes(state.status) ||
+    if (state.activeOperation || !['passed', 'failed', 'cancelled', 'stale'].includes(state.status) ||
         (state.status === 'passed' && plan.stage === 'planning') ||
         Object.values(state.nodes).some((node) => node.status === 'uncertain'))
       fail('DIRECT_BUSY', 'Другая задача еще использует текущий проект');

@@ -67,6 +67,7 @@ export const Status = z.enum([
   'waiting-for-human',
   'passed',
   'failed',
+  'cancelled',
   'uncertain',
   'stale',
 ]);
@@ -326,7 +327,7 @@ export const ReceiptSchema = z.strictObject({
   finishedAt: z.iso.datetime().nullable(),
   durationMs: z.number().min(0).nullable(),
   exitCode: z.number().int().nullable(),
-  verdict: z.enum(['pass', 'fail', 'uncertain', 'started']),
+  verdict: z.enum(['pass', 'fail', 'cancelled', 'uncertain', 'started']),
   checks: z.array(CheckResultSchema).max(20),
   artifacts: z.array(Hash).max(30),
   changedFiles: z.array(RelativePath).max(200),

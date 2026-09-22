@@ -33,11 +33,14 @@ export function executionPresentation(
     case 'stopping':
       return stopping;
     case 'stopped':
+      if (snapshot.status === 'passed')
+        return { kind: 'idle', title: '', description: '', tone: 'neutral', busy: false };
       return {
         kind: 'stopped',
-        title: 'Процесс остановлен',
-        description:
-          'Текущий результат не подтвержден. Можно продолжить с новым планом или запустить задачу заново',
+        title: snapshot.status === 'cancelled' ? 'Остановлено пользователем' : 'Процесс остановлен',
+        description: snapshot.status === 'cancelled'
+          ? 'Flowcairn подтвердил завершение процесса. Для продолжения подготовьте новый план или создайте задачу заново'
+          : 'Текущий результат не подтвержден. Можно продолжить с новым планом или запустить задачу заново',
         tone: 'neutral',
         busy: false,
       };

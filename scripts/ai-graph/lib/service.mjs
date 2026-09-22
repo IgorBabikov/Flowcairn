@@ -935,6 +935,13 @@ export class WorkflowService {
         if (!hash || this.store.readObject('receipts', hash).verdict !== 'pass')
           fail('RECEIPT_MISSING', 'Passed требует успешный receipt');
       }
+      if (node.status === 'cancelled') {
+        const last = node.receipts.length
+          ? ReceiptSchema.parse(this.store.readObject('receipts', node.receipts.at(-1)))
+          : null;
+        if (last?.verdict !== 'cancelled' || last.termination?.stopped !== true || last.termination.uncertain)
+          fail('RECEIPT_INTEGRITY', 'Cancelled требует подтвержденную остановку процесса');
+      }
       if (node.retrySafe) {
         const last = node.receipts.length
           ? this.store.readObject('receipts', node.receipts.at(-1))
@@ -957,7 +964,7 @@ export class WorkflowService {
         fail('STATE_RECEIPT_INTEGRITY', 'State attempts/artifacts не соответствуют receipts');
       if (
         lastFinished &&
-        ['passed', 'failed', 'uncertain'].includes(node.status) &&
+        ['passed', 'failed', 'cancelled', 'uncertain'].includes(node.status) &&
         (hashObject(lastFinished.checks) !== hashObject(node.checks) ||
           hashObject(lastFinished.changedFiles) !== hashObject(node.changedFiles))
       )
@@ -1011,7 +1018,7 @@ export class WorkflowService {
       const ready = state.nodes[planner.id].status === 'passed';
       const usable = !state.activeOperation && !state.finalDisposition && !state.setupPending && !lock;
       if (ready && usable) capabilities.run.requestReplan = { allowed: true, reason: null };
-      if (!ready && !['ready', 'failed', 'uncertain', 'stale'].includes(state.status))
+      if (!ready && !['ready', 'failed', 'cancelled', 'uncertain', 'stale'].includes(state.status))
         capabilities.run.requestReplan = { allowed: false, reason: 'Сначала выполните AI-планирование' };
       for (const definition of plan.nodes.filter((node) => node.action.id === 'human-accept')) {
         capabilities.nodes[definition.id].accept = { allowed: false, reason: 'Planning не является результатом реализации' };
@@ -1508,7 +1515,7 @@ export class WorkflowService {
         );
         if (!ready) break;
         state = await this.#execute(state, task, plan, ready, controller.signal);
-        if (['failed', 'uncertain', 'stale'].includes(state.status) || definition) break;
+        if (['failed', 'cancelled', 'uncertain', 'stale'].includes(state.status) || definition) break;
       }
       state = this.store.readRun(runId);
       if (state.activeOperation?.id === operation.id)
@@ -1516,6 +1523,7 @@ export class WorkflowService {
           activeOperation: null,
           ...(state.stopRequested && state.stopResult?.state === 'requested' && !state.activeOperation.process
             ? {
+                status: 'cancelled',
                 stopResult: {
                   ...state.stopResult,
                   state: 'stopped',

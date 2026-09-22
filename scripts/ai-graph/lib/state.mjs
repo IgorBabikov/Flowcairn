@@ -24,7 +24,7 @@ export function initialNodes(plan) {
 /** Only runtime uses this reducer; the UI receives its projected states and capabilities. */
 export function reconcile(state, plan) {
   const next = structuredClone(state);
-  if (next.finalDisposition || next.status === 'stale' || next.status === 'uncertain') return next;
+  if (next.finalDisposition || ['stale', 'uncertain', 'cancelled'].includes(next.status)) return next;
   for (const definition of plan.nodes) {
     const node = next.nodes[definition.id];
     if (!['pending', 'ready', 'waiting-for-human'].includes(node.status)) continue;
@@ -51,17 +51,19 @@ export function reconcile(state, plan) {
   const statuses = Object.values(next.nodes).map((node) => node.status);
   next.status = statuses.includes('running')
     ? 'running'
-    : statuses.includes('uncertain')
-      ? 'uncertain'
-      : statuses.includes('failed')
-        ? 'failed'
-        : statuses.includes('waiting-for-human')
-          ? 'waiting-for-human'
-          : statuses.every((s) => s === 'passed')
-            ? 'passed'
-            : statuses.includes('ready')
-              ? 'ready'
-              : 'pending';
+    : statuses.includes('cancelled')
+      ? 'cancelled'
+      : statuses.includes('uncertain')
+        ? 'uncertain'
+        : statuses.includes('failed')
+          ? 'failed'
+          : statuses.includes('waiting-for-human')
+            ? 'waiting-for-human'
+            : statuses.every((s) => s === 'passed')
+              ? 'passed'
+              : statuses.includes('ready')
+                ? 'ready'
+                : 'pending';
   return next;
 }
 
@@ -85,15 +87,20 @@ export function calculateCapabilities(
   );
   const busy = Boolean(state.activeOperation) || runningControl;
   const usable = integrity && !closed && !busy && !lock;
+  // После подтвержденной отмены старый план закрыт; продолжение идет только
+  // через отдельную версию плана, а не повтором прежней операции.
+  const executable = usable && state.status !== 'cancelled';
   const reason = !integrity
     ? 'Integrity не подтверждена'
     : closed
       ? 'Run закрыт'
-      : busy
-        ? 'Действие уже выполняется'
-        : lock
-          ? 'Run заблокирован другим writer'
-          : 'Операция недоступна в текущем состоянии';
+      : state.status === 'cancelled'
+        ? 'Запуск остановлен пользователем; подготовьте новый план'
+        : busy
+          ? 'Действие уже выполняется'
+          : lock
+            ? 'Run заблокирован другим writer'
+            : 'Операция недоступна в текущем состоянии';
   const nodes = {};
   for (const definition of plan.nodes) {
     const node = state.nodes[definition.id],
@@ -106,7 +113,7 @@ export function calculateCapabilities(
         ? runner.checks.available
         : true;
     const retry =
-      usable &&
+      executable &&
       !historical &&
       state.status !== 'uncertain' &&
       node.status === 'failed' &&
@@ -117,18 +124,18 @@ export function calculateCapabilities(
       definition.needs.every((id) => state.nodes[id].status === 'passed') &&
       executionAvailable;
     const approve =
-      usable &&
+      executable &&
       !historical &&
       node.status === 'waiting-for-human' &&
       ['human-approve', 'human-provider-consent'].includes(definition.action.id);
     const accept =
-      usable &&
+      executable &&
       !historical &&
       node.status === 'waiting-for-human' &&
       definition.action.id === 'human-accept';
     nodes[definition.id] = {
       run: capability(
-        usable && !historical && node.status === 'ready' && executionAvailable,
+        executable && !historical && node.status === 'ready' && executionAvailable,
         executionAvailable ? reason : 'Runner не прошел проверку изоляции',
       ),
       retry: capability(
@@ -165,7 +172,7 @@ export function calculateCapabilities(
     nodes,
     run: {
       run: capability(
-        usable && state.status !== 'uncertain' && values.some((n) => n.run.allowed),
+        executable && state.status !== 'uncertain' && values.some((n) => n.run.allowed),
         reason,
       ),
       retry: capability(

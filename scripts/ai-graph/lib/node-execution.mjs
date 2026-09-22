@@ -194,7 +194,7 @@ export async function executeNode(host, state, task, plan, definition, signal) {
           ...(definition.action.id.startsWith('ai-') && externalProvider(host.adapters.project?.ai.provider)
             ? { providerConsent: host.providerConsent(state, task, plan) }
             : {}),
-          onStart: async (metadata) => {
+          onStart: (metadata) => {
             processStarted = true;
             const current = host.store.readRun(state.runId);
             host.adapters.verifyBinding(current.binding);
@@ -283,15 +283,16 @@ export async function executeNode(host, state, task, plan, definition, signal) {
       const assessment = host.adapters.inspectChanges(before, after, definition, task);
       changedFiles = assessment.changedFiles;
       host.read(state.runId);
-      if (!result.stopped || result.uncertain || !assessment.allowed) {
+      if (!result.stopped || result.uncertain) {
         verdict = 'uncertain';
         reason =
           reason ??
-          (!assessment.allowed
-            ? 'Нарушена граница изменений'
-            : result.failureReason === 'TIMEOUT'
-              ? 'Истек лимит времени выполнения этапа; требуется восстановление'
+          (result.failureReason === 'TIMEOUT'
+              ? 'TIMEOUT: Истек лимит времени выполнения этапа; остановка процесса не подтверждена'
               : 'Остановка процесса или результат не подтверждены');
+      } else if (!assessment.allowed) {
+        verdict = 'fail';
+        reason = reason ?? 'Нарушена граница изменений';
       } else if (result.exitCode !== 0) {
         verdict = 'fail';
         reason = reason ?? host.sanitizeText(result.failureReason ?? 'Действие завершилось с ошибкой');
@@ -426,6 +427,11 @@ export async function executeNode(host, state, task, plan, definition, signal) {
       finishedAt = now(),
       durationMs = performance.now() - started;
     host.assertExecutionOwner(current, state, definition, { allowStop: true });
+    if (current.stopRequested && result?.failureReason === 'ABORTED' &&
+        result.stopped === true && result.uncertain !== true && after) {
+      verdict = 'cancelled';
+      reason = 'CANCELLED_BY_USER';
+    }
     const receipt = host.receipt(current, task, plan, definition, {
       attempt,
       attemptId,
@@ -459,7 +465,7 @@ export async function executeNode(host, state, task, plan, definition, signal) {
     });
     const finalNodes = structuredClone(current.nodes);
     Object.assign(finalNodes[definition.id], {
-      status: verdict === 'pass' ? 'passed' : verdict === 'fail' ? 'failed' : 'uncertain',
+      status: verdict === 'pass' ? 'passed' : verdict === 'fail' ? 'failed' : verdict === 'cancelled' ? 'cancelled' : 'uncertain',
       receipts: [...finalNodes[definition.id].receipts, receipt],
       artifacts: [...finalNodes[definition.id].artifacts, ...artifacts],
       checks,
@@ -478,7 +484,7 @@ export async function executeNode(host, state, task, plan, definition, signal) {
         ...current,
         nodes: finalNodes,
         workspaceFingerprint: after ? host.persistFingerprint(after) : current.workspaceFingerprint,
-        status: verdict === 'uncertain' ? 'uncertain' : 'running',
+        status: verdict === 'uncertain' ? 'uncertain' : verdict === 'cancelled' ? 'cancelled' : 'running',
         ...(current.stopRequested
           ? {
               stopResult: {
@@ -492,5 +498,9 @@ export async function executeNode(host, state, task, plan, definition, signal) {
       },
       plan,
     );
+    // Поздняя команда Stop не переписывает успешный receipt уже завершенного
+    // этапа: отменяется только оставшаяся работа.
+    if (current.stopRequested && verdict === 'pass' && next.status !== 'passed')
+      next.status = 'cancelled';
     return host.write(current, next);
   }

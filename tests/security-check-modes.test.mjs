@@ -5,11 +5,11 @@ import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'no
 import os from 'node:os';
 import path from 'node:path';
 import { initializeProject } from '../bin/flowcairn.mjs';
-import { hasTrustedLocalChecksConsent } from '../scripts/ai-graph/lib/project.mjs';
+import { hasTrustedLocalChecksBinding } from '../scripts/ai-graph/lib/project.mjs';
 
 const testClaude = path.resolve(import.meta.dirname, 'fixtures/verified-claude/node_modules/@anthropic-ai/claude-code/bin/claude.exe');
 
-test('new projects do not register or run a repository script without an explicit check boundary', (t) => {
+test('new projects register conventional scripts in trusted-local without running them during setup', (t) => {
   const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'flowcairn-security-check-')));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   execFileSync('/usr/bin/git', ['init', '--initial-branch=main', root], { stdio: 'ignore' });
@@ -23,12 +23,13 @@ test('new projects do not register or run a repository script without an explici
   execFileSync('/usr/bin/git', ['-C', root, 'add', '.']);
   execFileSync('/usr/bin/git', ['-C', root, 'commit', '-m', 'fixture'], { stdio: 'ignore' });
   const installed = initializeProject(root, { provider: 'claude', 'provider-path': testClaude });
-  assert.deepEqual(installed.profile.checks, []);
-  assert.equal(installed.profile.checkMode, 'none');
+  assert.deepEqual(installed.profile.checks, ['tests']);
+  assert.equal(installed.profile.checkMode, 'trusted-local');
+  assert.equal(hasTrustedLocalChecksBinding(root, installed.profile), true);
   assert.equal(existsSync(path.join(root, 'host-code-ran')), false);
 });
 
-test('trusted-local requires a separate consent and binds it to registered scripts', (t) => {
+test('trusted-local binds exact registered scripts and detects later drift', (t) => {
   const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'flowcairn-trusted-local-')));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   execFileSync('/usr/bin/git', ['init', '--initial-branch=main', root], { stdio: 'ignore' });
@@ -39,12 +40,10 @@ test('trusted-local requires a separate consent and binds it to registered scrip
   execFileSync('/usr/bin/git', ['-C', root, 'add', '.']);
   execFileSync('/usr/bin/git', ['-C', root, 'commit', '-m', 'fixture'], { stdio: 'ignore' });
   const options = { provider: 'claude', 'provider-path': testClaude, checks: 'tests', 'check-mode': 'trusted-local' };
-  assert.throws(() => initializeProject(root, options), { code: 'CHECK_LOCAL_CONSENT' });
-  assert.equal(existsSync(path.join(root, '.flowcairn.json')), false);
-  const installed = initializeProject(root, { ...options, 'trusted-local-consent': true });
+  const installed = initializeProject(root, options);
   assert.equal(installed.profile.checkMode, 'trusted-local');
   assert.deepEqual(installed.profile.checkScripts, { tests: 'test' });
-  assert.equal(hasTrustedLocalChecksConsent(root, installed.profile), true);
+  assert.equal(hasTrustedLocalChecksBinding(root, installed.profile), true);
   installed.profile.checkScripts.tests = 'changed';
-  assert.equal(hasTrustedLocalChecksConsent(root, installed.profile), false);
+  assert.equal(hasTrustedLocalChecksBinding(root, installed.profile), false);
 });

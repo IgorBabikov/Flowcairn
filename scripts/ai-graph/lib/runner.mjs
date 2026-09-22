@@ -31,7 +31,7 @@ import {
   verifyReviewEvidenceFile,
 } from './review-evidence.mjs';
 import { verifyToolchain } from './toolchain.mjs';
-import { hasTrustedLocalChecksConsent, loadProjectProfile, resolveProjectCheckScript, RUNTIME_ROOT } from './project.mjs';
+import { hasTrustedLocalChecksBinding, loadProjectProfile, resolveProjectCheckScript, RUNTIME_ROOT } from './project.mjs';
 import { providerToolchain } from './providers.mjs';
 import { codexModelSettings } from './codex-settings.mjs';
 import { buildProjectInstructionContext } from './project-instruction-context.mjs';
@@ -46,7 +46,9 @@ const SUPERVISOR_FILE = fileURLToPath(new URL('./supervisor.mjs', import.meta.ur
 const MAX_AI_RESULT_BYTES = 2 * 1024 * 1024;
 const MAX_TICKET_BYTES = 64 * 1024;
 const MAX_TOOLCHAIN_FILE_BYTES = 512 * 1024 * 1024;
-const READY_TIMEOUT_MS = 5_000;
+// Запуск AI может занимать заметное время; пять секунд превращали медленный
+// старт supervisor в ложный неопределенный результат.
+const SUPERVISOR_READY_TIMEOUT_MS = 30_000;
 const STOP_GRACE_MS = 3_000;
 
 function fail(code, message, details) {
@@ -443,8 +445,8 @@ export function probeLocalChecks({ root }) {
     const profile = loadProjectProfile(root);
     if (profile.checkMode !== 'trusted-local')
       return { available: false, reason: profile.checkMode === 'local' ? 'LOCAL_CHECK_RECONFIGURATION_REQUIRED' : 'CHECKS_NOT_ENABLED', mode: 'trusted-local' };
-    if (!hasTrustedLocalChecksConsent(root, profile))
-      return { available: false, reason: 'CHECK_LOCAL_CONSENT_REQUIRED', mode: 'trusted-local' };
+    if (!hasTrustedLocalChecksBinding(root, profile))
+      return { available: false, reason: 'CHECK_LOCAL_BINDING_REQUIRED', mode: 'trusted-local' };
     localCheckToolchain(profile);
     for (const id of profile.checks) resolveProjectCheckScript(root, `check-${id}`, profile);
     return { available: true, reason: null, mode: 'local' };
@@ -500,27 +502,47 @@ function readTicket(file) {
   return value;
 }
 
-function waitForControl(stream, expectedType, timeoutMs) {
+function waitForControl(stream, expectedType, timeoutMs, {
+  child = null,
+  timeoutCode = 'RUNNER_CONTROL_TIMEOUT',
+  timeoutMessage = 'Supervisor не ответил',
+} = {}) {
   return new Promise((resolve, reject) => {
     let buffer = '';
-    const timer = setTimeout(
-      () => reject(new GraphError('RUNNER_CONTROL_TIMEOUT', 'Supervisor не ответил')),
-      timeoutMs,
-    );
+    let settled = false;
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      callback(value);
+    };
+    const timer = setTimeout(() => finish(reject, new GraphError(timeoutCode, timeoutMessage)), timeoutMs);
     const cleanup = () => {
       clearTimeout(timer);
       stream.off('data', onData);
       stream.off('error', onError);
+      stream.off('end', onEnd);
+      stream.off('close', onEnd);
+      child?.off('error', onChildError);
+      child?.off('close', onChildClose);
     };
-    const onError = (error) => {
-      cleanup();
-      reject(error);
-    };
+    const onError = (error) => finish(reject, error);
+    const onEnd = () => finish(reject, new GraphError(
+      'RUNNER_CONTROL_CLOSED',
+      `Supervisor закрыл control channel до ${expectedType}`,
+    ));
+    const onChildError = (error) => finish(reject, new GraphError(
+      'RUNNER_SUPERVISOR_ERROR',
+      errorReason(error, 'Supervisor не запустился'),
+    ));
+    const onChildClose = (code, signal) => finish(reject, new GraphError(
+      'RUNNER_SUPERVISOR_EXIT',
+      `Supervisor завершился до ${expectedType}: code=${String(code)} signal=${String(signal)}`,
+    ));
     const onData = (chunk) => {
       buffer += chunk.toString('utf8');
       if (Buffer.byteLength(buffer) > MAX_TICKET_BYTES) {
-        cleanup();
-        reject(new GraphError('RUNNER_CONTROL_LIMIT', 'Supervisor control output слишком велик'));
+        finish(reject, new GraphError('RUNNER_CONTROL_LIMIT', 'Supervisor control output слишком велик'));
         return;
       }
       const lines = buffer.split('\n');
@@ -531,26 +553,28 @@ function waitForControl(stream, expectedType, timeoutMs) {
         try {
           value = JSON.parse(line);
         } catch {
-          cleanup();
-          reject(
+          finish(
+            reject,
             new GraphError('RUNNER_CONTROL_INVALID', 'Supervisor вернул invalid control JSON'),
           );
           return;
         }
         if (value.type === expectedType) {
-          cleanup();
-          resolve(value);
+          finish(resolve, value);
           return;
         }
         if (value.type === 'supervisor-error') {
-          cleanup();
-          reject(new GraphError('RUNNER_SUPERVISOR_ERROR', value.reason));
+          finish(reject, new GraphError('RUNNER_SUPERVISOR_ERROR', value.reason));
           return;
         }
       }
     };
     stream.on('data', onData);
     stream.once('error', onError);
+    stream.once('end', onEnd);
+    stream.once('close', onEnd);
+    child?.once('error', onChildError);
+    child?.once('close', onChildClose);
   });
 }
 
@@ -585,33 +609,38 @@ async function stopGroup(pgid) {
   return !groupAlive(pgid);
 }
 
-function boundedCallback(callback, value, timeoutMs) {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(new GraphError('RUNNER_START_TIMEOUT', 'onStart не подтвердил durable state')),
-      timeoutMs,
-    );
-    Promise.resolve()
-      .then(() => callback(value))
-      .then(
-        (result) => {
-          clearTimeout(timer);
-          resolve(result);
-        },
-        (error) => {
-          clearTimeout(timer);
-          reject(error);
-        },
-      );
-  });
-}
-
 function executionMetadata(prepared, output, usage = null) {
   return Object.freeze({
     ...prepared.execution,
     usage,
     outputDigest: sha256(canonicalJson(output)),
   });
+}
+
+async function stoppedPreflightResult({ supervisor, ticketFile, prepared, error, processMetadata = null }) {
+  // До отправки GO результат можно безопасно классифицировать как известный
+  // preflight failure, если группа supervisor действительно остановлена.
+  supervisor?.stdin.destroy();
+  const stopped = !supervisor?.pid || await stopGroup(supervisor.pid);
+  let ticket = null;
+  try { ticket = readTicket(ticketFile); } catch { /* The parent still knows GO was never sent. */ }
+  return {
+    exitCode: stopped ? 1 : null,
+    output: null,
+    stopped,
+    uncertain: !stopped,
+    failureReason: typeof ticket?.failureReason === 'string'
+      ? ticket.failureReason
+      : errorReason(error, 'START_NOT_ACKNOWLEDGED'),
+    durationMs: 0,
+    ...(processMetadata ? { process: processMetadata } : {}),
+    execution: {
+      ...executionMetadata(prepared, null),
+      kind: 'preflight',
+      processStarted: false,
+      stage: 'supervisor-start',
+    },
+  };
 }
 
 function parseAiOutput(file) {
@@ -653,8 +682,8 @@ export async function runRegisteredAction({
   const input = parseInputs({ node, task, plan, skills, priorEvidence, reviewEvidence });
   const profile = loadProjectProfile(root);
   const localCheck = ['check-typecheck', 'check-lint', 'check-tests', 'check-build'].includes(action.id);
-  if (localCheck && !hasTrustedLocalChecksConsent(root, profile))
-    fail('CHECK_LOCAL_CONSENT_REQUIRED', 'trusted-local требует подтверждение exact scripts текущего профиля.');
+  if (localCheck && !hasTrustedLocalChecksBinding(root, profile))
+    fail('CHECK_LOCAL_BINDING_REQUIRED', 'trusted-local требует актуальную привязку exact scripts текущего профиля.');
   const allocation = validateAllocation(root, worktree, outputDirectory, localCheck ? 'local' : profile.ai.provider,
     profile.workspaceMode === 'direct');
   if (action.id.startsWith('check-') && !localCheck)
@@ -720,11 +749,13 @@ export async function runRegisteredAction({
     });
     let ready;
     try {
-      ready = await waitForControl(supervisor.stdio[3], 'ready', READY_TIMEOUT_MS);
+      ready = await waitForControl(supervisor.stdio[3], 'ready', SUPERVISOR_READY_TIMEOUT_MS, {
+        child: supervisor,
+        timeoutCode: 'RUNNER_READY_TIMEOUT',
+        timeoutMessage: 'Supervisor не подтвердил готовность к запуску',
+      });
     } catch (error) {
-      supervisor.stdin.destroy();
-      if (supervisor.pid) await stopGroup(supervisor.pid);
-      throw error;
+      return await stoppedPreflightResult({ supervisor, ticketFile, prepared, error });
     }
     if (
       ready.pid !== supervisor.pid ||
@@ -732,9 +763,12 @@ export async function runRegisteredAction({
       ready.nonceHash !== ticket.nonceHash ||
       ready.commandHash !== commandHash
     ) {
-      supervisor.stdin.destroy();
-      await stopGroup(supervisor.pid);
-      fail('RUNNER_SUPERVISOR_IDENTITY', 'Supervisor identity не совпала');
+      return await stoppedPreflightResult({
+        supervisor,
+        ticketFile,
+        prepared,
+        error: new GraphError('RUNNER_SUPERVISOR_IDENTITY', 'Supervisor identity не совпала'),
+      });
     }
     const ticketRelative = path.relative(allocation.rootPath, ticketFile);
     const processMetadata = Object.freeze({
@@ -754,20 +788,11 @@ export async function runRegisteredAction({
       ticketHash,
     });
     try {
-      await boundedCallback(onStart, processMetadata, READY_TIMEOUT_MS);
+      const callbackResult = onStart(processMetadata);
+      if (callbackResult && typeof callbackResult.then === 'function')
+        fail('RUNNER_START_CALLBACK_ASYNC', 'onStart должен синхронно сохранить durable state');
     } catch (error) {
-      supervisor.stdin.destroy();
-      const stopped = await stopGroup(supervisor.pid);
-      return {
-        exitCode: null,
-        output: null,
-        stopped,
-        uncertain: !stopped,
-        failureReason: 'START_NOT_ACKNOWLEDGED',
-        durationMs: 0,
-        process: processMetadata,
-        execution: executionMetadata(prepared, null),
-      };
+      return await stoppedPreflightResult({ supervisor, ticketFile, prepared, error, processMetadata });
     }
 
     try {
@@ -790,6 +815,11 @@ export async function runRegisteredAction({
       supervisor.stdio[3],
       'finished',
       input.task.limits.timeoutMs + STOP_GRACE_MS + 2_000,
+      {
+        child: supervisor,
+        timeoutCode: 'RUNNER_RESULT_TIMEOUT',
+        timeoutMessage: 'Supervisor не сохранил конечный результат вовремя',
+      },
     );
     let aborted = false;
     const abort = () => {
@@ -817,6 +847,17 @@ export async function runRegisteredAction({
       signal?.removeEventListener('abort', abort);
       supervisor.stdin.destroy();
       stopped = await stopGroup(supervisor.pid);
+    }
+    // The control pipe can close before its last frame is observed. A finished,
+    // identity-checked durable ticket is authoritative after the process group stops.
+    if (!final && stopped) {
+      try {
+        const replay = inspectProcess({ root: allocation.rootPath, process: processMetadata });
+        if (replay.stopped && replay.result) {
+          final = replay.result;
+          controlFailure = null;
+        }
+      } catch { /* Keep the original control failure when durable proof is unavailable. */ }
     }
     const durationMs = Date.now() - started;
     let output = final
@@ -850,9 +891,7 @@ export async function runRegisteredAction({
     const failureReason = aborted
       ? 'ABORTED'
       : (final?.failureReason ?? controlFailure?.code ?? controlFailure?.message ?? null);
-    const uncertain =
-      !stopped ||
-      ['TIMEOUT', 'OUTPUT_LIMIT', 'PARENT_DISCONNECTED', 'ABORTED'].includes(failureReason);
+    const uncertain = !stopped;
     return {
       exitCode: controlFailure ? 1 : (final?.exitCode ?? null),
       output,
@@ -1119,6 +1158,7 @@ export const RUNNER_TESTING = Object.freeze({
   instructionDenials,
   discoverCodex,
   cleanupPrepared,
+  waitForControl,
 });
 
 export function inspectCodexInstallation(ai = {}) {

@@ -51,6 +51,22 @@ test('task cockpit leads to requirement evidence and advanced graph', async ({ p
   await expect(page.getByTestId('task-proof-status')).toHaveText('Результат подтвержден');
 });
 
+test('execution failure with proof shows the real runtime cause above requirement gaps', async ({ page }) => {
+  const state = taskWithProof();
+  state.status = 'failed';
+  state.nodes[1] = { ...state.nodes[1], status: 'failed', reason: 'NON_ZERO_EXIT' };
+  state.proof.status = 'BLOCKED';
+  state.proof.certificate = null;
+  state.proof.coverage.proven = 0;
+  state.proof.requirements[0].status = 'blocked';
+  state.proof.blockers = ['Исполнение находится в состоянии failed'];
+  await mockApi(page, state);
+  await page.goto(`/#session=${token}`);
+  await expect(page.getByTestId('task-proof-status')).toHaveText('AI-исполнитель завершился с ошибкой');
+  await expect(page.locator('.task-cockpit .workflow-problem')).toContainText('ненулевым кодом');
+  await expect(page.locator('.task-cockpit .workflow-problem .technical-details')).not.toHaveAttribute('open', '');
+});
+
 test('mobile run rail opens as a modal and restores focus', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await mockApi(page, taskWithProof());

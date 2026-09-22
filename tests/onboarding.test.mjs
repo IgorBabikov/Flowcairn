@@ -44,9 +44,63 @@ test('явный onboarding сохраняет проверенный CLI и п�
   assert.deepEqual(result.profile.onboarding, {version:1,readConsent:true,readScope:'tracked-project',testPolicy:'keep',coverage:false,instructions:'preserve'});
   assert.equal(result.profile.ai.modelMode, 'provider');
   assert.equal(result.profile.ai.reasoningEffort, 'high');
-  assert.deepEqual(result.profile.checks, []);
-  assert.equal(result.profile.checkMode, 'none');
+  assert.deepEqual(result.profile.checks, ['tests', 'build']);
+  assert.equal(result.profile.checkMode, 'trusted-local');
   assert.equal(readFileSync(path.join(root,'AGENTS.md'),'utf8'),'Правила владельца');
+});
+
+test('trusted-local остается фактическим default даже без найденных scripts', async t => {
+  const root = fixture(t);
+  writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: 'fixture', scripts: {} }));
+  const result = initializeProject(root, options);
+  const { hasTrustedLocalChecksBinding } = await import('../scripts/ai-graph/lib/project.mjs');
+  assert.equal(result.profile.checkMode, 'trusted-local');
+  assert.deepEqual(result.profile.checks, []);
+  assert.equal(hasTrustedLocalChecksBinding(root, result.profile), true);
+});
+
+test('явные none и hardened сохраняются, а legacy-профиль без режима мигрирует атомарно', async t => {
+  const noneRoot = fixture(t);
+  const explicit = initializeProject(noneRoot, { ...options, 'check-mode': 'none' });
+  assert.equal(explicit.profile.checkMode, 'none');
+  const onboarding = await import('../bin/onboarding.mjs');
+  assert.deepEqual(await onboarding.migrateLegacyCheckMode(noneRoot), { migrated: false, reason: 'EXPLICIT_MODE' });
+
+  const hardenedRoot = fixture(t);
+  const hardened = initializeProject(hardenedRoot, { ...options, 'check-mode': 'hardened', checks: 'tests' });
+  assert.equal(hardened.profile.checkMode, 'hardened');
+
+  const legacyRoot = fixture(t);
+  initializeProject(legacyRoot, { ...options, 'check-mode': 'none' });
+  const profilePath = path.join(legacyRoot, '.flowcairn.json');
+  const ownerPath = path.join(legacyRoot, '.ai-orchestrator/flowcairn-install.json');
+  const legacy = JSON.parse(readFileSync(profilePath, 'utf8'));
+  delete legacy.checkMode;
+  legacy.checks = [];
+  delete legacy.checkScripts;
+  const legacyBytes = `${JSON.stringify(legacy, null, 2)}\n`;
+  writeFileSync(profilePath, legacyBytes);
+  const owner = JSON.parse(readFileSync(ownerPath, 'utf8'));
+  const { sha256 } = await import('../scripts/ai-graph/lib/io.mjs');
+  owner.profileHash = sha256(legacyBytes);
+  delete owner.trustedLocalChecksHash;
+  writeFileSync(ownerPath, `${JSON.stringify(owner, null, 2)}\n`);
+
+  const { acquireRuntimeLease } = await import('../scripts/ai-graph/lib/lifecycle.mjs');
+  const release = acquireRuntimeLease({ root: legacyRoot, kind: 'viewer' });
+  try {
+    await assert.rejects(onboarding.migrateLegacyCheckMode(legacyRoot), { code: 'UNINSTALL_PROCESS_ACTIVE' });
+    assert.equal(readFileSync(profilePath, 'utf8'), legacyBytes);
+  } finally { release(); }
+
+  const migrated = await onboarding.migrateLegacyCheckMode(legacyRoot);
+  const project = await import('../scripts/ai-graph/lib/project.mjs');
+  const profile = project.loadProjectProfile(legacyRoot);
+  assert.equal(migrated.migrated, true);
+  assert.equal(profile.checkMode, 'trusted-local');
+  assert.deepEqual(profile.checks, ['tests', 'build']);
+  assert.equal(project.hasTrustedLocalChecksBinding(legacyRoot, profile), true);
+  assert.equal(Object.hasOwn(JSON.parse(readFileSync(profilePath, 'utf8')), 'checkMode'), true);
 });
 
 test('старый init не предоставляет разрешение на чтение автоматически', t => {
@@ -182,7 +236,7 @@ test('опрос Claude фиксирует только явное соглас�
   const root = fixture(t);
   const api = await import('../bin/onboarding.mjs').catch(() => ({}));
   assert.equal(typeof api.collectOnboarding,'function');
-  const replies = ['keep','нет','none','нет','нет'];
+  const replies = ['keep','нет','нет','нет'];
   let text='';
   const result=await api.collectOnboarding(root, {provider:'claude','provider-path':testClaude,advanced:true}, {input:{isTTY:true},output:{isTTY:true,write:value=>{text+=value;}},prompt:{question:async()=>replies.shift()}});
   assert.equal(result['read-consent'],false);
@@ -191,8 +245,9 @@ test('опрос Claude фиксирует только явное соглас�
   assert.equal(result.coverage,false);
   assert.match(text,/Claude Code — использовать выбранный CLI/);
   assert.doesNotMatch(text,/Режим: provider/);
-  assert.match(text,/Шаг 1 из 5/);
-  assert.match(text,/Шаг 5 из 5/);
+  assert.match(text,/Шаг 1 из 4/);
+  assert.match(text,/Шаг 4 из 4/);
+  assert.doesNotMatch(text,/Как запускать проверки проекта|Шаг 5 из 5/);
   assert.match(text,/\x1b\[/);
   assert.doesNotMatch(text,/Codex — macOS/);
   assert.equal(existsSync(path.join(root,'.flowcairn.json')),false);
@@ -212,7 +267,7 @@ test('setup переводит устаревший API-профиль на Clau
   owner.profileHash = sha256(legacyBytes);
   writeFileSync(ownerPath, `${JSON.stringify(owner, null, 2)}\n`);
   const { setupCommand } = await import('../bin/flowcairn.mjs');
-  const replies = ['keep', 'нет', 'none', 'нет', 'нет'];
+  const replies = ['keep', 'нет', 'нет', 'нет'];
   let text = '';
   const result = await setupCommand(root, { provider: 'claude', 'provider-path':testClaude }, {
     input: { isTTY: true }, output: { isTTY: true, write: (value) => { text += value; } }, prompt: { question: async () => replies.shift() },
@@ -238,23 +293,25 @@ test('повторная настройка требует свежий fingerpr
   assert.equal(api.inspectOnboarding(root).configured,true);
 });
 
-test('setup сохраняет выбранные проверки и требует отдельное согласие trusted-local', async t => {
+test('setup сохраняет выбранные проверки и обновляет точную trusted-local привязку', async t => {
   const root = fixture(t);
   const { onboardingInput, inspectOnboarding, saveOnboarding } = await import('../bin/onboarding.mjs');
+  const { hasTrustedLocalChecksBinding } = await import('../scripts/ai-graph/lib/project.mjs');
   initializeProject(root, options);
   const choice = { ...options, model: 'provider-default', 'provider-version': '2.1.198 (Claude Code)',
     'check-mode': 'trusted-local', checks: 'tests,build' };
   const input = onboardingInput(choice, inspectOnboarding(root).profileHash);
   assert.equal(input.checkMode, 'trusted-local');
-  await assert.rejects(saveOnboarding(root, input), { code: 'CHECK_LOCAL_CONSENT' });
-  const enabled = await saveOnboarding(root, { ...input, trustedLocalConsent: true });
+  const enabled = await saveOnboarding(root, input);
   assert.equal(enabled.profile.checkMode, 'trusted-local');
   assert.deepEqual(enabled.profile.checks, ['tests', 'build']);
   assert.deepEqual(enabled.profile.checkScripts, { tests: 'test', build: 'build' });
+  assert.equal(hasTrustedLocalChecksBinding(root, enabled.profile), true);
   const disabled = await saveOnboarding(root, { ...input, profileHash: inspectOnboarding(root).profileHash, checkMode: 'none', checks: [] });
   assert.equal(disabled.profile.checkMode, 'none');
   assert.deepEqual(disabled.profile.checks, []);
   assert.deepEqual(disabled.profile.checkScripts, {});
+  assert.equal(hasTrustedLocalChecksBinding(root, disabled.profile), false);
   await assert.rejects(saveOnboarding(root, { ...input, profileHash: inspectOnboarding(root).profileHash, checkMode: 'hardened', checks: ['lint'] }), { code: 'CHECK_SCRIPT_MISSING' });
 });
 
@@ -293,7 +350,7 @@ test('обычная настройка не запускает scripts прое
   const result = await maybePrepareChecks(root, profile, {}, {
     input: { isTTY: true }, output: { isTTY: true, write() {} }, prompt: { question: async () => 'да' },
   }, checks);
-  assert.deepEqual(result, { prepared: false, reason: 'NOT_NEEDED' });
+  assert.deepEqual(result, { prepared: false, reason: 'LOCAL_DEFAULT' });
   assert.equal(prepared, 0);
 });
 

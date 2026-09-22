@@ -951,6 +951,7 @@ export function App() {
             onStart: () => void execute('run'),
             onSetup: () => setShowSetup(true),
             onClarify: requestReplan,
+            onReplan: requestReplan,
             onOpenEvidence: openProofEvidence,
             onOpenArtifact: openProofArtifact,
             onAcceptRequirement: acceptRequirement,

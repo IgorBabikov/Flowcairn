@@ -30,7 +30,7 @@ export function relevantNodeId(snapshot: Snapshot): string | null {
   if (snapshot.activeNodeId && ids.has(snapshot.activeNodeId)) return snapshot.activeNodeId;
   const gate = snapshot.gates.find((item) => ids.has(item.nodeId));
   if (gate) return gate.nodeId;
-  const blocked = snapshot.nodes.find((node) => ['failed', 'uncertain'].includes(node.status));
+  const blocked = snapshot.nodes.find((node) => ['failed', 'cancelled', 'uncertain'].includes(node.status));
   if (blocked) return blocked.id;
   if (snapshot.finalDisposition === 'accepted' || snapshot.status === 'passed')
     return snapshot.nodes.at(-1)?.id ?? null;

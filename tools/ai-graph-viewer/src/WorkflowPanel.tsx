@@ -32,8 +32,8 @@ export function WorkflowPanel({ snapshot, plan, busy, stateUnavailable = false, 
     ? (snapshot.runner?.ai.available === false ? snapshot.runner.ai.reason : snapshot.capabilities.run.reason)
     : null;
   const unavailableReason = humanText(unavailableRawReason) || (unavailableRawReason ? 'Исполнитель сейчас недоступен.' : null);
-  const blocked = stateUnavailable || Boolean(snapshot.failureReason || unavailableReason) || ['failed', 'uncertain', 'stale'].includes(snapshot.status) || !snapshot.integrity.valid;
-  const current = snapshot.nodes.find(node => node.id === snapshot.activeNodeId) ?? snapshot.nodes.find(node => ['failed', 'uncertain', 'running'].includes(node.status));
+  const blocked = stateUnavailable || Boolean(snapshot.failureReason || unavailableReason) || ['failed', 'cancelled', 'uncertain', 'stale'].includes(snapshot.status) || !snapshot.integrity.valid;
+  const current = snapshot.nodes.find(node => node.id === snapshot.activeNodeId) ?? snapshot.nodes.find(node => ['failed', 'cancelled', 'uncertain', 'running'].includes(node.status));
   const problemSource = snapshot.failureReason || unavailableRawReason || current?.reason || snapshot.integrity.reason;
   const problem = runtimeProblem(problemSource);
   const technical = technicalProblem(problemSource);

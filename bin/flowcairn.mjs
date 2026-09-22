@@ -21,7 +21,7 @@ import { uninstallCommand } from './uninstall.mjs';
 import { selectProjectSkills } from './skills-selection.mjs';
 import { createTask } from '../scripts/ai-graph/lib/task-registration.mjs';
 import { inspectHarnesses } from '../scripts/ai-graph/lib/harnesses.mjs';
-import { collectOnboarding, inspectOnboarding, onboardingInput, saveOnboarding } from './onboarding.mjs';
+import { collectOnboarding, inspectOnboarding, migrateLegacyCheckMode, onboardingInput, saveOnboarding } from './onboarding.mjs';
 import { initializeProject, assertProviderPlatform } from './installation.mjs';
 import { PROFILE, csv, existsNoFollow, git, projectRoot, readRegular } from './project-files.mjs';
 export { createTask, initializeProject };
@@ -70,7 +70,7 @@ const VALUE_OPTIONS = new Set([
   'skill-actions',
   'skill-scope',
 ]);
-const BOOLEAN_OPTIONS = new Set(['json', 'dry-run', 'help', 'snapshot', 'no-open', 'consent', 'read-consent', 'coverage', 'trusted-local-consent']);
+const BOOLEAN_OPTIONS = new Set(['json', 'dry-run', 'help', 'snapshot', 'no-open', 'consent', 'read-consent', 'coverage']);
 
 function fail(code, message) {
   throw new GraphError(code, message);
@@ -99,8 +99,12 @@ export function parseOptions(tokens) {
 /** Первый запуск спрашивает настройки один раз, не читая глобальные аккаунты. */
 export async function initializeCommand(input, options = {}, terminal = {}) {
   const root = projectRoot(input);
-  if (existsNoFollow(path.join(root, PROFILE)) || existsNoFollow(path.join(root, '.ai-orchestrator')))
+  if (existsNoFollow(path.join(root, PROFILE)) || existsNoFollow(path.join(root, '.ai-orchestrator'))) {
+    const migration = await migrateLegacyCheckMode(root, { dryRun: options['dry-run'] === true });
+    if (migration.migrated && migration.dryRun)
+      return { created: false, dryRun: true, root, profile: migration.profile, changes: ['.flowcairn.json', '.ai-orchestrator/flowcairn-install.json'] };
     return initializeProject(root, options);
+  }
   assertProviderPlatform(options);
   const selected = await collectOnboarding(root, options, terminal);
   const result = initializeProject(root, { ...selected, _skillManifest: await selectProjectSkills(root, selected, terminal) });
@@ -144,6 +148,7 @@ export async function maybePrepareChecks(root, profile, options = {}, terminal =
 export async function setupCommand(input, options = {}, terminal = {}) {
   const root = projectRoot(input);
   if (!existsNoFollow(path.join(root, PROFILE))) return initializeCommand(root, options, terminal);
+  await migrateLegacyCheckMode(root, { dryRun: options['dry-run'] === true });
   const current = inspectOnboarding(root);
   const selected = await collectOnboarding(root, { ...options, advanced: true }, terminal);
   const resolved = {
@@ -155,7 +160,6 @@ export async function setupCommand(input, options = {}, terminal = {}) {
     'test-policy':current.values.testPolicy, coverage:current.values.coverage,
     ...selected,
   };
-  // В скриптах требуется новое явное разрешение; прежнее не считается ответом.
   const result = await saveOnboarding(root, onboardingInput(resolved, current.profileHash), {dryRun:options['dry-run'] === true});
   if (selected.consent === true && !options['dry-run']) {
     const inspected = await instructionsCommand(root, 'inspect');
@@ -213,9 +217,11 @@ export async function doctorProject(input) {
     assistants: inspectHarnesses(),
     ai: ai.ai,
     checks,
-    note: profile.checkMode === 'local'
-      ? 'Проверки выполняются локально в отдельном worktree. Docker не нужен; это не изолированная песочница.'
-      : 'Проверки используют подготовленный изолированный Docker-образ.',
+    note: profile.checkMode === 'trusted-local'
+      ? 'Проверки выполняются локально точными scripts профиля с правами пользователя. Это не изолированная песочница.'
+      : profile.checkMode === 'hardened'
+        ? 'Проверки используют подготовленный изолированный Docker-образ.'
+        : 'Scripts проекта выключены; требования без другого verifier останутся неподтвержденными.',
   };
 }
 
@@ -336,6 +342,11 @@ export async function main(tokens = process.argv.slice(2)) {
       if (options['dry-run']) { printInitialization(initialized); return; }
       printInitialization(initialized);
     } else {
+      const migration = await migrateLegacyCheckMode(canonicalRoot, { dryRun: options['dry-run'] === true });
+      if (migration.migrated && migration.dryRun) {
+        printInitialization({ created: false, dryRun: true, root: canonicalRoot, profile: migration.profile, changes: ['.flowcairn.json', '.ai-orchestrator/flowcairn-install.json'] });
+        return;
+      }
       initializeProject(canonicalRoot, options);
     }
     const { acquireRuntimeLease } = await import('../scripts/ai-graph/lib/lifecycle.mjs');

@@ -39,7 +39,7 @@ const CurrentEvidence = z.strictObject({
 });
 const HistoricalIncompleteImplementation = z.strictObject({
   nodeId: Id,
-  status: z.enum(['pending', 'failed', 'uncertain']),
+  status: z.enum(['pending', 'failed', 'cancelled', 'uncertain']),
   receiptHash: Hash.nullable(),
   receipt: ReceiptSchema.nullable(),
 });
@@ -197,7 +197,7 @@ function validateHistoricalEvidence(value, { node, task, plan }) {
       receipt.actionId !== definition.action.id ||
       receipt.actionVersion !== definition.action.version ||
       !['finished', 'recovery'].includes(receipt.phase) ||
-      receipt.verdict !== (item.status === 'failed' ? 'fail' : 'uncertain') ||
+      receipt.verdict !== (item.status === 'failed' ? 'fail' : item.status === 'cancelled' ? 'cancelled' : 'uncertain') ||
       !receipt.termination?.stopped ||
       receipt.termination.uncertain ||
       !receipt.afterFingerprint ||
@@ -329,7 +329,7 @@ export function buildHistoricalReviewEvidence({ state, task, plan, node, fingerp
       completedImplementations.push({ receiptHash, receipt, diff: pick('diff'), changedFiles: pick('changed-files') });
       continue;
     }
-    if (!current || !['pending', 'failed', 'uncertain'].includes(current.status))
+    if (!current || !['pending', 'failed', 'cancelled', 'uncertain'].includes(current.status))
       fail('Historical implementation не имеет доказуемого статуса');
     if (current.status === 'pending') {
       if (current.attempts !== 0 || current.receipts.length !== 0)
