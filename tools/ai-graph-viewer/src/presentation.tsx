@@ -72,6 +72,8 @@ const reasons: Record<string, string> = {
   PROVIDER_AUTH_REQUIRED: 'AI-клиент не авторизован. Войдите в выбранный CLI и повторите запуск.',
   CODEX_MODEL_SETTINGS_REQUIRED: 'Модель и усиление CLI не определены. Задайте их в настройках flowcairn или конфигурации Codex CLI.',
   CODEX_AUTH_REQUIRED: 'Codex не авторизован. Выполните codex login и повторите запуск.',
+  CHECK_LOCAL_BINDING_REQUIRED: 'Настройки локальных проверок изменились. Повторите setup, чтобы привязать актуальные scripts.',
+  CANCELLED_BY_USER: 'Выполнение остановлено пользователем',
   PROJECT_PROFILE_INVALID: 'Настройки проекта не прошли проверку',
   analysis: 'Анализ задачи',
   review: 'Ревью изменений',
@@ -89,6 +91,11 @@ export type RuntimeProblem = {
 };
 
 const runtimeProblems: Record<string, RuntimeProblem> = {
+  CANCELLED_BY_USER: {
+    title: 'Работа остановлена',
+    summary: 'Flowcairn подтвердил остановку по вашей команде. Это не ошибка и не успешный результат задачи.',
+    action: 'Для продолжения подготовьте новый план.',
+  },
   STORE_LIMIT_EXCEEDED: {
     title: 'Не удалось подготовить задачу',
     summary: 'Flowcairn остановился, пока сохранял безопасный снимок проекта. Задача не была передана AI, изменения в проект не вносились.',
@@ -108,6 +115,51 @@ const runtimeProblems: Record<string, RuntimeProblem> = {
     title: 'Подготовка задачи заняла слишком много времени',
     summary: 'Flowcairn не успел безопасно собрать исходное состояние проекта. AI-анализ не запускался.',
     action: 'Повторите запуск. Если это повторится, проверьте, не занят ли диск или проект другим процессом.',
+  },
+  RUNNER_READY_TIMEOUT: {
+    title: 'AI-исполнитель не запустился',
+    summary: 'Flowcairn не получил подтверждение запуска AI. Код проекта не изменялся.',
+    action: 'Повторите анализ. Если ошибка повторится, перезапустите Flowcairn и проверьте AI-клиент командой doctor.',
+  },
+  RUNNER_CONTROL_TIMEOUT: {
+    title: 'AI-исполнитель не запустился',
+    summary: 'Flowcairn не получил подтверждение запуска AI. Код проекта не изменялся.',
+    action: 'Повторите анализ. Если ошибка повторится, перезапустите Flowcairn и проверьте AI-клиент командой doctor.',
+  },
+  START_NOT_ACKNOWLEDGED: {
+    title: 'AI-исполнитель не запустился',
+    summary: 'Запуск был остановлен до передачи задачи AI. Изменения в проект не вносились.',
+    action: 'Повторите анализ. Если ошибка повторится, перезапустите Flowcairn.',
+  },
+  NON_ZERO_EXIT: {
+    title: 'AI-исполнитель завершился с ошибкой',
+    summary: 'Процесс AI-клиента завершился с ненулевым кодом. Flowcairn подтвердил его остановку и сохранил ошибку, но не получил безопасную подробную причину.',
+    action: 'Проверьте состояние выбранного AI-клиента и повторите анализ с новым планом.',
+  },
+  AI_SANDBOX_DENIED: {
+    title: 'AI-исполнитель заблокирован средой',
+    summary: 'macOS отказала в запуске изолированного AI-процесса. Задача не была передана модели, а исходники проекта не изменялись.',
+    action: 'Запустите Flowcairn в обычном терминале вне другого sandbox и повторите анализ.',
+  },
+  RUNNER_RESULT_TIMEOUT: {
+    title: 'Исполнитель не вернул итог',
+    summary: 'Процесс завершен, но Flowcairn не получил конечный отчет вовремя.',
+    action: 'Откройте технические детали и подготовьте новую версию плана. Не повторяйте изменение, если остановка не подтверждена.',
+  },
+  TIMEOUT: {
+    title: 'Этап превысил лимит времени',
+    summary: 'Flowcairn остановил слишком долгий этап и сохранил подтвержденное состояние проекта.',
+    action: 'Запустите новую версию плана с более узким этапом.',
+  },
+  OUTPUT_LIMIT: {
+    title: 'Исполнитель вернул слишком много данных',
+    summary: 'Flowcairn остановил этап, чтобы не сохранять неограниченный вывод.',
+    action: 'Уменьшите задачу или объем проверки и подготовьте новый план.',
+  },
+  CHECK_LOCAL_BINDING_REQUIRED: {
+    title: 'Настройки проверок изменились',
+    summary: 'Список или команды scripts больше не совпадают с сохраненной привязкой проекта.',
+    action: 'Закройте Flowcairn и выполните npx flowcairn setup, затем повторите задачу.',
   },
   NETWORK_UNCERTAIN: {
     title: 'Не удалось связаться с локальным сервисом',
@@ -198,6 +250,7 @@ const stateWords: Record<string, string> = {
   running: 'выполняется',
   passed: 'завершен',
   failed: 'ошибка',
+  cancelled: 'остановлено',
   waiting: 'ожидает решения',
   'waiting-for-human': 'нужно решение человека',
   uncertain: 'результат неизвестен',
@@ -223,6 +276,7 @@ const hints: Record<RunStatus, [string, string]> = {
   running: ['Сервер сообщил о выполнении', 'Service reports execution'],
   passed: ['Сервер подтвердил результат', 'Service confirmed the result'],
   failed: ['Причина ошибки — в деталях', 'See details for the failure reason'],
+  cancelled: ['Выполнение остановлено пользователем', 'Execution was cancelled by the user'],
   waiting: ['Продолжение ждет решения', 'Continuation needs a decision'],
   'waiting-for-human': ['Нужно решение человека', 'A human decision is required'],
   uncertain: ['Перед повтором проверьте результат', 'Inspect the result before retrying'],
@@ -239,6 +293,7 @@ const paths: Record<RunStatus, string> = {
   running: 'M12 4a8 8 0 0 1 8 8 M20 12l-3-3 M20 12l2-4 M12 20a8 8 0 0 1-8-8 M4 12l3 3 M4 12l-2 4',
   passed: 'M5 12l5 5L20 6',
   failed: 'M6 6l12 12 M18 6L6 18',
+  cancelled: 'M7 7h10v10H7z',
   waiting: 'M8 5v14 M16 5v14',
   'waiting-for-human': 'M8 5v14 M16 5v14',
   uncertain: 'M9 8a3 3 0 1 1 5 2c-2 1-2 2-2 4 M12 18v1',

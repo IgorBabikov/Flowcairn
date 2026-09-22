@@ -27,6 +27,8 @@ export function SetupPanel({ onClose }: { onClose: () => void }) {
         <dt>Усиление</dt><dd>{values.modelMode === 'provider' && values.model === 'provider-default' ? 'Не определено' : values.reasoningEffort || 'Не определено'}</dd>
         <dt>Тесты</dt><dd>{values.testPolicy === 'add' ? 'Добавлять тесты по задаче' : 'Следовать правилам проекта'}</dd>
         <dt>Покрытие</dt><dd>{values.coverage ? 'Включено' : 'Не навязывается'}</dd>
+        <dt>Запуск проверок</dt><dd>{values.checkMode === 'trusted-local' ? 'Доверенный локальный проект' : values.checkMode === 'hardened' ? 'Docker' : 'Выключен'}</dd>
+        <dt>Scripts</dt><dd>{values.checks.length ? values.checks.join(', ') : 'Подходящие scripts не найдены'}</dd>
         <dt>Контекст для AI</dt><dd>{values.readConsent ? 'Разрешен при настройке' : 'Требуется согласие'}</dd>
       </dl>
       <h3>Другие AI-инструменты</h3>

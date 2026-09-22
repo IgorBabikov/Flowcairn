@@ -51,6 +51,34 @@ test('ready analysis shows a permitted start action or an explicit executor prob
     if (width < 720) await page.keyboard.press('Escape');
   }
 });
+
+test('known startup failure explains what happened and offers a new plan', async ({ page }) => {
+  const state = workflow();
+  state.phase = 'planning'; state.status = 'failed'; state.gates = [];
+  state.nodes = [{ ...state.nodes[0], status: 'failed', reason: 'RUNNER_READY_TIMEOUT', capabilities: { ...allDenied, requestReplan: allowed } }];
+  state.capabilities = { ...allDenied, requestReplan: allowed };
+  const fixture = await mockApi(page, state);
+  await page.goto(`/#session=${token}`);
+  await expect(page.getByRole('heading', { name: 'AI-исполнитель не запустился', exact: true })).toBeVisible();
+  await expect(page.locator('.workflow-summary')).toContainText('Код проекта не изменялся');
+  const technical = page.locator('.workflow-panel .technical-details');
+  await expect(technical).not.toHaveAttribute('open', '');
+  await page.getByRole('button', { name: 'Повторить с новым планом', exact: true }).click();
+  expect(fixture.calls.filter(call => call.action === 'replan')).toHaveLength(1);
+});
+
+test('confirmed stop is shown as cancelled and can start a separate plan', async ({ page }) => {
+  const state = workflow();
+  state.phase = 'planning'; state.status = 'cancelled'; state.execution = { state: 'stopped', stopRequested: true }; state.gates = [];
+  state.nodes = [{ ...state.nodes[0], status: 'cancelled', reason: 'CANCELLED_BY_USER', capabilities: allDenied }];
+  state.capabilities = { ...allDenied, requestReplan: allowed };
+  const fixture = await mockApi(page, state);
+  await page.goto(`/#session=${token}`);
+  await expect(page.getByTestId('task-proof-status')).toHaveText('Остановлено пользователем');
+  await expect(page.locator('.execution-status')).toContainText('Остановлено пользователем');
+  await page.getByRole('button', { name: 'Подготовить новый план', exact: true }).click();
+  expect(fixture.calls.filter(call => call.action === 'replan')).toHaveLength(1);
+});
 test('one approval binds the displayed plan without a manual run', async ({page}) => {
   const fixture = await mockApi(page, workflow());
   await page.goto(`/#session=${token}`);

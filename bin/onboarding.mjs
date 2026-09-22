@@ -1,9 +1,9 @@
 import path from 'node:path';
-import { readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { createInterface } from 'node:readline/promises';
 import { z } from 'zod';
 import { GraphError, hashObject, sha256 } from '../scripts/ai-graph/lib/io.mjs';
-import { ProjectProfileSchema, discoverProjectChecks, loadProjectProfile, projectProfileHash, hasOnboardingConsent, onboardingConsentHash } from '../scripts/ai-graph/lib/project.mjs';
+import { ProjectProfileSchema, discoverProjectChecks, loadProjectProfile, projectProfileHash, hasOnboardingConsent, onboardingConsentHash, trustedLocalChecksHash } from '../scripts/ai-graph/lib/project.mjs';
 import { defaultProvider } from '../scripts/ai-graph/lib/platform.mjs';
 import { acquireUninstallGuard } from '../scripts/ai-graph/lib/lifecycle.mjs';
 import { readIntegrationTarget, replaceIntegrationFile } from '../scripts/ai-graph/lib/integration.mjs';
@@ -24,7 +24,6 @@ const SetupSchema = z.strictObject({
   testPolicy: z.enum(['keep', 'add']), coverage: z.boolean(), readConsent: z.boolean(),
   checkMode: z.enum(['none', 'trusted-local', 'hardened']).optional(),
   checks: ProjectProfileSchema.shape.checks.optional(),
-  trustedLocalConsent: z.boolean().optional(),
 });
 const fail = (code, message) => { throw new GraphError(code, message); };
 
@@ -33,7 +32,7 @@ function paint(output, code, text) {
 }
 
 function step(output, index, title) {
-  output.write(`\n${paint(output, '1;38;5;99', `Шаг ${index} из 5`)} ${paint(output, '1', title)}\n`);
+  output.write(`\n${paint(output, '1;38;5;99', `Шаг ${index} из 4`)} ${paint(output, '1', title)}\n`);
 }
 
 export function inspectOnboarding(root) {
@@ -75,13 +74,14 @@ export function inspectOnboarding(root) {
       ...(profile?.ai.reviewModel ? { reviewModel: profile.ai.reviewModel } : {}),
       ...(profile?.ai.reviewReasoningEffort ? { reviewReasoningEffort: profile.ai.reviewReasoningEffort } : {}),
       testPolicy: profile?.onboarding?.testPolicy ?? 'keep', coverage: profile?.onboarding?.coverage ?? false,
+      checkMode: profile?.checkMode ?? 'trusted-local', checks: profile?.checks ?? [],
       readConsent: Boolean(profile && hasOnboardingConsent(root, profile)),
       ...(profile?.ai.providerPath ? { providerPath: profile.ai.providerPath } : {}),
       ...(profile?.ai.providerVersion ? { providerVersion: profile.ai.providerVersion } : {}),
     },
     limitations: [
       'Codex: модель и усиление считываются из конфигурации CLI. Настройки активного чата VS Code не считываются. Можно выбрать модель вручную в Flowcairn.',
-      'По умолчанию scripts проекта выключены. Trusted-local запускает их в отдельной worktree с правами пользователя и требует явного согласия.',
+      'Для локального проекта trusted-local запускает только найденные и привязанные к профилю scripts с правами вашей учетной записи.',
       'Docker остается дополнительным усиленным режимом проверок и не нужен для первого запуска.',
       'Поддержка исполнения: Node.js 22, macOS и Linux; native Windows не поддерживается. WSL2 требует Linux-файловую систему.',
       'Изменение настроек: закройте UI и выполните npx flowcairn setup. Старые планы сохранят прежний профиль и потребуют перепланирования.',
@@ -103,7 +103,7 @@ export async function collectOnboarding(root, options = {}, terminal = {}) {
   };
   try {
     output.write(`\n${paint(output, '1;38;5;99', 'Flowcairn')} ${paint(output, '2', '· от задачи до проверенного результата')}\n`);
-    output.write(`${paint(output, '38;5;245', 'Ответьте на пять коротких вопросов. Код не изменится до согласования плана.')}\n`);
+    output.write(`${paint(output, '38;5;245', 'Ответьте на четыре коротких вопроса. Код не изменится до согласования плана.')}\n`);
     step(output, 1, 'Как Flowcairn будет работать с AI');
     const harnesses = inspectHarnesses();
     const detected = harnesses.filter((item) => item.detected).map((item) => item.label);
@@ -154,26 +154,7 @@ export async function collectOnboarding(root, options = {}, terminal = {}) {
     if (!['keep','add'].includes(testPolicy)) fail('ONBOARDING_CHOICE', 'Выберите подход к тестам из списка.');
     const yes = async (text) => ['да', 'yes'].includes((await ask(text, 'нет')).toLowerCase());
     const coverage = options.coverage ?? (advanced ? await yes('Нужно измерять покрытие тестами? [да / нет; Enter — нет]: ') : false);
-    step(output, 4, 'Как запускать проверки проекта');
-    let discoveredChecks = { checks: [], checkScripts: {} };
-    try { discoveredChecks = discoverProjectChecks(JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'))); } catch { /* Init validates package.json before writing. */ }
-    const listed = discoveredChecks.checks.map((id) => `${id} → ${discoveredChecks.checkScripts[id]}`).join(', ');
-    output.write(`${paint(output, '38;5;245', listed ? `Найдены: ${listed}.` : 'Подходящих scripts не найдено.')}\n`);
-    output.write(`${paint(output, '38;5;99', '[1]')} Не запускать scripts автоматически — безопасный старт\n`);
-    output.write(`${paint(output, '38;5;99', '[2]')} Docker — изолированные проверки\n`);
-    output.write(`${paint(output, '38;5;99', '[3]')} Доверенный локальный проект — scripts получат права вашей учетной записи\n`);
-    const rawCheckMode = options['check-mode'] ?? await ask('Режим проверок [1]: ', 'none');
-    const checkMode = ({ '1': 'none', '2': 'hardened', '3': 'trusted-local' })[rawCheckMode] ?? rawCheckMode;
-    if (!['none', 'hardened', 'trusted-local'].includes(checkMode))
-      fail('ONBOARDING_CHOICE', 'Выберите способ запуска проверок из списка.');
-    if (checkMode !== 'none' && !discoveredChecks.checks.length)
-      fail('CHECK_SCRIPT_MISSING', 'В проекте нет conventional scripts для выбранного режима проверок.');
-    const trustedLocalConsent = checkMode === 'trusted-local'
-      ? await yes(`Подтверждаете локальный запуск: ${listed}? [да / нет; Enter — нет]: `)
-      : false;
-    if (checkMode === 'trusted-local' && !trustedLocalConsent)
-      fail('CHECK_LOCAL_CONSENT', 'Без отдельного согласия trusted-local не включается.');
-    step(output, 5, 'Согласуйте границы работы');
+    step(output, 4, 'Согласуйте границы работы');
     output.write(`${paint(output, '38;5;245', 'flowcairn прочитает только разрешенные файлы проекта. Изменения начнутся только после вашего согласования плана.')}\n`);
     const readConsent = options['read-consent'] ?? await yes('Разрешить чтение проекта для подготовки плана? [да / нет; Enter — нет]: ');
     output.write(`${paint(output, '38;5;245', 'Ваши правила проекта сохранятся. flowcairn добавит только слой управления Graph.')}\n`);
@@ -184,7 +165,7 @@ export async function collectOnboarding(root, options = {}, terminal = {}) {
       if (report.findings.length) output.write(`${paint(output, '38;5;245', 'Нашли существующие AI-правила. Они будут сохранены и учтены.')}\n`);
     }
     const consent = options.consent ?? await yes('Подключить Graph к правилам проекта? [да / нет; Enter — нет]: ');
-    return { ...options, provider, model, 'model-mode':mode, ...(reasoning ? {'reasoning-effort':reasoning} : {}), ...review, ...(external ? {'provider-path': external.executable, 'provider-version': external.version} : {}), 'test-policy':testPolicy, coverage, 'check-mode': checkMode, checks: checkMode === 'none' ? '' : discoveredChecks.checks.join(','), ...(trustedLocalConsent ? {'trusted-local-consent': true} : {}), 'read-consent':readConsent, consent };
+    return { ...options, provider, model, 'model-mode':mode, ...(reasoning ? {'reasoning-effort':reasoning} : {}), ...review, ...(external ? {'provider-path': external.executable, 'provider-version': external.version} : {}), 'test-policy':testPolicy, coverage, 'read-consent':readConsent, consent };
   } finally { if (!terminal.prompt) prompt.close(); }
 }
 
@@ -200,8 +181,79 @@ export function onboardingInput(options, profileHash) {
     testPolicy: options['test-policy'] ?? 'keep', coverage: options.coverage === true, readConsent: options['read-consent'] === true,
     ...(options['check-mode'] !== undefined ? { checkMode: options['check-mode'] } : {}),
     ...(options.checks !== undefined ? { checks: String(options.checks).split(',').map((item) => item.trim()).filter(Boolean) } : {}),
-    ...(options['trusted-local-consent'] !== undefined ? { trustedLocalConsent: options['trusted-local-consent'] === true } : {}),
   });
+}
+
+/** Однократная миграция профилей до trusted-local с проверкой остановки runtime. */
+export async function migrateLegacyCheckMode(root, { dryRun = false } = {}) {
+  const profileBefore = readIntegrationTarget(root, '.flowcairn.json');
+  if (!profileBefore) return { migrated: false, reason: 'PROFILE_MISSING' };
+  let raw;
+  try { raw = JSON.parse(profileBefore.bytes.toString('utf8')); }
+  catch { fail('PROJECT_PROFILE_INVALID', '.flowcairn.json содержит некорректный JSON.'); }
+  if (Object.hasOwn(raw, 'checkMode')) return { migrated: false, reason: 'EXPLICIT_MODE' };
+  if (!readIntegrationTarget(root, '.ai-orchestrator/flowcairn-install.json', 1024 * 1024))
+    return { migrated: false, reason: 'INSTALLATION_MISSING' };
+
+  const legacyProfile = ProjectProfileSchema.parse({ ...raw, checkMode: 'none' });
+  const manifest = readIntegrationTarget(root, 'package.json', 1024 * 1024);
+  if (!manifest) fail('PACKAGE_JSON', 'Нужен package.json проекта.');
+  const available = discoverProjectChecks(JSON.parse(manifest.bytes.toString('utf8')));
+  const checks = legacyProfile.checks.length ? legacyProfile.checks : available.checks;
+  if (checks.some((id) => !available.checks.includes(id)))
+    fail('CHECK_SCRIPT_MISSING', 'Legacy-профиль ссылается на отсутствующий script package.json.');
+  const profile = ProjectProfileSchema.parse({
+    ...legacyProfile,
+    checkMode: 'trusted-local',
+    checks,
+    checkScripts: Object.fromEntries(checks.map((id) => [id, available.checkScripts[id]])),
+  });
+  if (dryRun) return { migrated: true, dryRun: true, profile };
+
+  const guard = await acquireUninstallGuard({ root });
+  try {
+    const verifyStoppedGraph = () => ({ ...guard.processProbe(), bindings: guard.graphBindings });
+    if (verifyStoppedGraph().verified !== true) fail('ONBOARDING_STALE', 'Состояние изменилось. Повторите запуск.');
+    const currentProfile = readIntegrationTarget(root, '.flowcairn.json');
+    const ownerBefore = readIntegrationTarget(root, '.ai-orchestrator/flowcairn-install.json', 1024 * 1024);
+    if (!currentProfile || currentProfile.sha256 !== profileBefore.sha256 || currentProfile.identity !== profileBefore.identity || !ownerBefore)
+      fail('ONBOARDING_STALE', 'Профиль или локальная установка изменились во время миграции.');
+    const owner = JSON.parse(ownerBefore.bytes.toString('utf8'));
+    if (owner.tool !== 'flowcairn' || !/^flowcairn-[a-f0-9-]+$/.test(owner.owner ?? ''))
+      fail('INSTALL_CONFLICT', 'Владелец установки не подтвержден.');
+    const bytes = Buffer.from(JSON.stringify(profile, null, 2) + '\n');
+    const { trustedLocalChecksHash: _oldChecksHash, ...ownerBase } = owner;
+    const nextOwner = {
+      ...ownerBase,
+      profileHash: sha256(bytes),
+      readConsentHash: profile.onboarding?.readConsent ? onboardingConsentHash(root, profile) : null,
+      ...(profile.checks.length ? { trustedLocalChecksHash: trustedLocalChecksHash(root, profile) } : {}),
+    };
+    let profileAfter, ownerAfter;
+    try {
+      profileAfter = replaceIntegrationFile(root, '.flowcairn.json', bytes, currentProfile);
+      ownerAfter = replaceIntegrationFile(
+        root,
+        '.ai-orchestrator/flowcairn-install.json',
+        Buffer.from(JSON.stringify(nextOwner, null, 2) + '\n'),
+        ownerBefore,
+        1024 * 1024,
+      );
+      let profileMigration = { migrated: false, reason: 'REGISTRY_MISSING' };
+      if (existsSync(path.join(root, '.ai-orchestrator', 'state.json'))) {
+        profileMigration = migrateProjectProfile(root, {
+          fromProfileHash: hashObject(legacyProfile),
+          toProfileHash: projectProfileHash(root),
+          verifyStoppedGraph,
+        });
+      }
+      return { migrated: true, profile, profileMigration };
+    } catch (error) {
+      try { if (ownerAfter) replaceIntegrationFile(root, '.ai-orchestrator/flowcairn-install.json', ownerBefore.bytes, ownerAfter, 1024 * 1024); } catch { /* Preserve a concurrent edit. */ }
+      try { if (profileAfter) replaceIntegrationFile(root, '.flowcairn.json', profileBefore.bytes, profileAfter); } catch { /* Preserve a concurrent edit. */ }
+      throw error;
+    }
+  } finally { guard.release(); }
 }
 
 function configuredProfile(root, previous, value) {
@@ -209,13 +261,15 @@ function configuredProfile(root, previous, value) {
   let checkSettings = {};
   if (value.checkMode !== undefined || value.checks !== undefined) {
     const checkMode = value.checkMode ?? previous.checkMode;
-    const checks = value.checks ?? (checkMode === 'none' ? [] : previous.checks);
-    if (checkMode === 'none' && checks.length) fail('CHECK_MODE', 'Выберите режим исполнения для настроенных проверок.');
-    if (checkMode === 'trusted-local' && checks.length && value.trustedLocalConsent !== true)
-      fail('CHECK_LOCAL_CONSENT', 'Запуск scripts с правами пользователя требует явного trusted-local-consent.');
     const manifest = readIntegrationTarget(root, 'package.json', 1024 * 1024);
     if (!manifest) fail('PACKAGE_JSON', 'Нужен package.json проекта.');
     const available = discoverProjectChecks(JSON.parse(manifest.bytes.toString('utf8')));
+    const checks = value.checks ?? (checkMode === 'none'
+      ? []
+      : value.checkMode !== undefined && value.checkMode !== previous.checkMode
+        ? available.checks
+        : previous.checks);
+    if (checkMode === 'none' && checks.length) fail('CHECK_MODE', 'Выберите режим исполнения для настроенных проверок.');
     if (checks.some((id) => !available.checks.includes(id))) fail('CHECK_SCRIPT_MISSING', 'Выбранная проверка не имеет существующего script package.json.');
     checkSettings = { checkMode, checks, checkScripts: Object.fromEntries(checks.map((id) => [id, available.checkScripts[id]])) };
   }
@@ -274,7 +328,15 @@ export async function saveOnboarding(root, input, { dryRun = false } = {}) {
     try {
       // При частичной записи старое согласие перестает подходить новому профилю.
       profileAfter = replaceIntegrationFile(root,'.flowcairn.json',bytes,profileBefore);
-      const nextOwner = {...owner,profileHash:sha256(bytes),readConsentHash:value.readConsent ? onboardingConsentHash(root,profile) : null};
+      const { trustedLocalChecksHash: _oldChecksHash, ...ownerBase } = owner;
+      const nextOwner = {
+        ...ownerBase,
+        profileHash: sha256(bytes),
+        readConsentHash: value.readConsent ? onboardingConsentHash(root,profile) : null,
+        ...(profile.checkMode === 'trusted-local' && profile.checks.length
+          ? { trustedLocalChecksHash: trustedLocalChecksHash(root, profile) }
+          : {}),
+      };
       ownerAfter = replaceIntegrationFile(root,'.ai-orchestrator/flowcairn-install.json',Buffer.from(JSON.stringify(nextOwner,null,2)+'\n'),ownerBefore,1024*1024);
       const profileMigration = migrateProjectProfile(root, {
         fromProfileHash: value.profileHash,

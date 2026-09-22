@@ -1000,10 +1000,10 @@ test('stop snapshot stays stopping until the owned execution confirms terminatio
   t.after(() => release?.());
   const f = await fixture(t);
   f.adapters.execute = async ({ onStart }) => {
-    await onStart({ pid: process.pid, ticket: 'held-stop-fixture' });
+    onStart({ pid: process.pid, ticket: 'held-stop-fixture' });
     started();
     await held;
-    return { exitCode: null, stopped: true, uncertain: true, failureReason: 'ABORTED' };
+    return { exitCode: null, stopped: true, uncertain: false, failureReason: 'ABORTED' };
   };
   let current = await f.approve();
   const running = f.service.command(
@@ -1018,7 +1018,40 @@ test('stop snapshot stays stopping until the owned execution confirms terminatio
   release();
   const finished = await running;
   assert.equal(finished.execution.state, 'stopped');
-  assert.equal(finished.status, 'uncertain');
+  assert.equal(finished.status, 'cancelled');
+  const cancelled = finished.nodes.find((node) => node.id === 'analyze');
+  assert.equal(cancelled.status, 'cancelled');
+  assert.equal(f.service.receipt(finished.runId, cancelled.receiptIds.at(-1)).verdict, 'cancelled');
+  assert.equal(finished.capabilities.requestReplan.allowed, true);
+  const restarted = await f.service.command(finished.runId, 'replan', f.request(finished));
+  assert.notEqual(restarted.runId, finished.runId);
+  assert.equal(restarted.status, 'waiting-for-human');
+});
+
+test('late Stop preserves a successful node receipt and cancels only remaining work', async (t) => {
+  let release, started;
+  const held = new Promise((resolve) => { release = resolve; });
+  const began = new Promise((resolve) => { started = resolve; });
+  t.after(() => release?.());
+  const f = await fixture(t);
+  const execute = f.adapters.execute;
+  f.adapters.execute = async (args) => {
+    const result = await execute(args);
+    started();
+    await held;
+    return result;
+  };
+  let current = await f.approve();
+  const running = f.service.command(current.runId, 'run', f.request(current, { nodeId: 'analyze' }));
+  await began;
+  current = f.service.snapshot(current.runId);
+  await f.service.command(current.runId, 'stop', f.request(current));
+  release();
+  const finished = await running;
+  assert.equal(finished.status, 'cancelled');
+  const analyzed = finished.nodes.find((node) => node.id === 'analyze');
+  assert.equal(analyzed.status, 'passed');
+  assert.equal(f.service.receipt(finished.runId, analyzed.receiptIds.at(-1)).verdict, 'pass');
 });
 
 test('unconfirmed child termination is projected as stop-uncertain', async (t) => {
@@ -1071,6 +1104,7 @@ test('stop before child start becomes stopped without a fictitious termination r
   release();
   const finished = await running;
   assert.equal(finished.execution.state, 'stopped');
+  assert.equal(finished.status, 'cancelled');
   assert.equal(finished.nodes.find((node) => node.id === 'analyze').receiptIds.length, 0);
 });
 
@@ -1448,16 +1482,37 @@ test('uncertain implementation keeps a sanitized explanation without saving prop
 });
 
 
-test('подтвержденный таймаут сохраняет причину и не разрешает слепой повтор', async (t) => {
+test('подтвержденный таймаут становится известной ошибкой и не разрешает слепой повтор', async (t) => {
   const f = await fixture(t);
   f.adapters.execute = async ({ onStart }) => {
-    await onStart({ pid: process.pid, ticket: 'timeout-fixture' });
-    return { exitCode: 0, stopped: true, uncertain: true, timedOut: true, failureReason: 'TIMEOUT' };
+    onStart({ pid: process.pid, ticket: 'timeout-fixture' });
+    return { exitCode: null, stopped: true, uncertain: false, timedOut: true, failureReason: 'TIMEOUT' };
   };
   let s = await f.approve();
   s = await f.service.command(s.runId, 'run', f.request(s));
-  const node = s.nodes.find(item => item.status === 'uncertain');
-  assert.match(node.reason, /Истек лимит времени/);
+  const node = s.nodes.find(item => item.status === 'failed');
+  assert.equal(s.status, 'failed');
+  assert.equal(node.reason, 'TIMEOUT');
   assert.equal(node.capabilities.retry.allowed, false);
   assert.equal(f.service.receipt(s.runId, node.receiptIds.at(-1)).termination.timedOut, true);
+});
+
+test('ошибка supervisor до запуска AI сохраняется как известный failure с termination evidence', async (t) => {
+  const f = await fixture(t);
+  f.adapters.execute = async () => ({
+    exitCode: 1,
+    stopped: true,
+    uncertain: false,
+    failureReason: 'RUNNER_READY_TIMEOUT',
+    execution: { kind: 'preflight', processStarted: false, stage: 'supervisor-start' },
+  });
+  let s = await f.approve();
+  s = await f.service.command(s.runId, 'run', f.request(s));
+  const node = s.nodes.find((item) => item.status === 'failed');
+  assert.equal(s.status, 'failed');
+  assert.equal(node.reason, 'RUNNER_READY_TIMEOUT');
+  const receipt = f.service.receipt(s.runId, node.receiptIds.at(-1));
+  assert.equal(receipt.termination.stopped, true);
+  assert.equal(receipt.termination.uncertain, false);
+  assert.equal(receipt.termination.execution.processStarted, false);
 });

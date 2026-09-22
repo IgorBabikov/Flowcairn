@@ -103,9 +103,16 @@ export function assertProviderPlatform(options) {
 /** Explicit, repeatable setup. It never replaces AGENTS, hooks or an existing profile. */
 export function initializeProject(input, options = {}) {
   const root = projectRoot(input);
-  const existingProfile = existsNoFollow(path.join(root, PROFILE))
-    ? loadProjectProfile(root)
-    : null;
+  const profilePath = path.join(root, PROFILE);
+  const profileExists = existsNoFollow(profilePath);
+  if (profileExists && existsNoFollow(path.join(root, OWNER_FILE))) {
+    let raw;
+    try { raw = JSON.parse(readRegular(profilePath, 32768).toString('utf8')); }
+    catch { fail('PROJECT_PROFILE_INVALID', '.flowcairn.json не соответствует строгому профилю проекта.'); }
+    if (!Object.hasOwn(raw, 'checkMode'))
+      fail('PROFILE_MIGRATION_REQUIRED', 'Legacy-профиль требует безопасной миграции через npx flowcairn.');
+  }
+  const existingProfile = profileExists ? loadProjectProfile(root) : null;
   const selectedProvider = options.provider ?? defaultProvider();
   if (!existingProfile && ['claude', 'cursor'].includes(selectedProvider)) {
     const probe = probeExternalProvider(selectedProvider, { executable: options['provider-path'] });
@@ -192,14 +199,14 @@ export function initializeProject(input, options = {}) {
     );
   validatePackageManagerProject(root, manager, pkg);
   const discoveredChecks = discoverProjectChecks(pkg);
-  const checkMode = options['check-mode'] ?? 'none';
+  const checkMode = options['check-mode'] ?? 'trusted-local';
   if (!['none', 'trusted-local', 'hardened'].includes(checkMode))
     fail('CHECK_MODE', 'Доступны check-mode: none, hardened или trusted-local.');
-  const checks = options.checks === undefined ? [] : csv(options.checks);
+  const checks = options.checks === undefined
+    ? (checkMode === 'trusted-local' ? discoveredChecks.checks : [])
+    : csv(options.checks);
   if (checkMode === 'none' && checks.length)
     fail('CHECK_MODE', 'Для project checks выберите hardened или trusted-local.');
-  if (checkMode === 'trusted-local' && checks.length && options['trusted-local-consent'] !== true)
-    fail('CHECK_LOCAL_CONSENT', 'trusted-local запускает scripts проекта с правами пользователя. Повторите с --trusted-local-consent после проверки scripts.');
   for (const check of checks) {
     if (!PROJECT_CHECK_IDS.includes(check) || !discoveredChecks.checkScripts[check])
       fail('CHECK_SCRIPT_MISSING', `Для проверки ${check} нужен существующий script package.json.`);
@@ -289,7 +296,7 @@ export function initializeProject(input, options = {}) {
           owner: `flowcairn-${randomUUID()}`,
           profileHash: sha256(profileText),
           ...(!existingProfile && options['read-consent'] === true ? { readConsentHash: onboardingConsentHash(root, profile) } : {}),
-          ...(profile.checkMode === 'trusted-local' && options['trusted-local-consent'] === true
+          ...(profile.checkMode === 'trusted-local' && profile.checks.length
             ? { trustedLocalChecksHash: trustedLocalChecksHash(root, profile) }
             : {}),
           profileOwned: !existingProfile,

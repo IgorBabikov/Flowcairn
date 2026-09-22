@@ -73,7 +73,7 @@ export async function replanRun(host, { state, task, plan, request, digest, acto
           analysisArtifact = plan.analysisArtifact;
         }
       }
-    } else if (!['ready', 'failed', 'uncertain', 'stale'].includes(state.status)) {
+    } else if (!['ready', 'failed', 'cancelled', 'uncertain', 'stale'].includes(state.status)) {
       fail('PLANNING_INCOMPLETE', 'Сначала выполните AI-планирование');
     }
   } else if (plan.stage === 'execution' && !request.draft) {
@@ -155,7 +155,7 @@ export async function replanRun(host, { state, task, plan, request, digest, acto
       previousRunId: state.runId,
       previousPlanHash: state.planHash,
       nodes: plan.nodes
-        .filter((n) => ['failed', 'uncertain'].includes(state.nodes[n.id].status))
+        .filter((n) => ['failed', 'cancelled', 'uncertain'].includes(state.nodes[n.id].status))
         .map((n) => ({
           id: n.id,
           status: state.nodes[n.id].status,

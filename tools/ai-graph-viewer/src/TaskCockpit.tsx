@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import type { Snapshot } from './contracts';
 import type { ProofEvidence, ProofFinding, RequirementProof, TaskProof } from './proof-contracts';
-import { humanText, nodeTitle } from './presentation';
+import { humanText, nodeTitle, runtimeProblem, technicalProblem } from './presentation';
 import { ResourcePanel } from './ResourcePanel';
+import { TechnicalDetails } from './TechnicalDetails';
 
 const requirementLabels = { proven: 'Подтверждено', unproven: 'Нужна проверка', stale: 'Нужна перепроверка', failed: 'Проверка не пройдена', blocked: 'Заблокировано' };
-const taskLabels = { PROVEN: 'Результат подтвержден', UNPROVEN: 'Результат пока не подтвержден', STALE: 'Нужна повторная проверка', FAILED: 'Обнаружена проблема', BLOCKED: 'Работа заблокирована', RUNNING: 'Работа продолжается' };
+const taskLabels = { PROVEN: 'Результат подтвержден', UNPROVEN: 'Результат пока не подтвержден', STALE: 'Нужна повторная проверка', FAILED: 'Проверка не пройдена', BLOCKED: 'Работа заблокирована', RUNNING: 'Работа продолжается' };
 const methodLabels: Record<string, string> = { check: 'Выполнение проверки', 'source-review': 'Проверка исходных данных', human: 'Приемка человеком' };
 const evidenceLabels = { passed: 'Проверка пройдена', failed: 'Проверка не пройдена', uncertain: 'Результат неоднозначен', unavailable: 'Проверка недоступна' };
 const checkLabels: Record<string, string> = { 'check-tests': 'Тесты', 'check-typecheck': 'Проверка типов', 'check-lint': 'Проверка стиля кода', 'check-build': 'Сборка' };
@@ -18,6 +19,9 @@ function date(value: string | null) {
 }
 
 function blockerText(reason: string, proof: TaskProof) {
+  if (reason === 'Исполнение находится в состоянии cancelled') return 'Выполнение остановлено пользователем.';
+  if (reason === 'Исполнение находится в состоянии failed') return 'Этап завершился с ошибкой; откройте причину выше.';
+  if (reason === 'Исполнение находится в состоянии uncertain') return 'Исход этапа не подтвержден; требуется восстановление.';
   const check = /^Обязательная проверка (check-[a-z]+) не подтверждена на текущем результате$/.exec(reason);
   if (check?.[1]) return `${checkLabels[check[1]] ?? 'Проверку'} нужно повторить для текущего состояния файлов.`;
   const requirement = proof.requirements.find(item => reason.startsWith(`${item.id}: `));
@@ -47,6 +51,10 @@ export function TaskCockpit({ snapshot, busy, unavailable = false, embedded = fa
   const current = snapshot.nodes.find(node => node.id === snapshot.activeNodeId);
   const changes = proof.changedFiles ?? [...new Set(snapshot.nodes.flatMap(node => node.changedFiles))];
   const openFindings = proof.findings.filter(finding => finding.status === 'open');
+  const failedNode = snapshot.nodes.find(node => node.status === 'failed');
+  const failureSource = snapshot.failureReason || failedNode?.reason;
+  const runtimeFailure = snapshot.status === 'failed' ? runtimeProblem(failureSource) : null;
+  const diagnostic = runtimeFailure ? technicalProblem(failureSource) : null;
   const selectRequirement = (id: string) => { setSelectedId(id); setView('requirements'); };
   return <section className="task-cockpit" aria-label="Задача и доказательства">
     <header className="cockpit-header">
@@ -60,6 +68,12 @@ export function TaskCockpit({ snapshot, busy, unavailable = false, embedded = fa
         <span data-testid="requirement-coverage"><strong>{proof.coverage.proven} из {proof.coverage.required}</strong> обязательных требований подтверждено</span>
         <progress aria-label="Подтвержденные обязательные требования" value={proof.coverage.proven} max={Math.max(proof.coverage.required, 1)} />
       </div>
+      {runtimeFailure && <div className="workflow-problem" role="alert">
+        <strong>{runtimeFailure.title}</strong>
+        <p>{runtimeFailure.summary}</p>
+        <p>{runtimeFailure.action}</p>
+        {diagnostic && <TechnicalDetails code={diagnostic.code} message={diagnostic.message} />}
+      </div>}
       {current && !proven && <p className="cockpit-current"><strong>Сейчас:</strong> {nodeTitle(current, 'ru')}<span>{current.outcome}</span></p>}
       {proof.blockers.length > 0 && <div className="proof-blockers"><strong>Что мешает завершению</strong><ul>{proof.blockers.map((reason, index) => <li key={index}>{blockerText(reason, proof)}</li>)}</ul></div>}
     </header>

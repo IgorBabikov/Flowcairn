@@ -18,7 +18,11 @@ const MAX_TICKET_BYTES = 64 * 1024;
 const TERMINATION_GRACE_MS = 2_000;
 
 // Only fixed error codes leave memory; provider output may contain secrets or source text.
-export function classifyAiFailure(output) {
+export function classifyAiFailure(output, stderr = '') {
+  // macOS can reject nested sandbox-exec before the AI CLI writes a JSON event.
+  // Persist only this fixed code, never raw stderr or source-bearing output.
+  if (/^sandbox-exec: sandbox_apply: Operation not permitted\s*$/m.test(stderr))
+    return 'AI_SANDBOX_DENIED';
   const messages = output
     .split('\n')
     .flatMap((line) => {
@@ -146,6 +150,7 @@ export async function supervise(ticketPath) {
   let stdoutBytes = 0;
   let stderrBytes = 0;
   let diagnostic = Buffer.alloc(0);
+  let stderrDiagnostic = Buffer.alloc(0);
   const stdoutHash = createHash('sha256');
   const stderrHash = createHash('sha256');
   const usageCollector = createUsageCollector();
@@ -259,6 +264,8 @@ export async function supervise(ticketPath) {
           diagnostic = Buffer.concat([diagnostic, data]).subarray(-65536);
           usageCollector.push(data);
         }
+        if (!isStdout && initial.actionId?.startsWith('ai-'))
+          stderrDiagnostic = Buffer.concat([stderrDiagnostic, data]).subarray(-65536);
         if (isStdout) stdoutBytes += data.length;
         else stderrBytes += data.length;
         const total = stdoutBytes + stderrBytes;
@@ -275,7 +282,7 @@ export async function supervise(ticketPath) {
       finish(
         code,
         signal,
-        terminatingReason ?? (code === 0 ? null : classifyAiFailure(diagnostic.toString('utf8'))),
+        terminatingReason ?? (code === 0 ? null : classifyAiFailure(diagnostic.toString('utf8'), stderrDiagnostic.toString('utf8'))),
       ),
     );
     action.stdin.end(message.input);

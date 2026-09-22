@@ -81,10 +81,9 @@ export const ProjectProfileSchema = z.strictObject({
     .array(checkId)
     .max(4)
     .refine((values) => new Set(values).size === values.length),
-  // New projects do not execute repository scripts until the owner selects an
-  // execution boundary. `local` remains readable only to block legacy profiles
-  // and force a conscious migration to `trusted-local`.
-  checkMode: z.enum(['none', 'trusted-local', 'hardened', 'local']).default('none'),
+  // Новый и legacy-профиль без явного значения используют продуктовый default.
+  // `local` остается читаемым только для блокировки устаревших профилей.
+  checkMode: z.enum(['none', 'trusted-local', 'hardened', 'local']).default('trusted-local'),
   checkScripts: z
     .object({
       typecheck: checkScript.optional(),
@@ -342,8 +341,9 @@ export function hasOnboardingConsent(root, profile = loadProjectProfile(root)) {
   } catch { return false; }
 }
 
-export function hasTrustedLocalChecksConsent(root, profile = loadProjectProfile(root)) {
-  if (profile.checkMode !== 'trusted-local' || !profile.checks.length) return false;
+export function hasTrustedLocalChecksBinding(root, profile = loadProjectProfile(root)) {
+  if (profile.checkMode !== 'trusted-local') return false;
+  if (!profile.checks.length) return true;
   try {
     const directory = path.join(realpathSync(root), '.ai-orchestrator');
     const stat = lstatSync(directory);

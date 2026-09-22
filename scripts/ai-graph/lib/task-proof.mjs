@@ -200,7 +200,7 @@ export function deriveTaskProof({ state, task, plan, currentFingerprint, current
   }
   for (const item of requirements.filter((item) => item.mandatory && item.status !== 'proven')) blockers.push(`${item.id}: ${item.reason}`);
   if (findings.some((item) => item.blocking && item.status === 'open')) blockers.push('Есть открытые блокирующие замечания');
-  if (['failed', 'uncertain', 'stale'].includes(state.status)) blockers.push(`Исполнение находится в состоянии ${state.status}`);
+  if (['failed', 'cancelled', 'uncertain', 'stale'].includes(state.status)) blockers.push(`Исполнение находится в состоянии ${state.status}`);
   if (state.activeOperation || Object.values(state.nodes).some((node) => ['ready', 'pending', 'running', 'waiting-for-human'].includes(node.status))) blockers.push('Выполнение обязательной работы еще не завершено');
   const coverage = { required: required.length, proven: requirements.filter((item) => item.mandatory && item.status === 'proven').length };
   const proven = blockers.length === 0 && coverage.required > 0 && coverage.required === coverage.proven;

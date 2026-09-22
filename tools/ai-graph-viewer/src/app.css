@@ -49,6 +49,7 @@
   --status-waiting-for-human: #b26d20;
   --status-passed: #16824a;
   --status-failed: #b5475a;
+  --status-cancelled: #65718f;
   --status-uncertain: #b26d20;
   --status-stale: #7a8494;
 }
@@ -78,6 +79,7 @@
   --status-waiting-for-human: #f0bd76;
   --status-passed: #73d79c;
   --status-failed: #f2a0ae;
+  --status-cancelled: #b4bfce;
   --status-uncertain: #f0bd76;
   --status-stale: #b4bfce;
 }
@@ -513,6 +515,10 @@ button {
   border-color: var(--status-failed);
   background: var(--status-failed);
 }
+.status-mark.status-cancelled {
+  border-color: var(--status-cancelled);
+  background: var(--status-cancelled);
+}
 .status-mark.status-uncertain {
   border-color: var(--status-uncertain);
   background: var(--status-uncertain);
@@ -774,6 +780,9 @@ pre {
 }
 .status-chip.status-failed {
   color: var(--status-failed);
+}
+.status-chip.status-cancelled {
+  color: var(--status-cancelled);
 }
 .status-chip.status-running {
   color: var(--status-running);
@@ -1351,7 +1360,7 @@ dialog::backdrop {
 .graph-node:hover {
   border-color: var(--node-status-color);
 }
-.graph-node.status-idle, .graph-node.status-pending, .graph-node.status-stale {
+.graph-node.status-idle, .graph-node.status-pending, .graph-node.status-cancelled, .graph-node.status-stale {
   border-style: dashed;
 }
 .graph-node.status-uncertain { border-style: double; border-width: 3px; }
@@ -1556,6 +1565,7 @@ a { text-underline-offset: 3px; }
 .status-icon[data-status='passed'] { color: var(--status-passed); }
 .status-icon[data-status='running'] { color: var(--status-running); }
 .status-icon[data-status='failed'] { color: var(--status-failed); }
+.status-icon[data-status='cancelled'] { color: var(--status-cancelled); }
 .status-icon[data-status='waiting-for-human'] { color: var(--status-waiting-for-human); }
 .graph-node.status-waiting-for-human {
   background: color-mix(in srgb, var(--status-waiting-for-human) 7%, var(--surface));

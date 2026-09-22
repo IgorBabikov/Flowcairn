@@ -9,6 +9,7 @@ export type RunStatus =
   | 'waiting-for-human'
   | 'passed'
   | 'failed'
+  | 'cancelled'
   | 'uncertain'
   | 'stale';
 
@@ -237,7 +238,7 @@ export interface Receipt {
   finishedAt: string | null;
   durationMs: number | null;
   exitCode: number | null;
-  verdict: 'pass' | 'fail' | 'uncertain' | 'started';
+  verdict: 'pass' | 'fail' | 'cancelled' | 'uncertain' | 'started';
   checks: CheckResult[];
   artifacts: string[];
   changedFiles: string[];
@@ -366,6 +367,6 @@ export interface OnboardingStatus {
   configured: boolean;
   profileHash: string | null;
   providers: Array<{id: string; label: string; supported: boolean; state: string; reason: string | null}>;
-  values: { provider: string; model: string | null; modelMode: string; reasoningEffort: string | null; testPolicy: string; coverage: boolean; readConsent: boolean };
+  values: { provider: string; model: string | null; modelMode: string; reasoningEffort: string | null; testPolicy: string; coverage: boolean; checkMode: 'none' | 'trusted-local' | 'hardened'; checks: string[]; readConsent: boolean };
   limitations: string[];
 }

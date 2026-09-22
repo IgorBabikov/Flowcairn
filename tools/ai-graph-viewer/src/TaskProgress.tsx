@@ -5,7 +5,7 @@ import { nodeTitle, StatusIcon } from './presentation';
 function activeNodeIndex(snapshot: Snapshot) {
   const explicit = snapshot.nodes.findIndex(node => node.id === snapshot.activeNodeId);
   if (explicit >= 0) return explicit;
-  return snapshot.nodes.findIndex(node => ['running', 'failed', 'uncertain', 'waiting-for-human', 'ready'].includes(node.status));
+  return snapshot.nodes.findIndex(node => ['running', 'failed', 'cancelled', 'uncertain', 'waiting-for-human', 'ready'].includes(node.status));
 }
 
 export function TaskProgress({

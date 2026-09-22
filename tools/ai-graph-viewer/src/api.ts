@@ -115,6 +115,8 @@ export const api = {
   async onboarding(): Promise<OnboardingStatus> {
     const body = await requestJson<OnboardingStatus>('/api/onboarding');
     if (!body || typeof body.configured !== 'boolean' || !body.values ||
+        !['none', 'trusted-local', 'hardened'].includes(body.values.checkMode) ||
+        !Array.isArray(body.values.checks) || !body.values.checks.every(check => typeof check === 'string') ||
         !Array.isArray(body.providers) || !Array.isArray(body.limitations))
       throw { code: 'INVALID_ONBOARDING', message: 'Не удалось прочитать настройки проекта.', retryable: true } satisfies ApiError;
     return body;

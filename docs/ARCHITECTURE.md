@@ -63,7 +63,7 @@ Snapshot проверяет живую рабочую копию и toolchain. �
 
 Replan создает новую версию; предыдущие receipts остаются доступны. Исправление сохраняет контракт, права и разрешенный контекст чтения. Checks и review выполняются заново. Findings закрываются только более поздними связанными проверками. Автоматический цикл ограничен двумя исправлениями; срок плана определяется числом этапов и ограничен двумя часами. Неопределенная остановка процесса требует восстановления.
 
-Durable state хранит `stopRequested` и связанный `stopResult`. `task-snapshot.mjs` проецирует их вместе с `activeOperation` в `Snapshot.execution`: `running`, `stopping`, `stopped`, `stop-uncertain` или `idle`. `stopped` выводится только после подтвержденного termination либо подтвержденной отмены до запуска дочернего процесса. Эта проекция не меняет verdict узла и не превращает прерванный результат в PASS.
+Durable state хранит `stopRequested` и связанный `stopResult`. `task-snapshot.mjs` проецирует их вместе с `activeOperation` в `Snapshot.execution`: `running`, `stopping`, `stopped`, `stop-uncertain` или `idle`. `stopped` выводится только после подтвержденного termination либо подтвержденной отмены до запуска дочернего процесса. Подтвержденная пользовательская остановка получает status/verdict `cancelled`; неподтвержденное завершение остается `uncertain` и требует recovery.
 
 Store использует CAS, locks, durable revisions и fsync. Текущие требования, findings, evidence и следующая допустимая работа восстанавливаются из сохраненных объектов, а не из чата модели. Это локальное файловое хранилище, не распределенная очередь.
 
@@ -73,6 +73,6 @@ Store использует CAS, locks, durable revisions и fsync. Текущи�
 
 Для реализации compiler использует paths текущего шага, explicit readPaths, необходимые зависимости и проектные инструкции. Полный review bundle имеет отдельный предел 512 KiB и не обрезается молча. Провайдеры получают структурированные данные, а executable actions выбирает registry.
 
-По умолчанию scripts проекта выключены. `trusted-local` требует явного разрешения доверенному проекту; `hardened` использует подготовленный Docker-образ. Произвольные команды из model/task JSON не исполняются. Внешние side effects, commit, push и deploy не следуют из PROVEN.
+Для нового локального проекта default — `trusted-local`: runtime регистрирует только найденные conventional scripts и связывает их точные имена и команды hash локальной установки. Изменившиеся scripts не запускаются до повторного `setup`. `none` и `hardened` остаются явными настройками. Произвольные команды из model/task JSON не исполняются. Внешние side effects, commit, push и deploy не следуют из PROVEN.
 
 Фундаментальные сущности — Task, Requirement, Work, Artifact, Evidence, Finding и Result. Полноценный текущий executor работает с software development; поддержка других доменов требует собственных действий и verifiers, а не нового значения зеленого статуса. [Подробные ограничения](LIMITATIONS.md).
