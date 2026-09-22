@@ -15,6 +15,7 @@ import { prepareToolchain, verifyToolchain } from './toolchain.mjs';
 import { effectiveInstructionFiles } from './instructions.mjs';
 import { projectInstructionMetadata } from './project-instruction-context.mjs';
 import { directAdapters } from './direct-adapters.mjs';
+import { taskContextInventory } from './intake.mjs';
 
 const fail = (code, message) => { throw new GraphError(code, message); };
 const unique = (values) => [...new Set(values)];
@@ -172,6 +173,7 @@ export async function defaultAdapters(root) {
     : [...resolveAction(node.action.id).skills];
   const adapters = {
     project: profile,
+    taskContextInventory: () => taskContextInventory(root),
     identity: () => profile.workspaceMode === 'direct'
       ? pinnedRuntimeIdentity(root)
       : hashObject({ runtime: pinnedRuntimeIdentity(root), instructions: instructionInspection()?.fingerprint ?? null }),

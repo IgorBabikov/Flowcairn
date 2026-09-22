@@ -17,7 +17,8 @@ test('natural task selects related source and configuration without unrelated pr
     'Обновить устаревшие правила в AGENTS.md.';
   const scope = selectDirectTaskScope(description, files, candidates);
   assert.deepEqual(scope, [
-    'AGENTS.md', 'dictionaries', 'package.json', 'src/interfaces', 'src/localization', 'src/modules',
+    'AGENTS.md', 'dictionaries/tmg.ru.json', 'package.json', 'src/interfaces', 'src/localization/index.ts',
+    'src/localization/locale.json', 'src/localization/tmg.ts', 'src/modules',
     'webpack-plugins', 'webpack.config.admin.js', 'webpack.config.client.js',
   ]);
   assert.ok(!scope.includes('src/unrelated'));

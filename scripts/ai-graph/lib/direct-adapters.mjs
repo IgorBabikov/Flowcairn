@@ -13,6 +13,7 @@ import { prepareToolchain, verifyToolchain } from './toolchain.mjs';
 /** The same WorkflowService controls direct projects; only its workspace boundary changes. */
 export function directAdapters(root, profile, base) {
   const projectRoot = realpathSync(root);
+  let previewSnapshot = null;
   const fingerprint = (worktree) => {
     if (realpathSync(worktree) !== projectRoot) throw new GraphError('DIRECT_ROOT', 'Работа вышла за текущий проект');
     // Dependency directories are already excluded by the direct scanner and
@@ -21,6 +22,7 @@ export function directAdapters(root, profile, base) {
   };
   const projectSummary = () => {
     const snapshot = fingerprint(projectRoot);
+    previewSnapshot = snapshot;
     const files = snapshot.files.map((file) => file.path);
     const excluded = ['.flowcairn.json', ...profile.outputPaths];
     const scopeCandidates = [...new Set(files.filter((file) => !isInstructionPath(file) &&
@@ -30,7 +32,7 @@ export function directAdapters(root, profile, base) {
     const firstTask = !existsSync(path.join(projectRoot, '.ai-orchestrator', 'graph', 'state.json'));
     const bootstrap = { firstTask, required: false, changedPaths: [], untrackedCandidates: [], requiredUntracked: [],
       snapshotHash: hashObject({ source: snapshot.hash }) };
-    return { schemaVersion: 2, name: path.basename(projectRoot),
+    return { schemaVersion: 2, name: path.basename(projectRoot), sourceHash: snapshot.hash,
       contextHash: hashObject({ runtimeHash: base.identity(), sourceHash: snapshot.hash, contextPaths, scopeCandidates, profile }),
       contextPaths, scopeCandidates, bootstrap, checks: profile.checks,
       ai: { provider: profile.ai.provider, model: profile.ai.model },
@@ -39,10 +41,18 @@ export function directAdapters(root, profile, base) {
   return {
     ...base,
     projectSummary,
+    taskContextInventory: () => {
+      // Match the project summary's exact snapshot. Intake/capture rechecks
+      // freshness before mutation; a preview does not need a second full scan.
+      const snapshot = previewSnapshot ?? fingerprint(projectRoot);
+      return { files: snapshot.files.map((file) => file.path), sourceHash: snapshot.hash };
+    },
     selectTaskScope: (description, candidates) =>
       selectDirectTaskScope(description, fingerprint(projectRoot).files.map((file) => file.path), candidates),
     registerTask: async (selectedRoot, task, options) => {
       if (realpathSync(selectedRoot) !== projectRoot) throw new GraphError('DIRECT_ROOT', 'Задача относится к другому проекту');
+      if (options.contextHash && options.contextHash !== projectSummary().contextHash)
+        throw new GraphError('STALE_CONTEXT', 'Файлы изменились после проверки области задачи. Проверьте ее заново.');
       const selected = task.includeUntracked ?? [];
       if (selected.length) {
         const available = new Set(fingerprint(projectRoot).files.map((file) => file.path));
@@ -51,6 +61,7 @@ export function directAdapters(root, profile, base) {
       }
       return options.service.create(task, { runId: options.run, operationId: options.operation,
         stage: options.stage, workflow: options.workflow, naturalIntakeHash: options.naturalIntakeHash,
+        expectedSourceHash: options.expectedSourceHash,
         actor: options.actor });
     },
     capture: async (_task, context = {}) => captureDirectSource(projectRoot, profile, context.worktree ?? projectRoot),

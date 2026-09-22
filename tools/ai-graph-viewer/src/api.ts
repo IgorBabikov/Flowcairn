@@ -11,6 +11,8 @@ import type {
   IntakeInput,
   ProjectContext,
   OnboardingStatus,
+  IntakePreview,
+  PreviewInput,
 } from './contracts';
 import { isSnapshot } from './contracts';
 
@@ -97,6 +99,19 @@ async function requestJson<T>(url: string, init: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
+  async previewIntake(input: PreviewInput): Promise<IntakePreview> {
+    const body = await requestJson<IntakePreview>('/api/intake/preview', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
+    });
+    const strings = (value: unknown): value is string[] => Array.isArray(value) && value.every(item => typeof item === 'string');
+    if (!body || typeof body.contextHash !== 'string' || typeof body.previewHash !== 'string' ||
+        typeof body.ready !== 'boolean' || !strings(body.scope) || !strings(body.candidates) ||
+        !strings(body.issues) || !strings(body.feedback) || !Array.isArray(body.references) ||
+        !body.references.every(ref => ref && typeof ref.reference === 'string' &&
+          ['resolved', 'missing', 'ambiguous', 'unavailable'].includes(ref.status) && strings(ref.matches)))
+      throw { code: 'INVALID_PREVIEW', message: 'Не удалось прочитать проверку контекста. Повторите проверку.', retryable: true } satisfies ApiError;
+    return body;
+  },
   async onboarding(): Promise<OnboardingStatus> {
     const body = await requestJson<OnboardingStatus>('/api/onboarding');
     if (!body || typeof body.configured !== 'boolean' || !body.values ||

@@ -1513,6 +1513,26 @@ a { text-underline-offset: 3px; }
 .task-composer textarea { min-height: 180px; resize: vertical; }
 .task-composer #task-number { max-width: 240px; }
 .task-composer footer { justify-content: flex-end; margin-top: 26px; }
+.task-context-picker { min-width: 0; margin-top: 28px; padding-top: 24px; border-top: 1px solid var(--border-strong); }
+.task-context-picker h3 { margin: 0 0 12px; }
+.task-context-picker textarea { min-height: 112px; }
+.task-context-picker select { width: 100%; min-height: 44px; padding: 10px 12px; background: var(--surface); color: var(--text); border: 1px solid var(--border-strong); border-radius: 8px; }
+.context-reference { min-width: 0; margin: 24px 0; padding: 0; border: 0; }
+.context-reference legend { margin-bottom: 8px; font-weight: 600; }
+.task-context-picker code, .context-issues li, .context-feedback li, .task-clarification .runtime-reason { overflow-wrap: anywhere; }
+.context-issues, .context-feedback { margin-top: 20px; line-height: 1.6; }
+.task-context-picker .context-resolved { margin-top: 12px; }
+.context-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 12px; margin: 24px 0 12px; }
+.context-actions .button { min-height: 44px; white-space: normal; }
+.context-recovery { margin: 20px 0; }
+.context-recovery p { margin: 0 0 12px; }
+.task-clarification > p + p { margin-top: 16px; }
+.task-clarification > header { display: flex; align-items: start; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+@media (max-width: 720px) {
+  .context-actions { flex-direction: column; align-items: stretch; }
+  .task-context-picker input, .task-context-picker textarea, .task-context-picker select { font-size: 16px; }
+  .task-clarification > header { flex-wrap: wrap; }
+}
 .autonomous .graph-facts { display: none; }
 .autonomous .node-mode, .autonomous .node-meta, .autonomous .node-hint { display: none; }
 .autonomous .graph-node { min-height: 124px; }

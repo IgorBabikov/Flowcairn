@@ -83,7 +83,7 @@ test('product intake accepts up to 64 safe project roots before planning', async
  const scopeCandidates=Array.from({length:33},(_,index)=>`area-${index}`);
  const f=await fixture(t,{scopeCandidates});
  const result=await f.service.intake({title:'Миграция проекта',description:'Разделить большую миграцию на проверяемые этапы',taskNumber:'BIG-1',operationId:'intake-many-roots',contextHash:hash});
- assert.deepEqual(result.task.scope,scopeCandidates);
+ assert.deepEqual(result.task.scope,[...scopeCandidates].sort());
  assert.equal(result.status,'ready');
  await f.settle(result);
  assert.equal(f.service.close(),true);
@@ -102,12 +102,12 @@ test('planning continues when a project fingerprint has more than ten thousand f
  assert.equal(f.service.store.readFingerprint(stored.initialFingerprint.hash).files.length,10_001);
 });
 
-test('product intake requires an explicit scope when a project exposes more than 64 roots', async(t)=>{
+test('product intake starts bounded discovery when a project exposes more than 64 roots', async(t)=>{
  const f=await fixture(t,{scopeCandidates:Array.from({length:65},(_,index)=>`area-${index}`)});
- await assert.rejects(
-  f.service.intake({title:'Большая миграция',description:'Проверить большую миграцию по частям',taskNumber:'BIG-2',operationId:'intake-too-many-roots',contextHash:hash}),
-  error=>error.code==='INTAKE_SCOPE_LIMIT',
- );
+ const initial=await f.service.intake({title:'Большая миграция',description:'Проверить большую миграцию по частям',taskNumber:'BIG-2',operationId:'intake-too-many-roots',contextHash:hash});
+ assert.equal(initial.task.scope.length,1);
+ await f.settle(initial);
+ assert.equal(f.calls[0].task.contextDiscovery,true);
 });
 
 test('implementation receipt accepts a hash-bound large-file move as two declared changes', async(t)=>{

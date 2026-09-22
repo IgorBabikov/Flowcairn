@@ -89,6 +89,7 @@ export function projectSnapshot(host, runId, verifySource) {
         needs: definition.needs,
         action: { id: definition.action.id, kind: action.kind },
         status: node.status,
+        resolutionKind: host.resultKind?.(node) ?? null,
         mode: definition.permissions.some((p) => p.includes('write')) ? 'write' : 'read',
         permissions: definition.permissions,
         resources: definition.resources,
@@ -177,6 +178,9 @@ export function projectSnapshot(host, runId, verifySource) {
       planHash: state.planHash,
       revision: state.revision,
       status: driftReason ? 'stale' : state.status,
+      resolutionKind: state.status === 'uncertain'
+        ? (nodes.filter((node) => node.status === 'uncertain').every((node) => node.resolutionKind === 'semantic') ? 'semantic' : 'process') : null,
+      contextClarification: (!driftReason || /^(?:RUNTIME_DRIFT|SKILL_DRIFT|POLICY_DRIFT):/.test(driftReason)) && capabilities.run.requestReplan.allowed && (host.contextClarification?.(state, plan) ?? false),
       execution: executionSnapshot(state),
       finalDisposition: state.finalDisposition,
       createdAt: state.createdAt,
