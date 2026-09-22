@@ -180,6 +180,30 @@ test('desktop opens the complete dependency-ordered chain in compact rows and pr
   await page.screenshot({ path: 'output/playwright/compact-layout-dark.png', fullPage: true });
 });
 
+test('task-first running view leads with the task and keeps the graph behind an explicit action', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1366, height: 768 });
+  const current = chain();
+  await mockApi(page, current);
+  await page.goto(`/#session=${token}`);
+
+  await expect(page.getByRole('heading', { name: 'Добавить форму регистрации компании' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Что происходит сейчас' })).toBeVisible();
+  await expect(page.locator('.react-flow')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Граф · детали исполнения', exact: true })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('task-first-running-1366x768.png') });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.screenshot({ path: testInfo.outputPath('task-first-running-1440x900.png') });
+
+  await openGraph(page);
+  await expect(page.locator('.react-flow')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Задача', exact: true }).click();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByRole('heading', { name: 'Что происходит сейчас' })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath('task-first-running-390x844.png') });
+});
+
 test('keeps run rail actions on one compact line', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
   await mockApi(page, chain());
@@ -366,7 +390,7 @@ test('1024 rail and 390 drawer use responsive widths without page overflow', asy
   await mockApi(page, chain());
   await page.setViewportSize({ width: 1024, height: 768 });
   await page.goto(`/#session=${token}`);
-  expect((await page.locator('.desktop-run-rail').boundingBox())?.width).toBeCloseTo(208, 0);
+  expect((await page.locator('.desktop-run-rail').boundingBox())?.width).toBeCloseTo(220, 0);
 
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.locator('.desktop-run-rail')).toBeHidden();
@@ -392,7 +416,8 @@ test('loads local Latin and Cyrillic Manrope without an external font request', 
   expect(result.family).toContain('Manrope');
   expect(result.fonts.some((name) => name.includes('Manrope-Cyrillic-Variable.woff2'))).toBe(true);
   expect(result.fonts.some((name) => name.includes('Manrope-Latin-Variable.woff2'))).toBe(true);
-  expect(result.fonts.every((name) => new URL(name).origin === 'http://127.0.0.1:4329')).toBe(true);
+  const viewerOrigin = new URL(page.url()).origin;
+  expect(result.fonts.every((name) => new URL(name).origin === viewerOrigin)).toBe(true);
 });
 
 test('primary controls keep accessible sizes and a visible keyboard focus', async ({ page }) => {

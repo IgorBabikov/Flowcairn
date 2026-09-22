@@ -44,8 +44,16 @@ function GraphNodeCard({ data }: NodeProps<Node<GraphNodeData, 'operator'>>) {
       tabIndex={0}
     >
       {data.status === 'running' && (
-        <svg className="execution-border" aria-hidden="true" preserveAspectRatio="none" viewBox="0 0 100 100">
-          <rect height="98" pathLength="100" rx="5" ry="5" width="98" x="1" y="1" />
+        <svg
+          className="execution-border"
+          aria-hidden="true"
+          focusable="false"
+          height="100%"
+          preserveAspectRatio="none"
+          viewBox="0 0 100 100"
+          width="100%"
+        >
+          <rect height="98" pathLength="100" vectorEffect="non-scaling-stroke" width="98" x="1" y="1" />
         </svg>
       )}
       <NodeToolbar
