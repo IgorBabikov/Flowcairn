@@ -43,7 +43,8 @@ test('task cockpit leads to requirement evidence and advanced graph', async ({ p
   await requirement.getByRole('button', { name: 'Результат 1', exact: true }).click();
   await expect(page.getByRole('dialog')).toContainText('<script>attack()</script>');
   await page.getByRole('button', { name: 'Закрыть', exact: true }).click();
-  await page.getByRole('button', { name: 'Граф · детали исполнения', exact: true }).click();
+  await page.getByRole('button', { name: 'Граф', exact: true }).click();
+  await page.getByRole('button', { name: 'Детали исполнения', exact: true }).click();
   await expect(page.locator('.graph-node').first()).toBeVisible();
   await expect(page.locator('.detail-panel')).toHaveCount(1);
   await expect(page.locator('.detail-scroll')).toHaveCount(1);
@@ -102,7 +103,8 @@ test('compact graph details open as a closable dialog', async ({ page }) => {
   await page.setViewportSize({ width: 1024, height: 768 });
   await mockApi(page, taskWithProof());
   await page.goto(`/#session=${token}`);
-  await page.getByRole('button', { name: 'Граф · детали исполнения', exact: true }).click();
+  await page.getByRole('button', { name: 'Граф', exact: true }).click();
+  await page.getByRole('button', { name: 'Детали исполнения', exact: true }).click();
 
   const details = page.getByRole('dialog', { name: 'Детали исполнения', exact: true });
   await expect(details).toBeVisible();
@@ -119,7 +121,8 @@ test('reports and English navigation use readable labels while API status stays 
   const legacy = fixture.current(); legacy.workflow = null; legacy.revision += 1;
   await page.getByRole('button', { name: 'На английском', exact: true }).click();
   await expect(page.locator('.run-row em')).toHaveText('Result confirmed');
-  await page.getByRole('button', { name: 'Граф · детали исполнения', exact: true }).click();
+  await page.getByRole('button', { name: 'Граф', exact: true }).click();
+  await page.getByRole('button', { name: 'Детали исполнения', exact: true }).click();
   await expect(page.getByRole('tab', { name: 'Check results', exact: true })).toBeVisible();
   expect(state.proof.status).toBe('PROVEN');
 });

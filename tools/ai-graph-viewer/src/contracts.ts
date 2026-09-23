@@ -1,4 +1,4 @@
-import type { TaskProof } from './proof-contracts';
+import type { TaskContract, TaskProof } from './proof-contracts';
 
 export type RunStatus =
   | 'idle'
@@ -181,6 +181,7 @@ export interface PlanNode {
 }
 
 export interface GraphPlan {
+  taskContract?: TaskContract;
   schemaVersion: 2;
   taskHash: string;
   version: number;

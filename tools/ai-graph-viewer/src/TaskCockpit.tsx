@@ -29,11 +29,12 @@ function blockerText(reason: string, proof: TaskProof) {
   return humanText(reason);
 }
 
-export function TaskCockpit({ snapshot, busy, unavailable = false, embedded = false, onOpenEvidence, onOpenArtifact, onAcceptRequirement }: {
+export function TaskCockpit({ snapshot, busy, unavailable = false, embedded = false, wide = false, onOpenEvidence, onOpenArtifact, onAcceptRequirement }: {
   snapshot: Snapshot;
   busy: boolean;
   unavailable?: boolean;
   embedded?: boolean;
+  wide?: boolean;
   onOpenEvidence: OpenEvidence;
   onOpenArtifact: (artifactId: string) => void;
   onAcceptRequirement?: ((requirementId: string, reason: string) => void) | undefined;
@@ -42,7 +43,7 @@ export function TaskCockpit({ snapshot, busy, unavailable = false, embedded = fa
   const [view, setView] = useState<View>('requirements');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   if (!proof) return null;
-  if (unavailable) return <section className="task-cockpit" aria-label="Задача и доказательства"><header className="cockpit-header">
+  if (unavailable || !snapshot.integrity.valid) return <section className="task-cockpit" aria-label="Задача и доказательства"><header className="cockpit-header">
     <h2>Актуальность результата не подтверждена</h2>
     <p role="status">Не удалось прочитать текущее состояние задачи. Предыдущие результаты проверок и отчет скрыты до успешного обновления.</p>
   </header></section>;
@@ -78,7 +79,7 @@ export function TaskCockpit({ snapshot, busy, unavailable = false, embedded = fa
       {proof.blockers.length > 0 && <div className="proof-blockers"><strong>Что мешает завершению</strong><ul>{proof.blockers.map((reason, index) => <li key={index}>{blockerText(reason, proof)}</li>)}</ul></div>}
     </header>
     <div className="cockpit-content">
-      {proven && proof.certificate && <Certificate proof={proof} onSelectRequirement={selectRequirement} />}
+      {proven && proof.certificate && <Certificate expanded={!wide} proof={proof} onSelectRequirement={selectRequirement} />}
       <nav className="cockpit-nav" aria-label="Сведения о задаче">{Object.entries(views).map(([name, label]) =>
         <button type="button" key={name} aria-pressed={view === name} onClick={() => setView(name as View)}>{label}</button>)}</nav>
       {view === 'requirements' && <div className="requirements-layout">
@@ -189,9 +190,9 @@ function Finding({ finding, snapshot }: { finding: ProofFinding; snapshot: Snaps
   </article>;
 }
 
-function Certificate({ proof, onSelectRequirement }: { proof: TaskProof; onSelectRequirement: (id: string) => void }) {
+function Certificate({ proof, onSelectRequirement, expanded }: { proof: TaskProof; onSelectRequirement: (id: string) => void; expanded: boolean }) {
   const certificate = proof.certificate!;
-  return <details className="completion-certificate" open>
+  return <details className="completion-certificate" open={expanded}>
     <summary>Отчет о выполнении</summary>
     <p>Все обязательные требования подтверждены. Здесь собраны результаты проверок и приемки для текущего состояния задачи.</p>
     <ul>{proof.requirements.filter(requirement => certificate.requirementIds.includes(requirement.id)).map(requirement => <li key={requirement.id}><button type="button" className="text-button" onClick={() => onSelectRequirement(requirement.id)}>{requirement.title}</button></li>)}</ul>

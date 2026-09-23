@@ -1,0 +1,263 @@
+{
+  "version": "0.3.7",
+  "commit": "eecfcb7",
+  "date": "2026-09-23",
+  "captures": [
+    {
+      "file": "screenshots/01-new-task.png",
+      "title": "Новая задача",
+      "imageWidth": 1510,
+      "imageHeight": 990,
+      "sha256": "71b37649d4c1b69878582317a6183ed5bb5dd850a9bed672a1568d8a7ba92b2d",
+      "data": "synthetic API; current frontend"
+    },
+    {
+      "file": "screenshots/02-running.png",
+      "title": "Выполнение в узком окне",
+      "imageWidth": 1024,
+      "imageHeight": 576,
+      "sha256": "2ea046aab222ab5591f9c7a1f316fde4359932a5066ec49d40c539c780d5ace5",
+      "data": "synthetic API; current frontend"
+    },
+    {
+      "file": "screenshots/03-graph.png",
+      "title": "Граф и перекрывающие детали",
+      "imageWidth": 1024,
+      "imageHeight": 576,
+      "sha256": "369beb4adf88e52467ba76ad5d9246830120b48b61d3d36ad11821afacf80ddf",
+      "data": "synthetic API; current frontend"
+    },
+    {
+      "file": "screenshots/04-graph-laptop.png",
+      "title": "Граф при 1093 CSS px",
+      "imageWidth": 1092,
+      "imageHeight": 614,
+      "sha256": "b6799a75cc54e02f53b9668c76408310b99735efb5fa15b6abc8255811523597",
+      "data": "synthetic API; current frontend"
+    },
+    {
+      "file": "screenshots/05-graph-closed.png",
+      "title": "Граф после закрытия деталей",
+      "imageWidth": 1092,
+      "imageHeight": 614,
+      "sha256": "1c97ce05ee909d971e3cddf31aa22b8acba29eff242a9780d31ad62e8de7b64c",
+      "data": "synthetic API; current frontend"
+    },
+    {
+      "file": "screenshots/06-project-health.png",
+      "title": "Состояние проекта",
+      "imageWidth": 1092,
+      "imageHeight": 614,
+      "sha256": "8404c4cb3c85551f6ea7871e62cb722ad72a073c26337579cc6050b7568e5f3e",
+      "data": "synthetic API; current frontend"
+    },
+    {
+      "file": "screenshots/07-approval.png",
+      "title": "План, первый экран",
+      "imageWidth": 1440,
+      "imageHeight": 900,
+      "sha256": "1191a4ffb6abd4e33c9c448bd879ea3b4a0ffd9683df4ccb1eaf0828a8599596",
+      "data": "synthetic API; current frontend"
+    },
+    {
+      "file": "screenshots/08-approval-actions.png",
+      "title": "Согласование после прокрутки",
+      "imageWidth": 1440,
+      "imageHeight": 900,
+      "sha256": "b426dbfee2e88e5dfd2b35a93109aaaf998929dbe7e9efbc2fff77057541ba0d",
+      "data": "synthetic API; current frontend"
+    },
+    {
+      "file": "screenshots/09-settings.png",
+      "title": "Открытые настройки",
+      "imageWidth": 1440,
+      "imageHeight": 900,
+      "sha256": "560a8b52d71195036c4b12ef3c351407a0e9b9710188e3e66ac271b0f793eb83",
+      "data": "synthetic API; current frontend"
+    },
+    {
+      "file": "screenshots/10-proven.png",
+      "title": "Подтвержденный результат",
+      "imageWidth": 1440,
+      "imageHeight": 900,
+      "sha256": "650ce28382850c68d9d1cd13e88bb1e8c5af5bc64fa90eeb6319cb333924ee5c",
+      "data": "synthetic API; current frontend"
+    },
+    {
+      "file": "screenshots/11-evidence.png",
+      "title": "Доказательство требования",
+      "imageWidth": 1440,
+      "imageHeight": 900,
+      "sha256": "f982aa13c5e2d4cb06508d0298e2dd2cc97738aa8cd1ae9ab1b0b34d3e5ae505",
+      "data": "synthetic API; current frontend"
+    },
+    {
+      "file": "screenshots/12-receipt.png",
+      "title": "Отчет проверки JSON",
+      "imageWidth": 1440,
+      "imageHeight": 900,
+      "sha256": "f12ad1ea5db146ee5b1a2be831c71e157ec78daff11d3dbb691181cf72822d38",
+      "data": "synthetic API; current frontend"
+    },
+    {
+      "file": "screenshots/13-changes.png",
+      "title": "Изменения задачи",
+      "imageWidth": 1440,
+      "imageHeight": 900,
+      "sha256": "6b266f3a0f34e0e425c586122113e9e462fb262a16a1e09717c205b9725642ec",
+      "data": "synthetic API; current frontend"
+    },
+    {
+      "file": "screenshots/14-resources.png",
+      "title": "Ресурсы задачи",
+      "imageWidth": 1440,
+      "imageHeight": 900,
+      "sha256": "dabdad8569235e3a84055349b4da1a2df5d45a902a81efbc6ccb8d552dede4ed",
+      "data": "synthetic API; current frontend"
+    },
+    {
+      "file": "screenshots/16-stopping.png",
+      "title": "Остановка",
+      "imageWidth": 1440,
+      "imageHeight": 900,
+      "sha256": "25e78ebd77742cdf1ccf711bbf5b57f64957921c7bc154279aea2ef230cbbd38",
+      "data": "synthetic API; current frontend"
+    },
+    {
+      "file": "screenshots/17-uncertain.png",
+      "title": "Неизвестная остановка",
+      "imageWidth": 1440,
+      "imageHeight": 900,
+      "sha256": "0cc7221292f9dbfc3ec49ce78c8e74209ee1673ee150f3920d0125603dc74e3b",
+      "data": "synthetic API; current frontend"
+    },
+    {
+      "file": "screenshots/18-mobile-task.png",
+      "title": "Мобильная задача",
+      "imageWidth": 390,
+      "imageHeight": 843,
+      "sha256": "b96e8cc72464ce15e883c643b1c80ecf262df650c0ea9670a6bbc9f5d936c471",
+      "data": "synthetic API; current frontend"
+    },
+    {
+      "file": "screenshots/19-mobile-runs.png",
+      "title": "Мобильный список запусков",
+      "imageWidth": 390,
+      "imageHeight": 843,
+      "sha256": "b8fff8f444a1a12cbdabddf118048a55d97a133dd5151e6d0ceede063d9dad7c",
+      "data": "synthetic API; current frontend"
+    },
+    {
+      "file": "screenshots/20-mobile-graph.png",
+      "title": "Мобильные детали",
+      "imageWidth": 390,
+      "imageHeight": 843,
+      "sha256": "3573700fb7b6b8ade199ca6538fd46c1b1c74e47e6ace714716f921a17b91134",
+      "data": "synthetic API; current frontend"
+    },
+    {
+      "file": "screenshots/21-mobile-graph-closed.png",
+      "title": "Мобильный граф после закрытия",
+      "imageWidth": 390,
+      "imageHeight": 843,
+      "sha256": "15d79cb2028e7a8015e4ddeba82c9a8ab22cc7806156ac09107826aea69e1371",
+      "data": "synthetic API; current frontend"
+    },
+    {
+      "file": "screenshots/22-details-reopened.png",
+      "title": "Повторно открывшиеся детали",
+      "imageWidth": 390,
+      "imageHeight": 843,
+      "sha256": "43ab65c8b9c06c86c37395d0c4897d778679df750c92478a80050d1b3350660e",
+      "data": "synthetic API; current frontend"
+    },
+    {
+      "file": "screenshots/23-dark-task.png",
+      "title": "Темная задача",
+      "imageWidth": 1440,
+      "imageHeight": 900,
+      "sha256": "a5d15dd3b7fd44e3d8707c01d5e7dfca31d4e97f66b0288ac79db922fcd58dae",
+      "data": "synthetic API; current frontend"
+    },
+    {
+      "file": "screenshots/24-dark-graph.png",
+      "title": "Темный граф",
+      "imageWidth": 1440,
+      "imageHeight": 900,
+      "sha256": "29c846b80bfb60ffd119cf91949f45dcde9b618b47bcc64e7a6c75ecc3f55a24",
+      "data": "synthetic API; current frontend"
+    },
+    {
+      "file": "screenshots/25-node-results.png",
+      "title": "Результаты этапа",
+      "imageWidth": 1440,
+      "imageHeight": 900,
+      "sha256": "cccd10f28a1f4b38c498ef4c4dd83906279a66a9ad1febc5324320e2cc3ef881",
+      "data": "synthetic API; current frontend"
+    },
+    {
+      "file": "screenshots/26-node-history.png",
+      "title": "История под названием Изменения",
+      "imageWidth": 1440,
+      "imageHeight": 900,
+      "sha256": "9015e5e4019732a8f38ae86d7fb4c76badf5e67d825f09c2d252f91f61e7e1c2",
+      "data": "synthetic API; current frontend"
+    },
+    {
+      "file": "screenshots/27-node-plan.png",
+      "title": "Пустой План autonomous-задачи",
+      "imageWidth": 1440,
+      "imageHeight": 900,
+      "sha256": "97d8efea025ef7abf8678f68fa534571af847a287f3c8d8d8f9a304945233ec8",
+      "data": "synthetic API; current frontend"
+    },
+    {
+      "file": "screenshots/28-form-without-id.png",
+      "title": "Форма без номера",
+      "imageWidth": 1440,
+      "imageHeight": 900,
+      "sha256": "27d66dca15fc8ba6ed250e59ee3e042809ce3ff82e0eb29fd8fb902a160cf638",
+      "data": "synthetic API; current frontend"
+    },
+    {
+      "file": "screenshots/29-form-laptop.png",
+      "title": "Форма на ноутбуке",
+      "imageWidth": 1366,
+      "imageHeight": 768,
+      "sha256": "1c889e133b9c970959774c9dc71fe7fdda387939ece1948fade25a59755b1eb3",
+      "data": "synthetic API; current frontend"
+    },
+    {
+      "file": "screenshots/30-stopped.png",
+      "title": "Остановленная задача",
+      "imageWidth": 1366,
+      "imageHeight": 768,
+      "sha256": "e45722ab74f14ce5ae161cdc9760c8c9ff408a446563e7b202758704a81ab15a",
+      "data": "synthetic API; current frontend"
+    },
+    {
+      "file": "screenshots/31-stale-corrected.png",
+      "title": "Устаревшее доказательство с корректной причиной",
+      "imageWidth": 1366,
+      "imageHeight": 768,
+      "sha256": "fe0461a73ba23b8dff565eddd1a170f9a7bcd52b23ed7edb3ac0b5ded80776a2",
+      "data": "synthetic API; current frontend"
+    },
+    {
+      "file": "screenshots/32-loading.png",
+      "title": "Загрузка snapshot",
+      "imageWidth": 1366,
+      "imageHeight": 768,
+      "sha256": "ef2f80842993fa37f517b9535d9bfd5a03d33fcbba2df016581934083560c798",
+      "data": "synthetic API; current frontend"
+    },
+    {
+      "file": "screenshots/33-laptop-graph.png",
+      "title": "Граф 1366 на 768",
+      "imageWidth": 1366,
+      "imageHeight": 768,
+      "sha256": "7ac2f0f10f62bc7f0ac82bb7b215cdf5a5dc8315d307a4db1d82bf19e0d0a1a8",
+      "data": "synthetic API; current frontend"
+    }
+  ]
+}

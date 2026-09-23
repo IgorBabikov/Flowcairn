@@ -1,35 +1,12 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useModalLifecycle } from './use-modal';
+import React, { useState } from 'react';
 import type { Artifact, GateSnapshot, GraphNodeSnapshot, GraphPlan, Receipt } from './contracts';
 import { humanText, nodeTitle } from './presentation';
 import { COPY, type Locale } from './ui-copy';
 import { getCapability } from './ui-controls';
 
 export type Evidence = { type: 'receipt'; value: Receipt } | { type: 'artifact'; value: Artifact };
-function useModalLifecycle(onClose: () => void) {
-  const dialogRef = useRef<HTMLDialogElement>(null);
-  const returnFocusRef = useRef<HTMLElement | null>(null);
-  const onCloseRef = useRef(onClose);
-  useEffect(() => {
-    onCloseRef.current = onClose;
-  }, [onClose]);
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    returnFocusRef.current =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    dialog?.showModal();
-    return () => {
-      if (dialog?.open) dialog.close();
-      returnFocusRef.current?.focus();
-    };
-  }, []);
-  return {
-    dialogRef,
-    onCancel: (event: React.SyntheticEvent<HTMLDialogElement>) => {
-      event.preventDefault();
-      onCloseRef.current();
-    },
-  };
-}
+
 
 export function DraftDialog({
   locale,

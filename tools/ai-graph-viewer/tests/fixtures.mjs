@@ -13,7 +13,7 @@ const canonicalJson = (value) => {
   }
   return JSON.stringify(value);
 };
-const objectHash = (value) => createHash('sha256').update(canonicalJson(value)).digest('hex');
+export const objectHash = (value) => createHash('sha256').update(canonicalJson(value)).digest('hex');
 const denied = (reason = 'Ожидается подтверждение плана') => ({
   allowed: false,
   reason,

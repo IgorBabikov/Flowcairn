@@ -12,6 +12,7 @@ import { inspectHarnesses } from '../scripts/ai-graph/lib/harnesses.mjs';
 import { probeExternalProvider } from '../scripts/ai-graph/lib/providers.mjs';
 import { codexModelSettings } from '../scripts/ai-graph/lib/codex-settings.mjs';
 import { inspectCodexInstallation } from '../scripts/ai-graph/lib/runner.mjs';
+import { paint } from './terminal.mjs';
 
 const effort = z.enum(['low', 'medium', 'high', 'xhigh']);
 const SetupSchema = z.strictObject({
@@ -26,10 +27,6 @@ const SetupSchema = z.strictObject({
   checks: ProjectProfileSchema.shape.checks.optional(),
 });
 const fail = (code, message) => { throw new GraphError(code, message); };
-
-function paint(output, code, text) {
-  return output.isTTY ? `\x1b[${code}m${text}\x1b[0m` : text;
-}
 
 function step(output, index, title) {
   output.write(`\n${paint(output, '1;38;5;99', `Шаг ${index} из 4`)} ${paint(output, '1', title)}\n`);

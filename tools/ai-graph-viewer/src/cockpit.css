@@ -14,7 +14,7 @@
 .task-technical summary { width: fit-content; cursor: pointer; }
 .task-technical dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 12px; margin: 12px 0 0; }
 .task-technical dd { margin: 0; overflow-wrap: anywhere; }
-.task-overview > .execution-status { margin: 18px 28px 0; }
+:is(.task-overview, .task-content-primary) > .execution-status { margin: 18px 28px 0; }
 .task-overview .workflow-panel.embedded { padding: 26px 28px 32px; }
 .task-overview .task-cockpit { overflow: visible; border: 0; border-radius: 0; }
 .task-overview .task-cockpit .cockpit-header { padding-top: 20px; }
@@ -108,7 +108,7 @@
   .operator-layout.task-layout { display: flex; }
   .task-heading { padding: 22px 18px 18px; }
   .task-heading-line { flex-direction: column; gap: 10px; }
-  .task-overview > .execution-status { margin: 14px 16px 0; }
+  :is(.task-overview, .task-content-primary) > .execution-status { margin: 14px 16px 0; }
   .task-overview .workflow-panel.embedded { padding: 20px 18px 26px; }
   .task-view-switch { width: 100%; }
   .task-view-switch button { flex: 1; min-height: 44px; }

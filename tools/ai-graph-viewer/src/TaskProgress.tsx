@@ -11,7 +11,9 @@ function activeNodeIndex(snapshot: Snapshot) {
 export function TaskProgress({
   snapshot,
   execution,
+  summaryOnly = false,
 }: {
+  summaryOnly?: boolean;
   snapshot: Snapshot;
   execution: ExecutionPresentation;
 }) {
@@ -47,7 +49,7 @@ export function TaskProgress({
       >
         {work.map(node => <i key={node.id} data-complete={node.status === 'passed' ? 'true' : undefined} />)}
       </div>
-      <ol className="task-progress-steps">
+      {!summaryOnly && <ol className="task-progress-steps">
         {visible.map((node, index) => (
           <li key={node.id} data-current={node.id === activeId || (index === 0 && sourceIndex < 0) ? 'true' : undefined}>
             <span className="task-step-mark"><StatusIcon status={node.status} /></span>
@@ -57,8 +59,8 @@ export function TaskProgress({
             </div>
           </li>
         ))}
-      </ol>
-      {currentIndex + visible.length < work.length && execution.kind !== 'stopping' && execution.kind !== 'stop-uncertain' && (
+      </ol>}
+      {!summaryOnly && currentIndex + visible.length < work.length && execution.kind !== 'stopping' && execution.kind !== 'stop-uncertain' && (
         <p className="task-progress-more">Далее еще {work.length - currentIndex - visible.length} этапа</p>
       )}
     </section>

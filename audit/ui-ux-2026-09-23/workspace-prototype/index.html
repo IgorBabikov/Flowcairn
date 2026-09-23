@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ru">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Flowcairn · Рабочее пространство</title><link rel="stylesheet" href="style.css"></head>
+<body>
+<a class="skip" href="#workspace">Перейти к задаче</a>
+<div class="app">
+  <aside class="sidebar" aria-label="Проект и задачи">
+    <div class="brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><strong>flowcairn</strong></div>
+    <button class="project" id="project-status" aria-haspopup="dialog"><span class="eyebrow">ТЕКУЩИЙ ПРОЕКТ</span><span class="project-name">Форма регистрации <span aria-hidden="true">⌄</span></span><span class="project-state"><i></i>Демонстрационный проект</span></button>
+    <button class="new-task" id="new-task"><span aria-hidden="true">＋</span>Новая задача</button>
+    <div class="nav-label"><span>Задачи</span><span>1</span></div>
+    <button class="task-row selected" aria-current="page"><span class="task-code">FORM-102</span><strong>Форма регистрации<br>компании</strong><span class="task-state"><i></i>Нужно ваше решение</span></button>
+    <div class="rail-bottom"><button id="settings">Настройки проекта</button><button id="theme">Темная тема</button><div class="prototype-note"><span class="demo-dot"></span>Макет широкого экрана<span>Данные для примера · AI не запущен</span></div></div>
+  </aside>
+  <main id="workspace" class="workspace">
+    <header class="task-header">
+      <div class="task-title"><div class="breadcrumb"><button class="mobile-project" id="mobile-project">Проект</button><span>FORM-102</span><span class="crumb-separator">/</span><span>Планирование</span><span class="prototype-tag">Макет широкого экрана</span></div><h1>Добавить форму регистрации компании</h1><div class="status-line"><span class="status-dot"></span><strong>План готов к согласованию</strong><span class="status-note">Изменения еще не начались</span></div></div>
+      <div class="task-actions"><button class="secondary" id="revise">Предложить изменения</button><button class="primary" id="approve">Согласовать план<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h12m-5-5 5 5-5 5"/></svg></button></div>
+    </header>
+    <div class="workspace-tabs"><nav aria-label="Представление задачи"><button class="view-tab active" data-view="task" aria-pressed="true">Задача</button><button class="view-tab" data-view="graph" aria-pressed="false">Граф</button></nav><button id="context-toggle" aria-expanded="true">Критерии и границы <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="4" width="14" height="12" rx="2"/><path d="M12 4v12"/></svg></button></div>
+    <div class="workspace-body">
+      <section class="primary-area" aria-label="План задачи">
+        <div class="task-view" id="task-view">
+          <div class="section-heading"><div><span class="eyebrow">ПЕРЕД НАЧАЛОМ РАБОТЫ</span><h2>План выполнения</h2><p>Проверьте шаги и ожидаемые результаты. Условия приемки — справа.</p></div><span class="step-count">5 шагов</span></div>
+          <div class="plan-table" role="group" aria-label="Шаги плана">
+            <div class="plan-table-head" aria-hidden="true"><span>Работа</span><span>Ожидаемый результат</span><span>Проверка</span></div>
+            <button class="plan-step" data-step="0"><span class="step-work"><span class="step-number">01</span><span><strong>Создать форму</strong><small>Реализация</small></span></span><span class="step-outcome">Email, пароль, название компании и ИНН — с проверкой обязательных полей.</span><span class="step-check"><span class="check-label">Сценарии формы</span><span class="row-chevron" aria-hidden="true">›</span></span></button>
+            <button class="plan-step" data-step="1"><span class="step-work"><span class="step-number">02</span><span><strong>Проверить изменения</strong><small>Проверки проекта</small></span></span><span class="step-outcome">Изменения совместимы с проектом и не затрагивают лишние файлы.</span><span class="step-check"><span class="check-label">Проверки проекта</span><span class="row-chevron" aria-hidden="true">›</span></span></button>
+            <button class="plan-step" data-step="2"><span class="step-work"><span class="step-number">03</span><span><strong>Проверить поведение формы</strong><small>Проверка требований</small></span></span><span class="step-outcome">Некорректные данные не отправляются. Повторная отправка заблокирована.</span><span class="step-check"><span class="check-label">Тесты формы</span><span class="row-chevron" aria-hidden="true">›</span></span></button>
+            <button class="plan-step" data-step="3"><span class="step-work"><span class="step-number">04</span><span><strong>Провести независимое ревью</strong><small>Ревью</small></span></span><span class="step-outcome">Каждый критерий сопоставлен с результатом проверки. Проблемы отмечены отдельно.</span><span class="step-check"><span class="check-label">Разбор доказательств</span><span class="row-chevron" aria-hidden="true">›</span></span></button>
+            <button class="plan-step" data-step="4"><span class="step-work"><span class="step-number">05</span><span><strong>Подготовить результат</strong><small>Итог задачи</small></span></span><span class="step-outcome">Измененные файлы и доказательства собраны в одном отчете.</span><span class="step-check"><span class="check-label">Покрытие критериев</span><span class="row-chevron" aria-hidden="true">›</span></span></button>
+          </div>
+          <div class="plan-footer"><div class="footnote-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m12 3 8 4v5c0 5-8 9-8 9s-8-4-8-9V7z"/><path d="m8 12 3 3 5-6"/></svg></div><p><strong>Готовность определяют доказательства.</strong><br>Завершение шагов само по себе не подтверждает результат задачи.</p><button id="open-criteria">Условия приемки <span aria-hidden="true">↗</span></button></div>
+          <details class="task-description"><summary>Исходное описание задачи</summary><p>Добавить форму регистрации компании. Email и пароль должны валидироваться. Для компании доступны название и ИНН. Повторная отправка формы заблокирована.</p><small>Содержание макета основано на демонстрационном сценарии FORM-102 из UI-тестов проекта.</small></details>
+        </div>
+        <section class="graph-view" id="graph-view" aria-label="Граф плана" hidden><div class="section-heading"><div><span class="eyebrow">СТРУКТУРА РАБОТЫ</span><h2>Граф выполнения</h2><p>Выберите этап, чтобы увидеть его результат и связь с критериями.</p></div><span class="step-count">5 шагов</span></div><div class="graph-stage"><div class="graph-chain" id="graph-chain"></div></div></section>
+      </section>
+      <aside class="context-panel" id="context-panel" aria-label="Критерии и границы">
+        <header class="context-header"><div><span class="eyebrow">КОНТЕКСТ ЗАДАЧИ</span><h2 id="context-title">Критерии и границы</h2></div><button class="icon-button" id="close-context" aria-label="Закрыть контекст">×</button></header>
+        <div class="context-body" id="context-body">
+          <section class="criteria"><div class="aside-heading"><h3>Что должно получиться</h3><span>3 критерия</span></div><p class="aside-intro">После выполнения у каждого критерия появится свое доказательство.</p><ol class="criteria-list"><li><span class="criterion-index">1</span><div><strong>Email и пароль валидируются</strong><small>Некорректные данные не отправляются.</small></div></li><li><span class="criterion-index">2</span><div><strong>Есть название компании и ИНН</strong><small>Доступны поля названия и ИНН.</small></div></li><li><span class="criterion-index">3</span><div><strong>Нет повторной отправки</strong><small>Один запрос на одно действие.</small></div></li></ol><p class="pending-evidence"><span></span>Проверки еще не выполнялись</p></section>
+          <section class="scope"><h3>Границы изменений</h3><div class="path"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2 6V4h6l2 2h8v10H2z"/></svg><code>src/registration</code></div><p>Изменения ограничены областью задачи.</p><details><summary>Права и технические сведения</summary><dl><dt>Чтение и изменение</dt><dd>Файлы формы регистрации</dd><dt>Состояние</dt><dd>План ожидает решения</dd></dl></details></section>
+          <section class="decision-note"><h3>Что разрешает согласование</h3><p>Начать выполнение этого плана в указанных границах. Дополнительные права потребуют отдельного решения.</p></section>
+        </div>
+      </aside>
+    </div>
+  </main>
+</div>
+<dialog id="dialog"><form method="dialog"><header><h2 id="dialog-title"></h2><button class="icon-button" aria-label="Закрыть">×</button></header><div id="dialog-body"></div><footer><button class="primary">Понятно</button></footer></form></dialog>
+<script src="app.js"></script>
+</body></html>

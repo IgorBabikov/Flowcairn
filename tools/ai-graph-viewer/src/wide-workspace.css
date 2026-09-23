@@ -1,0 +1,141 @@
+/* The wide layout is a presentation of the same task and executor state.
+   This class is enabled only at >=1800 CSS px; the compact UI stays unchanged. */
+.app-shell.wide-workspace {
+  display: grid;
+  grid-template-columns: 264px minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  width: 100%;
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--surface);
+}
+.wide-workspace:has(.operator-layout.inspector-open) { grid-template-columns: 264px minmax(0, 1fr) 400px; }
+.wide-workspace > .topbar { grid-column: 2 / -1; grid-row: 1; margin: 0; padding: 24px 36px; min-height: 130px; gap: 20px; align-items: center; border: 0; }
+.wide-workspace > .workspace-notices { display: flex; flex-direction: column; grid-column: 2 / -1; grid-row: 2; min-width: 0; }
+.wide-workspace > .workspace-notices > * { margin: 0 36px 8px; }
+.wide-workspace > .workspace-toolbar { grid-column: 2 / -1; grid-row: 3; min-height: 48px; height: 48px; padding: 0 36px; }
+.wide-workspace > .operator-layout { display: contents; }
+.wide-workspace .operator-layout > .run-rail { grid-column: 1; grid-row: 1 / 5; padding: 22px 16px; border: 0; border-right: 1px solid var(--border); border-radius: 0; background: var(--page); min-height: 0; }
+.wide-workspace .operator-layout > .main-content { grid-column: 2; grid-row: 4; padding: 0; display: block; background: var(--surface); min-height: 0; overflow: auto; scrollbar-gutter: auto; }
+.wide-workspace .operator-layout > .detail-panel { grid-column: 3; grid-row: 4; border: 0; border-left: 1px solid var(--border); border-radius: 0; background: var(--page); }
+.wide-workspace .topbar-actions { flex: 0 0 auto; }
+.wide-workspace .topbar-actions .project-settings-button,
+.wide-workspace .topbar-actions .theme-button,
+.wide-workspace .topbar-actions .connection { display: none; }
+.wide-project-heading .brand { padding: 2px 10px 24px; }
+.wide-project-heading .brand h1 { font-size: 1.4rem; }
+.wide-project-heading .project-status-trigger { margin: 0 0 20px; border: 0; border-block: 1px solid var(--border); padding: 14px 10px; width: 100%; }
+.wide-project-heading .project-name { max-width: 100%; font-size: .85rem; }
+.wide-project-heading .project-status-caption { display: block; font-size: .7rem; }
+.wide-project-heading .project-status-caption > * { display: block; margin-top: 4px; }
+.wide-workspace .rail-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 22px 8px; padding: 0 0 12px; border: 0; }
+.wide-workspace .rail-heading h2 { font-size: .78rem; color: var(--muted); grid-row: 2; padding-left: 10px; }
+.wide-workspace .rail-actions { display: contents; }
+.wide-workspace .rail-actions .rail-create { grid-row: 1; grid-column: 1 / -1; width: 100%; min-height: 42px; background: var(--surface); color: var(--text); border-color: var(--border); }
+.wide-workspace .rail-actions .icon-button { grid-row: 2; grid-column: 2; }
+.wide-workspace .run-list { padding: 0; max-height: none; }
+.wide-workspace .run-row { padding: 14px; border-radius: 8px; }
+.wide-workspace .run-row strong { color: var(--muted); font-size: .68rem; font-weight: 550; }
+.wide-workspace .run-row small:first-of-type { font-size: .86rem; color: var(--text); font-weight: 650; white-space: normal; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.wide-workspace .run-row small:last-of-type { display: none; }
+.wide-workspace .run-row em { font-size: .68rem; }
+.wide-rail-footer { margin-top: auto; padding: 20px 10px 0; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.wide-rail-footer .button { padding-inline: 0; font-size: .78rem; }
+.wide-rail-footer .connection { margin-top: 14px; font-size: .68rem; }
+.wide-task-heading { flex: 1; min-width: 0; display: flex; justify-content: space-between; align-items: center; gap: 28px; }
+.wide-heading-copy { min-width: 0; }
+.wide-heading-copy .task-number { margin: 0 0 8px; font-size: .7rem; }
+.wide-heading-copy h2, .wide-surface-heading h2 { font-size: clamp(1.6rem, 1.6vw, 2rem); line-height: 1.3; letter-spacing: -.025em; margin: 0; overflow-wrap: anywhere; }
+.wide-heading-copy .proof-status { margin-top: 10px; background: transparent; padding: 0; font-size: .78rem; }
+.wide-heading-decision { display: flex; gap: 10px; align-items: flex-start; flex-shrink: 0; }
+.wide-heading-decision .plan-primary-action { margin: 0; max-width: 300px; }
+.wide-heading-decision .approve-workflow { margin: 0; width: auto; min-height: 44px; }
+.wide-heading-decision .field-hint { margin: 7px 0 0; font-size: .73rem; }
+.wide-workspace .workspace-toolbar .task-view-switch { align-self: stretch; padding: 0; background: transparent; border-radius: 0; gap: 28px; }
+.wide-workspace .workspace-toolbar .task-view-switch button { min-width: 52px; min-height: 48px; border-radius: 0; padding: 8px 0; background: transparent; box-shadow: none; border-bottom: 2px solid transparent; font-size: .8rem; }
+.wide-workspace .workspace-toolbar .task-view-switch button[aria-pressed='true'] { border-bottom-color: var(--plum-strong); }
+.wide-workspace .wide-context-toggle, .wide-workspace .inspector-toggle { font-size: .75rem; padding-right: 0; }
+.wide-workspace .task-overview.is-wide { width: 100%; max-width: none; height: 100%; min-height: 0; margin: 0; border: 0; border-radius: 0; box-shadow: none; display: flex; flex-direction: column; }
+.wide-workspace .task-content-layout { display: grid; grid-template-columns: minmax(0, 1fr); height: 100%; min-height: 0; }
+.wide-workspace .with-context .task-content-layout { grid-template-columns: minmax(0, 1fr) 400px; }
+.wide-workspace .task-content-primary { display: block; min-width: 0; min-height: 0; overflow-y: auto; padding: 28px 36px; scrollbar-gutter: stable; }
+.wide-workspace .task-overview .workflow-panel.embedded { padding: 0; background: transparent; }
+.wide-workspace .workflow-panel > h2 { margin: 0; font-size: 1.5rem; }
+.wide-workspace .workflow-summary { max-width: 70ch; font-size: .87rem; margin-bottom: 26px; }
+.wide-workspace .workflow-panel .current-stage { display: none; }
+.wide-workspace .task-content-primary > .execution-status { margin: 0 0 24px; }
+.wide-workspace .task-content-primary > .execution-status.stage { display: none; }
+.wide-workspace .task-progress { padding: 0; margin: 0 0 26px; border: 0; border-radius: 0; }
+.wide-workspace .task-progress-head h3 { font-size: 1.4rem; }
+.wide-workspace .context-recovery, .wide-workspace .task-next-action { padding: 0 0 24px; }
+.wide-work-columns, .wide-work-row { display: grid; grid-template-columns: minmax(210px, .95fr) minmax(220px, 1.35fr) minmax(160px, .8fr); gap: 24px; align-items: center; }
+.wide-work-columns { border-block: 1px solid var(--border); padding: 12px; color: var(--muted); font-size: .74rem; }
+.wide-work-columns > :first-child { padding-left: 40px; }
+.wide-work-row { width: 100%; padding: 24px 12px; min-height: 116px; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent; text-align: left; cursor: pointer; }
+.wide-work-row:hover, .wide-work-row[data-active='true'] { background: var(--soft); }
+.wide-work-row[aria-pressed='true'] { background: var(--strong); box-shadow: inset 3px 0 var(--plum-strong); }
+.wide-work-name { display: flex; align-items: start; gap: 14px; min-width: 0; }
+.wide-work-number { font-size: .74rem; color: var(--muted); font-variant-numeric: tabular-nums; width: 26px; flex-shrink: 0; padding-top: 2px; }
+.wide-work-name strong { display: block; font-size: .9rem; line-height: 1.5; }
+.wide-work-name small { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: .7rem; color: var(--muted); }
+.wide-work-name .status-icon { width: 13px; height: 13px; }
+.wide-work-outcome { font-size: .86rem; line-height: 1.7; max-width: 64ch; color: var(--muted); }
+.wide-work-verification { font-size: .78rem; line-height: 1.65; color: var(--muted); max-width: 45ch; }
+.wide-task-context { display: flex; flex-direction: column; background: var(--page); border-left: 1px solid var(--border); min-height: 0; }
+.wide-task-context > header { display: flex; align-items: center; gap: 12px; justify-content: space-between; padding: 26px 24px; border-bottom: 1px solid var(--border); }
+.wide-eyebrow { font-size: .62rem; color: var(--muted); letter-spacing: .08em; margin: 0 0 6px; }
+.wide-task-context h3 { margin: 0; font-size: 1rem; }
+.wide-task-context > header .button { padding: 4px 0; font-size: .68rem; }
+.wide-context-body { min-height: 0; overflow-y: auto; padding: 24px; font-size: .8rem; line-height: 1.75; }
+.wide-context-body h4 { font-size: .88rem; margin: 0 0 10px; }
+.wide-context-body p { margin: 8px 0; color: var(--muted); }
+.wide-context-body > section + section, .wide-context-body > details { margin-top: 25px; padding-top: 24px; border-top: 1px solid var(--border); }
+.wide-context-body code { overflow-wrap: anywhere; font-size: .75rem; }
+.wide-context-body ul, .wide-context-body ol { padding-left: 20px; }
+.wide-context-body li { margin: 10px 0; }
+.wide-criteria-list { display: grid; gap: 10px; }
+.wide-criteria-list p { font-size: .76rem; }
+.wide-context-body dd { margin: 0 0 12px; }
+.wide-context-back { margin-bottom: 20px; font-size: .78rem; }
+.wide-workspace .task-overview .task-cockpit { border-radius: 0; }
+.wide-workspace .cockpit-header { padding: 0 0 20px; }
+.wide-workspace .cockpit-content { padding: 0; }
+.wide-workspace .completion-certificate { margin-top: 0; }
+.wide-workspace .cockpit-nav { margin: 18px 0; }
+.wide-workspace .requirements-layout { grid-template-columns: minmax(0, 1fr) 400px; gap: 28px; align-items: start; }
+.wide-workspace .requirement-detail { padding: 24px; background: var(--page); border-left: 1px solid var(--border); min-width: 0; }
+.wide-workspace .requirement-detail h3 { margin-top: 0; }
+.wide-workspace .requirements-list h3 { margin-top: 0; }
+.wide-workspace .requirement-choice { padding: 18px 12px; }
+.wide-workspace .graph-region { border: 0; border-radius: 0; height: 100%; display: flex; flex-direction: column; }
+.wide-workspace .graph-region .flow-wrap { flex: 1; min-height: 0; }
+.wide-workspace .graph-region .graph-header { padding: 24px 36px; }
+.wide-workspace .graph-region > .execution-status { margin: 20px 36px 0; }
+.wide-workspace .inspector-heading { padding: 22px 24px; }
+.wide-workspace .detail-scroll { padding: 24px; }
+.wide-workspace .composing .main-content { padding: 28px 36px; }
+.wide-workspace .task-composer { max-width: 880px; width: 100%; margin: 0; border: 0; box-shadow: none; border-radius: 0; }
+.wide-workspace .task-composer header h2 { display: none; }
+.wide-workspace .task-composer form { padding: 0; }
+.wide-workspace .task-composer footer { margin-inline: 0; padding-inline: 0; }
+.wide-workspace .task-clarification { padding: 28px 36px; max-width: 1100px; }
+.wide-loading .loading-layout > .shell-skeleton { grid-column: 2; grid-row: 4; padding: 28px 36px; }
+.wide-loading .loading-actions { display: none; }
+@media (max-width: 2199px) {
+  .wide-workspace .with-context .task-content-layout { grid-template-columns: minmax(0, 1fr) 360px; }
+  .wide-work-columns, .wide-work-row { grid-template-columns: minmax(190px, .9fr) minmax(190px, 1.2fr) minmax(150px, .85fr); gap: 20px; }
+}
+.wide-project-heading .brand p { display: none; }
+.wide-workspace .task-cockpit:has(.requirements-layout > .requirement-detail) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 400px;
+  grid-auto-rows: min-content;
+  column-gap: 28px;
+  align-items: start;
+}
+.wide-workspace .task-cockpit:has(.requirements-layout > .requirement-detail) > .cockpit-header,
+.wide-workspace .task-cockpit:has(.requirements-layout > .requirement-detail) .cockpit-content > *,
+.wide-workspace .task-cockpit:has(.requirements-layout > .requirement-detail) .requirements-list { grid-column: 1; }
+.wide-workspace .task-cockpit:has(.requirements-layout > .requirement-detail) .cockpit-content,
+.wide-workspace .task-cockpit:has(.requirements-layout > .requirement-detail) .requirements-layout { display: contents; }
+.wide-workspace .task-cockpit:has(.requirements-layout > .requirement-detail) .requirement-detail { grid-column: 2; grid-row: 1 / span 6; }
