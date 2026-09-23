@@ -41,9 +41,11 @@ flowchart TD
 | `docker-checks.mjs`, `docker-stop-proof.mjs` | Исполнение контейнера отделено от хранения и проверки доказательств остановки |
 | `orchestrator-*.mjs` | Отдельные границы registry/locks, Git, Graph leases, delivery, integration, inspection и source bootstrap Orchestrator |
 | `bin/installation.mjs`, `bin/project-files.mjs` | Установка и безопасные операции с проектом отделены от CLI dispatch |
-| `AppFrame.tsx`, `TaskOverview.tsx`, `TaskCockpit.tsx`, `ResourcePanel.tsx` | Стабильный каркас, основной экран задачи, требования, evidence и ресурсы; семантика PROVEN не вычисляется в React |
+| `AppFrame.tsx`, `TaskOverview.tsx`, `TaskCockpit.tsx`, `ResourcePanel.tsx`, `ProjectStatus.tsx` | Стабильный каркас, основной экран задачи, требования, evidence и ресурсы; семантика PROVEN не вычисляется в React |
+| `WideTaskHeading.tsx`, `WideWorkList.tsx`, `WideTaskContext.tsx`, `use-viewport-query.ts`, `wide-workspace.css` | Адаптация от 1800 CSS px: общая шапка задачи, работы и контекст; данные берутся из snapshot/plan/proof, отдельного runtime нет |
+| `PlanDecision.tsx`, `task-presentation.ts` | Общие условия согласования и подписи состояния для обычной и широкой компоновки; обработчики действий остаются в App |
 | `ExecutionStatus.tsx`, `execution-presentation.ts`, `StatusLoader.tsx`, `TechnicalDetails.tsx` | Человекочитаемая проекция состояния исполнения, loaders и отделение пользовательского сообщения от диагностики |
-| `ExecutionGraph.tsx`, `ExecutionDetails.tsx`, `ExecutionDialogs.tsx` | Расширенное представление графа, выбранного узла, immutable receipts и управляющих диалогов |
+| `ExecutionGraph.tsx`, `ExecutionDetails.tsx`, `ExecutionInspector.tsx`, `ExecutionDialogs.tsx`, `ModalSurface.tsx`, `use-modal.ts` | Расширенное представление графа, выбранного узла, immutable receipts и управляющих диалогов |
 
 Модули выполняют конкретные обязанности; универсального plugin framework и второго хранилища состояния нет. Compiler, service и verifier используют один immutable contract. Разделение файлов не дает модулю новые права.
 

@@ -16,6 +16,7 @@ import { startViewer } from '../tools/ai-graph-viewer/server.mjs';
 import { assertRuntimePlatform } from '../scripts/ai-graph/lib/platform.mjs';
 import { openBrowser } from './browser.mjs';
 import { checkUpdate } from './update.mjs';
+import { printCard, printReady } from './terminal.mjs';
 import { instructionsCommand } from './instructions.mjs';
 import { uninstallCommand } from './uninstall.mjs';
 import { selectProjectSkills } from './skills-selection.mjs';
@@ -252,19 +253,26 @@ export async function handoff(input, runId) {
 
 const HELP = `Flowcairn — от задачи до проверенного результата\n\nБыстрый старт\n  npx flowcairn          начать настройку и открыть интерфейс\n  npx flowcairn setup    изменить модель и правила после закрытия интерфейса\n  npx flowcairn doctor   проверить подготовку проекта\n\nДополнительно\n  npx flowcairn checks prepare   подготовить изолированные проверки\n  npx flowcairn uninstall        снять интеграцию, не удаляя исходники\n\nДля интеграции\n  init | ui | status | plan | events | receipt | artifact | handoff | orchestrator\n\nКод проекта не изменится, пока вы не согласуете план.\nДокументация: https://github.com/IgorBabikov/flowcairn\n`;
 
-export function printInitialization(result) {
+export function printInitialization(result, { launching = false, output = process.stdout } = {}) {
+  if (launching && !result.dryRun) {
+    output.write('Проект настроен. Запускаем интерфейс…\n');
+    return;
+  }
   const summary = [
     result.dryRun ? 'Предварительная проверка. Файлы не изменены.' : 'Готово. Flowcairn подготовлен для этого проекта.',
     result.dryRun
       ? 'Проверьте список ниже и повторите команду без --dry-run.'
-      : 'Теперь откроется Graph. Опишите задачу обычным языком — сначала увидите план.',
+      : 'Опишите задачу обычным языком — сначала увидите план.',
     'Код проекта не изменится, пока вы не согласуете этот план.',
   ];
   if (result.dryRun) summary.push(`Будут созданы: ${result.changes.join(', ')}.`);
   if (result.checkPreparation && !result.checkPreparation.prepared &&
       ['DECLINED', 'NON_INTERACTIVE'].includes(result.checkPreparation.reason))
     summary.push('Проверки можно подготовить позже из интерфейса или командой npx flowcairn checks prepare.');
-  process.stdout.write(sanitizeText(summary.join('\n')) + '\n');
+  if (!result.dryRun) summary.push('Открыть интерфейс: npx flowcairn');
+  printCard('Flowcairn', summary.map((line) => sanitizeText(line)), {
+    output, author: result.created === true && !result.dryRun && !launching,
+  });
 }
 
 export async function main(tokens = process.argv.slice(2)) {
@@ -337,10 +345,12 @@ export async function main(tokens = process.argv.slice(2)) {
     if (!Number.isInteger(port) || port < 1024 || port > 65535)
       fail('PORT', 'Порт должен быть от 1024 до 65535.');
     const canonicalRoot = projectRoot(root);
+    let firstLaunch = false;
     if (!existsNoFollow(path.join(canonicalRoot, PROFILE))) {
       const initialized = await initializeCommand(canonicalRoot, options);
       if (options['dry-run']) { printInitialization(initialized); return; }
-      printInitialization(initialized);
+      firstLaunch = initialized.created === true;
+      printInitialization(initialized, { launching: true });
     } else {
       const migration = await migrateLegacyCheckMode(canonicalRoot, { dryRun: options['dry-run'] === true });
       if (migration.migrated && migration.dryRun) {
@@ -361,7 +371,7 @@ export async function main(tokens = process.argv.slice(2)) {
     server.once('close', close);
     server.on('listening', async () => {
       const url = `http://127.0.0.1:${port}/#session=${token}`;
-      process.stdout.write(`Flowcairn: ${url}\nНе публикуйте временный URL с токеном. Ctrl+C завершает сервер.\n`);
+      printReady(url, { author: firstLaunch && !options.json });
       if (!options['no-open'] && !(await openBrowser(url)))
         process.stdout.write('Браузер не открылся автоматически. Откройте URL выше вручную.\n');
     });

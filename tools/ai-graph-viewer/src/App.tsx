@@ -4,7 +4,12 @@ import { api, sessionToken, watchRevisions } from './api';
 import { humanText } from './presentation';
 import { TaskComposer } from './TaskComposer';
 import { TaskClarification } from './TaskClarification';
-import { TaskOverview } from './TaskOverview';
+import { ProjectStatus } from './ProjectStatus';
+import { ExecutionInspector } from './ExecutionInspector';
+import { ModalSurface } from './ModalSurface';
+import { TaskOverview, type TaskOverviewActions } from './TaskOverview';
+import { WideTaskHeading } from './WideTaskHeading';
+import { useViewportQuery } from './use-viewport-query';
 import { ExecutionGraph } from './ExecutionGraph';
 import type { ProofEvidence } from './proof-contracts';
 import { SetupPanel } from './SetupPanel';
@@ -15,12 +20,12 @@ import { operationId, type PendingControlOperation, type PendingCreateOperation,
 import { hashPlan } from './plan-identity';
 import { newestRunsByTask, relevantNodeId } from './run-selection';
 import { NODE_TYPES, layoutNodes } from './GraphNodes';
-import { ActionButton, RunButton, RunHealth, ErrorNotice, LoadingState, MissingSession, EmptyGraph, getCapability } from './ui-controls';
+import { ActionButton, RunButton, ErrorNotice, LoadingState, MissingSession, EmptyGraph, getCapability } from './ui-controls';
 import { NodeDetails, EvidenceList, HistoryPanel, PlanPanel } from './ExecutionDetails';
 import { DraftDialog, GateDialog, EvidenceDialog, type Evidence } from './ExecutionDialogs';
 import { ExecutionStatus } from './ExecutionStatus';
 import { executionPresentation } from './execution-presentation';
-import { AppFrame, InitialLoadingFrame } from './AppFrame';
+import { AppFrame, InitialLoadingFrame, ShellSkeleton, Brand } from './AppFrame';
 import { StatusLoader } from './StatusLoader';
 export { AppErrorBoundary } from './ui-controls';
 
@@ -31,6 +36,10 @@ type SnapshotRefresh = {
 };
 
 export function App() {
+  const wideWorkspace = useViewportQuery('(min-width: 1800px)');
+  const [taskContextOpen, setTaskContextOpen] = useState(true);
+  const taskContextButton = useRef<HTMLButtonElement>(null);
+  const [planFeedbackOpen, setPlanFeedbackOpen] = useState(false);
   const [locale, setLocale] = useState<Locale>('ru');
   const labels = COPY[locale];
   useEffect(() => {
@@ -48,6 +57,7 @@ export function App() {
   const [snapshotUnavailable, setSnapshotUnavailable] = useState(false);
   const [plan, setPlan] = useState<GraphPlan | null>(null);
   const [events, setEvents] = useState<HistoryEvent[]>([]);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [tab, setTab] = useState<'overview' | 'evidence' | 'history' | 'plan'>('overview');
   const [taskView, setTaskView] = useState<'overview' | 'graph'>('overview');
@@ -76,6 +86,7 @@ export function App() {
   const [flowInstance, setFlowInstance] = useState<ReactFlowInstance | null>(null);
   const gateDialog = useRef<HTMLDialogElement>(null);
   const runsButton = useRef<HTMLButtonElement>(null);
+  const inspectorButton = useRef<HTMLButtonElement>(null);
   const mobileRunsDialog = useRef<HTMLDialogElement>(null);
   const selectedRunRef = useRef<string | null>(null);
   const snapshotRef = useRef<Snapshot | null>(null);
@@ -133,6 +144,7 @@ export function App() {
       setPlan(null);
       setEvents([]);
       setSelectedNodeId(null);
+      setDetailsOpen(false);
       setTab('overview');
       setEvidence(null);
       setCompareRunId('');
@@ -143,6 +155,8 @@ export function App() {
       setShowDraft(false);
       setClarifying(null);
       setPlanFeedbackDraft('');
+      setPlanFeedbackOpen(false);
+      setTaskContextOpen(true);
       setFlowInstance(null);
     }
     selectedRunRef.current = runId;
@@ -418,6 +432,7 @@ export function App() {
       visualSnapshot
         ? layoutNodes(visualSnapshot, locale, selectedNodeId, id => {
             setSelectedNodeId(id);
+            setDetailsOpen(true);
             if (visualSnapshot.nodes.find(node => node.id === id)?.sourceRunId) setTab('evidence');
           }, (action, nodeId) => {
             void execute(action, nodeId);
@@ -754,7 +769,14 @@ export function App() {
   const execution = executionPresentation(snapshot, stopBusy);
   const isStopping = execution.kind === 'stopping';
   const composing = showCreate || (!snapshot && !selectedRunId);
-  const showingTask = !composing && Boolean(snapshot) && taskView === 'overview';
+  const showingTask = !composing && taskView === 'overview';
+  const overviewActions: TaskOverviewActions = {
+    onApprove: approveWorkflow, onRevise: reviseWorkflow, onStart: () => void execute('run'),
+    onSetup: () => setShowSetup(true), onClarify: requestReplan, onReplan: requestReplan,
+    onRecover: (nodeId) => void execute('recover', nodeId), onOpenEvidence: openProofEvidence,
+    onOpenArtifact: openProofArtifact, onAcceptRequirement: acceptRequirement,
+    onOpenTechnical: (nodeId) => { if (nodeId) setSelectedNodeId(nodeId); setTaskView('graph'); setDetailsOpen(true); },
+  };
   const composer = <TaskComposer
     capability={project?.capabilities.intake ?? null}
     busy={busy} pending={pending?.kind === 'create'} error={error}
@@ -763,29 +785,24 @@ export function App() {
       if (pending?.kind === 'create') void sendOperation(pending);
       else void api.project().then(context => { setProject(context); setError(null); }).catch(reason => setError(reason as ApiError));
     }}
-    onClose={snapshot && !busy && pending?.kind !== 'create' ? () => { setShowCreate(false); document.getElementById('new-task')?.focus(); } : undefined}
+    onClose={snapshot && !busy && pending?.kind !== 'create' ? () => { setShowCreate(false); (window.matchMedia('(max-width: 720px)').matches ? runsButton.current : document.getElementById('new-task'))?.focus(); } : undefined}
   />;
 
   if (!authenticated) return <MissingSession labels={labels} />;
-  if (loading && runs.length === 0) return <InitialLoadingFrame label={labels.loading} />;
+  if (loading && runs.length === 0) return <InitialLoadingFrame label={labels.loading} wide={wideWorkspace} />;
 
   return (
-    <AppFrame className={snapshot?.workflow === 'autonomous' ? 'autonomous' : ''}>
+    <AppFrame className={`${snapshot?.workflow === 'autonomous' ? 'autonomous' : ''}${wideWorkspace ? ' wide-workspace' : ''}`}>
       <a className="skip-link" href="#main-content">
         {locale === 'ru' ? 'Перейти к задаче' : 'Skip to task'}
       </a>
       <header className="topbar">
-        <div className="brand">
-          <span className="brand-mark" aria-hidden="true">
-            <i />
-            <i />
-            <i />
-          </span>
-          <div>
-            <h1>{labels.title}</h1>
-            <p>{labels.subtitle}</p>
-          </div>
-        </div>
+        {wideWorkspace ? !composing && !clarifying && snapshot ? <WideTaskHeading snapshot={snapshot} plan={plan} execution={execution}
+          unavailable={snapshotUnavailable} busy={busy || Boolean(pending)} feedback={planFeedbackDraft} actions={overviewActions}
+          onFeedback={() => { setPlanFeedbackOpen(true); setTaskView('overview'); requestAnimationFrame(() => document.getElementById('plan-feedback')?.focus()); }} />
+          : <div className="wide-surface-heading"><h2>{composing ? 'Новая задача' : clarifying ? 'Уточнить контекст' : 'Загружаем задачу'}</h2></div>
+          : <><Brand title={labels.title} subtitle={labels.subtitle} />
+            <ProjectStatus project={project} snapshot={snapshot} unavailable={snapshotUnavailable} locale={locale} onSetup={() => setShowSetup(true)} /></>}
         <div className="topbar-actions">
           <button className="button quiet project-settings-button" type="button" aria-expanded={showSetup} onClick={() => setShowSetup(!showSetup)}>
             <svg className="mobile-action-icon" aria-hidden="true" viewBox="0 0 24 24" width="20" height="20"><circle cx="12" cy="12" r="3" /><path d="M19 13.5v-3l-2-.7-.8-1.9.9-1.9-2.1-2.1-1.9.9-1.9-.8-.7-2h-3l-.7 2-1.9.8-1.9-.9L1.6 6l.9 1.9-.8 1.9-2 .7v3l2 .7.8 1.9-.9 1.9 2.1 2.1 1.9-.9 1.9.8.7 2h3l.7-2 1.9-.8 1.9.9 2.1-2.1-.9-1.9.8-1.9z" /></svg>
@@ -798,7 +815,7 @@ export function App() {
           <span className={streamConnected ? 'connection live' : 'connection'}>
             {streamConnected ? labels.live : labels.disconnected}
           </span>
-          {!composing && snapshot?.workflow !== 'autonomous' && <>
+          {!composing && snapshot && snapshot.workflow !== 'autonomous' && <>
           <button
             className="button quiet locale-button"
             onClick={() => setLocale(locale === 'ru' ? 'en' : 'ru')}
@@ -846,6 +863,7 @@ export function App() {
         </div>
       </header>
 
+      <div className="workspace-notices">
       {stopError && !showCreate && (
         <ErrorNotice
           error={stopError}
@@ -876,15 +894,29 @@ export function App() {
         </div>
       )}
 
-      {showSetup && <SetupPanel onClose={() => setShowSetup(false)} />}
-      {!composing && taskView === 'graph' && <nav className="task-view-switch" aria-label="Представление задачи">
-        <button type="button" aria-pressed="false" onClick={() => { setTaskView('overview'); setTab('overview'); }}>Задача</button>
-        <button type="button" aria-pressed="true">Граф · детали исполнения</button>
-      </nav>}
-      <section className={`operator-layout${composing ? ' composing' : ''}${runs.length === 0 ? ' no-runs' : ''}${showingTask || clarifying ? ' task-layout' : ''}`}>
+      </div>
+      {showSetup && <ModalSurface title="Настройки проекта" onClose={() => setShowSetup(false)} className="settings-dialog">
+        <SetupPanel onClose={() => setShowSetup(false)} />
+      </ModalSurface>}
+      {!composing && !clarifying && <div className="workspace-toolbar">
+        <nav className="task-view-switch" aria-label="Представление задачи">
+          <button type="button" aria-pressed={taskView === 'overview'} onClick={() => { setTaskView('overview'); setTab('overview'); setDetailsOpen(false); }}>Задача</button>
+          <button type="button" aria-pressed={taskView === 'graph'} onClick={() => setTaskView('graph')}>Граф</button>
+        </nav>
+        {wideWorkspace && taskView === 'overview' && snapshot && (!snapshot.proof || snapshot.gates.some(item => ['approve-plan', 'provider-consent'].includes(item.type))) &&
+          <button ref={taskContextButton} className="button quiet wide-context-toggle" type="button" aria-expanded={taskContextOpen}
+            onClick={() => setTaskContextOpen(value => !value)}>Критерии и границы</button>}
+        {taskView === 'graph' && <button ref={inspectorButton} className="button quiet inspector-toggle" type="button" disabled={!selectedNode}
+          aria-expanded={detailsOpen} aria-haspopup={compactDetails ? 'dialog' : undefined}
+          onClick={() => setDetailsOpen(value => !value)}>Детали исполнения</button>}
+      </div>}
+      <section className={`operator-layout${composing ? ' composing' : ''}${runs.length === 0 ? ' no-runs' : ''}${showingTask || clarifying ? ' task-layout' : ''}${detailsOpen && taskView === 'graph' ? ' inspector-open' : ''}`}>
         <aside className="run-rail desktop-run-rail" aria-label={labels.runs} data-testid="run-rail">
+          {wideWorkspace && <div className="wide-project-heading"><Brand title={labels.title} subtitle={labels.subtitle} />
+            <ProjectStatus project={project} snapshot={snapshot} unavailable={snapshotUnavailable} locale={locale} onSetup={() => setShowSetup(true)} /></div>}
+
           <div className="rail-heading">
-            <h2>{labels.runs}</h2>
+            <h2>{wideWorkspace ? 'Задачи' : labels.runs}</h2>
             <div className="rail-actions">
               <button
                 aria-label={labels.refresh}
@@ -905,7 +937,7 @@ export function App() {
                 className="button compact rail-create"
                 disabled={!project?.capabilities.intake.allowed}
                 onClick={() => { setError(null); setShowCreate(true); }}
-              >{labels.createCompact}</button>
+              >{wideWorkspace ? 'Новая задача' : labels.createCompact}</button>
             </div>
           </div>
           <div className="run-list">
@@ -922,7 +954,12 @@ export function App() {
             ))}
             {runs.length === 0 && <p className="empty-copy">{labels.noRuns}</p>}
           </div>
-          {snapshot && <details className="health-details"><summary>Состояние проекта</summary><RunHealth snapshot={snapshot} locale={locale} /></details>}
+          {wideWorkspace && <div className="wide-rail-footer">
+            <button className="button quiet" type="button" onClick={() => setShowSetup(true)}>Настройки проекта</button>
+            <button className="button quiet" type="button" onClick={() => document.documentElement.toggleAttribute('data-dark')}>{labels.theme}</button>
+            <span className={streamConnected ? 'connection live' : 'connection'}>{streamConnected ? labels.live : labels.disconnected}</span>
+          </div>}
+
         </aside>
 
         <div className="main-content" data-testid="main-content" id="main-content">
@@ -945,19 +982,13 @@ export function App() {
           execution={execution}
           feedback={planFeedbackDraft}
           onFeedbackChange={setPlanFeedbackDraft}
-          actions={{
-            onApprove: approveWorkflow,
-            onRevise: reviseWorkflow,
-            onStart: () => void execute('run'),
-            onSetup: () => setShowSetup(true),
-            onClarify: requestReplan,
-            onReplan: requestReplan,
-            onOpenEvidence: openProofEvidence,
-            onOpenArtifact: openProofArtifact,
-            onAcceptRequirement: acceptRequirement,
-            onOpenTechnical: () => setTaskView('graph'),
-          }}
-        /> : <section className="graph-region" id="graph-canvas" aria-label={labels.graph}>
+          wide={wideWorkspace}
+          contextOpen={taskContextOpen}
+          onContextChange={(open) => { setTaskContextOpen(open); if (!open) taskContextButton.current?.focus(); }}
+          feedbackOpen={planFeedbackOpen}
+          onFeedbackToggle={setPlanFeedbackOpen}
+          actions={overviewActions}
+        /> : showingTask ? <ShellSkeleton /> : <section className="graph-region" id="graph-canvas" aria-label={labels.graph}>
           <ExecutionStatus value={execution} />
           {(snapshot?.workflow !== 'autonomous' || snapshot?.contextClarification) && snapshot?.phase === 'planning' && getCapability(snapshot.capabilities, 'requestReplan').allowed && (
             <div className="next-action"><p>Следующая версия плана будет проверена сервером. Новые права потребуют вашего решения.</p>
@@ -1035,27 +1066,10 @@ export function App() {
         </section>}
         </div>
 
-        {!composing && !clarifying && taskView === 'graph' && selectedNode && <aside
-          className="detail-panel"
-          aria-label={compactDetails ? 'Детали исполнения' : labels.details}
-          role={compactDetails ? 'dialog' : undefined}
+        {!composing && !clarifying && taskView === 'graph' && detailsOpen && selectedNode && <ExecutionInspector
+          compact={compactDetails} autonomous={snapshot?.workflow === 'autonomous'} tab={tab} onTab={setTab}
+          onClose={() => { setDetailsOpen(false); if (!compactDetails) inspectorButton.current?.focus(); }} locale={locale}
         >
-          {compactDetails && <button className="button quiet detail-close" type="button" onClick={() => setSelectedNodeId(null)}>Закрыть детали</button>}
-          <nav className="detail-tabs" aria-label={labels.details}>
-            {(['overview', 'evidence', 'history', 'plan'] as const).map((name) => (
-              <button
-                aria-selected={tab === name}
-                className={tab === name ? 'active' : ''}
-                key={name}
-                onClick={() => setTab(name)}
-                role="tab"
-                type="button"
-              >
-                {labels[name]}
-              </button>
-            ))}
-          </nav>
-          <div className="detail-scroll">
             {tab === 'overview' &&
               (selectedNode ? (
                 <NodeDetails
@@ -1095,8 +1109,7 @@ export function App() {
                 onCompare={selectComparison}
               />
             )}
-          </div>
-        </aside>}
+        </ExecutionInspector>}
       </section>
 
       {runsOpen && <dialog
@@ -1106,6 +1119,11 @@ export function App() {
         onCancel={(event) => { event.preventDefault(); closeRuns(); }}
       >
         <header><h2 id="mobile-runs-title">Запуски</h2><button className="button quiet" type="button" onClick={closeRuns}>Закрыть</button></header>
+        <div className="mobile-create-action">
+          <button className="button primary" type="button" disabled={!project?.capabilities.intake.allowed}
+            onClick={() => { dismissRuns(); setError(null); setShowCreate(true); }}>Новая задача</button>
+          {project && !project.capabilities.intake.allowed && <p>{humanText(project.capabilities.intake.reason) || 'Создание задачи недоступно'}</p>}
+        </div>
         <div className="run-list">
           {visibleRuns.map((run) => <RunButton
             key={run.runId}
@@ -1117,7 +1135,6 @@ export function App() {
             onClick={() => { selectRun(run.runId); closeRuns(); }}
           />)}
           {visibleRuns.length === 0 && <p className="empty-copy">{labels.noRuns}</p>}
-          {snapshot && <details className="health-details"><summary>Состояние проекта</summary><RunHealth snapshot={snapshot} locale={locale} /></details>}
         </div>
       </dialog>}
 

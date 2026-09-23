@@ -87,7 +87,8 @@ function overlaps(left, right) {
 }
 
 async function openGraph(page) {
-  await page.getByRole('button', { name: 'Граф · детали исполнения', exact: true }).click();
+  await page.getByRole('button', { name: 'Граф', exact: true }).click();
+  await page.getByRole('button', { name: 'Детали исполнения', exact: true }).click();
   const closeDetails = page.getByRole('button', { name: 'Закрыть детали', exact: true });
   if (await closeDetails.isVisible()) await closeDetails.click();
 }
@@ -189,7 +190,7 @@ test('task-first running view leads with the task and keeps the graph behind an 
   await expect(page.getByRole('heading', { name: 'Добавить форму регистрации компании' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Что происходит сейчас' })).toBeVisible();
   await expect(page.locator('.react-flow')).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Граф · детали исполнения', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Граф', exact: true })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath('task-first-running-1366x768.png') });
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.screenshot({ path: testInfo.outputPath('task-first-running-1440x900.png') });
@@ -359,6 +360,8 @@ test('single scroll keeps long task and run list bounded at laptop sizes', async
     await page.setViewportSize(viewport);
     await page.goto(`/#session=${token}`);
     await expect(page.locator('.task-overview')).toBeVisible();
+    await page.getByText('Описание задачи',{exact:true}).click();
+    await page.getByRole('button',{name:'Показать полностью',exact:true}).click();
     const metrics = await page.evaluate(() => {
       const main = document.querySelector('.main-content');
       const rail = document.querySelector('.desktop-run-rail .run-list');

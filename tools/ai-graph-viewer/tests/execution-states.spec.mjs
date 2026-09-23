@@ -45,7 +45,8 @@ async function capture(page, name) {
   await page.screenshot({ path: `output/playwright/${name}.png`, fullPage: true });
 }
 async function openGraph(page) {
-  await page.getByRole('button', { name: 'Граф · детали исполнения', exact: true }).click();
+  await page.getByRole('button', { name: 'Граф', exact: true }).click();
+  await page.getByRole('button', { name: 'Детали исполнения', exact: true }).click();
   const closeDetails = page.getByRole('button', { name: 'Закрыть детали', exact: true });
   if (await closeDetails.isVisible()) await closeDetails.click();
 }

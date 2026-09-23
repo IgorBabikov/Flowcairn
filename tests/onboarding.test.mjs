@@ -248,7 +248,8 @@ test('опрос Claude фиксирует только явное соглас�
   assert.match(text,/Шаг 1 из 4/);
   assert.match(text,/Шаг 4 из 4/);
   assert.doesNotMatch(text,/Как запускать проверки проекта|Шаг 5 из 5/);
-  assert.match(text,/\x1b\[/);
+  if (process.env.CI || Object.hasOwn(process.env, 'NO_COLOR') || process.env.TERM === 'dumb') assert.doesNotMatch(text,/\x1b\[/);
+  else assert.match(text,/\x1b\[/);
   assert.doesNotMatch(text,/Codex — macOS/);
   assert.equal(existsSync(path.join(root,'.flowcairn.json')),false);
 });

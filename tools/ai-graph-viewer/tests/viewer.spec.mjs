@@ -68,16 +68,17 @@ async function readableInGraph(page, title) {
 }
 
 async function openGraph(page) {
-  await page.getByRole('button', { name: 'Граф · детали исполнения', exact: true }).click();
+  await page.getByRole('button', { name: 'Граф', exact: true }).click();
+  await page.getByRole('button', { name: 'Детали исполнения', exact: true }).click();
   const closeDetails = page.getByRole('button', { name: 'Закрыть детали', exact: true });
-  if (await closeDetails.isVisible()) await closeDetails.click();
+  if (page.viewportSize().width < 1180 && await closeDetails.isVisible()) await closeDetails.click();
 }
 
 async function selectMobileRun(page, name) {
   await page.getByRole('button', { name: 'Показать запуски', exact: true }).click();
   await page.getByRole('dialog', { name: 'Запуски', exact: true }).getByRole('button', { name }).click();
   const closeDetails = page.getByRole('button', { name: 'Закрыть детали', exact: true });
-  if (await closeDetails.isVisible()) await closeDetails.click();
+  if (page.viewportSize().width < 1180 && await closeDetails.isVisible()) await closeDetails.click();
 }
 
 test('renders backend state, confirms a gate, and retries one operation id', async ({ page }) => {
@@ -96,7 +97,7 @@ test('renders backend state, confirms a gate, and retries one operation id', asy
   await page.getByRole('button', { name: /Plan evidence/ }).click();
   await expect(page.getByRole('dialog')).toContainText('<script>attack()</script>');
   await expect(page.locator('dialog script')).toHaveCount(0);
-  await page.getByRole('button', { name: 'Закрыть' }).click();
+  await page.getByRole('button', { name: 'Закрыть', exact: true }).click();
 
   await page.getByRole('tab', { name: 'Обзор' }).click();
   await page.getByRole('button', { name: 'Подтвердить план' }).click();
@@ -213,7 +214,7 @@ test('does not let a delayed snapshot replace a newer revision', async ({ page }
   await page.waitForTimeout(250);
   await expect(page.getByTestId('run-revision')).toHaveText('4');
 
-  await page.getByRole('tab', { name: 'Изменения' }).click();
+  await page.getByRole('tab', { name: 'История' }).click();
   await expect(page.getByText('r4', { exact: true })).toBeVisible();
 });
 
@@ -361,7 +362,7 @@ test('accepts a validated replan successor and resets run-scoped state', async (
   const fixture = await mockApi(page);
   await page.goto(`/#session=${token}`);
   await openGraph(page);
-  await page.getByRole('tab', { name: 'Изменения' }).click();
+  await page.getByRole('tab', { name: 'История' }).click();
   await expect(page.getByText('r3', { exact: true })).toBeVisible();
   await page.getByRole('tab', { name: 'Обзор' }).click();
   await page.getByRole('button', { name: 'Новая версия плана' }).click();
@@ -370,7 +371,8 @@ test('accepts a validated replan successor and resets run-scoped state', async (
 
   await expect(page.getByTestId('plan-version')).toHaveText('2');
   await expect(page.getByTestId('run-revision')).toHaveText('0');
-  await page.getByRole('tab', { name: 'Изменения' }).click();
+  await page.getByRole('button',{name:'Детали исполнения',exact:true}).click();
+  await page.getByRole('tab', { name: 'История' }).click();
   await expect(page.getByText('r0', { exact: true })).toBeVisible();
   await expect(page.getByText('r3', { exact: true })).toHaveCount(0);
   expect(fixture.current().supersedesRunId).toBe('run-demo');
@@ -501,6 +503,7 @@ test('accepts a fail-closed snapshot without revision and stops catch-up', async
   });
   await page.goto(`/#session=${token}`);
 
+  await page.getByRole('button',{name:'Состояние проекта',exact:true}).click();
   await expect(page.locator('.run-health .negative')).toHaveText('Целостность данных не подтверждена');
   await expect(page.getByTestId('run-revision')).toHaveText('—');
   await page.waitForTimeout(500);
@@ -853,7 +856,8 @@ test('renders a fail-closed snapshot when optional evidence reads fail', async (
     });
   });
   await page.goto(`/#session=${token}`);
-  await openGraph(page);
+  await page.getByRole('button',{name:'Граф',exact:true}).click();
+  await page.getByRole('button',{name:'Состояние проекта',exact:true}).click();
   await expect(page.locator('.run-health .negative')).toHaveText('Целостность данных не подтверждена');
   await expect(page.getByRole('heading', { name: 'Граф выполнения' }).first()).toBeVisible();
   await expect(page.locator('.error-banner')).toHaveCount(0);
@@ -883,7 +887,7 @@ test('actual service fixture smoke', async ({ page }, testInfo) => {
     }),
   ).toBeVisible();
   await expect(page.locator('.operator-layout')).toBeVisible();
-  const advancedGraph = page.getByRole('button', { name: 'Граф · детали исполнения', exact: true });
+  const advancedGraph = page.getByRole('button', { name: 'Граф', exact: true });
   if (await advancedGraph.isVisible()) await advancedGraph.click();
   await expect(page.locator('.graph-node').first()).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath('actual-workflow.png'), fullPage: true });

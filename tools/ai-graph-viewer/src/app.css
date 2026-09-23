@@ -1745,7 +1745,7 @@ body { font-size: 16px; }
 .collapsible-text { max-width: 74ch; margin-top: 18px; font-size: .96rem; line-height: 1.65; }
 .task-technical { margin-top: 20px; }
 
-.task-overview > .execution-status {
+:is(.task-overview, .task-content-primary) > .execution-status {
   margin: 24px 38px 0;
   padding: 16px 18px;
   border-color: color-mix(in srgb, var(--plum) 22%, var(--border));
@@ -1753,16 +1753,16 @@ body { font-size: 16px; }
   color: var(--text);
   font-weight: 650;
 }
-.task-overview > .execution-status.stop,
-.task-overview > .execution-status.warning {
+:is(.task-overview, .task-content-primary) > .execution-status.stop,
+:is(.task-overview, .task-content-primary) > .execution-status.warning {
   min-height: 116px;
   padding: 24px 28px;
   border-color: color-mix(in srgb, var(--warning) 36%, var(--border));
   background: color-mix(in srgb, var(--warning) 8%, var(--surface));
   font-size: 1.06rem;
 }
-.task-overview > .execution-status.stop .status-loader-mark { width: 38px; height: 38px; border-width: 6px; }
-.task-overview > .execution-status.danger { min-height: 108px; padding: 22px 26px; background: color-mix(in srgb, var(--danger) 7%, var(--surface)); }
+:is(.task-overview, .task-content-primary) > .execution-status.stop .status-loader-mark { width: 38px; height: 38px; border-width: 6px; }
+:is(.task-overview, .task-content-primary) > .execution-status.danger { min-height: 108px; padding: 22px 26px; background: color-mix(in srgb, var(--danger) 7%, var(--surface)); }
 
 .task-progress { margin: 24px 38px 34px; padding: 30px 32px; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); }
 .task-progress-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
@@ -1828,7 +1828,7 @@ body { font-size: 16px; }
   .task-composer footer .button { width: 100%; }
   .task-heading { padding: 24px 20px 20px; }
   .task-heading h2 { font-size: 1.75rem; }
-  .task-overview > .execution-status { margin: 16px 18px 0; }
+  :is(.task-overview, .task-content-primary) > .execution-status { margin: 16px 18px 0; }
   .task-progress { margin: 16px 18px 24px; padding: 22px 18px; }
   .task-progress-head { display: block; }
   .task-progress-count { display: block; margin-top: 8px; }

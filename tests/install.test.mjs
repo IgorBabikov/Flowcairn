@@ -576,6 +576,18 @@ test('actual npm tarball install provides executable bin and offline npx init/ta
     encoding: 'utf8',
   });
   assert.equal(direct.trim(), packed[0].version);
+  // Verify the installed artifact, not the source checkout or browser preview.
+  const presentation = execFileSync(process.execPath, ['--input-type=module', '-e', `
+    import { printCard } from './node_modules/flowcairn/bin/terminal.mjs';
+    printCard('Flowcairn', ['✓ Интерфейс запущен'], {
+      output: { isTTY: true, columns: 32, write: value => process.stdout.write(value) },
+      author: true, env: {},
+    });
+  `], { cwd: root, env, encoding: 'utf8' });
+  assert.match(presentation, /╭/);
+  assert.match(presentation, /╯/);
+  assert.match(presentation, /Telegram автора/);
+  assert.ok(presentation.includes('\x1b]8;;https://t.me/Babikov_build\x1b\\'));
   const run = (...args) =>
     spawnSync(process.execPath, [npx, '--offline', '--no', 'flowcairn', ...args], {
       cwd: root,

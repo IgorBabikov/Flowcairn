@@ -2,7 +2,8 @@ import { expect, test } from '@playwright/test';
 import { mockApi, snapshot, projectContext, allowed, allDenied, graphNode, token } from './fixtures.mjs';
 
 async function openGraph(page) {
-  await page.getByRole('button', { name: 'Граф · детали исполнения', exact: true }).click();
+  await page.getByRole('button', { name: 'Граф', exact: true }).click();
+  await page.getByRole('button', { name: 'Детали исполнения', exact: true }).click();
 }
 
 async function startTask(page) {
@@ -255,7 +256,7 @@ test('long task gets the full graph header width and expands with keyboard on de
   for (const width of [1440, 390]) {
     await page.setViewportSize({width, height:900});
     await page.goto(`/#session=${token}`);
-    await openGraph(page);
+    await page.getByRole('button',{name:'Граф',exact:true}).click();
     const header = page.locator('.graph-header');
     const summary = page.locator('.graph-goal summary');
     await expect(summary).toBeVisible();

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { GateSnapshot, GraphPlan, Snapshot } from './contracts';
 import type { ProofEvidence } from './proof-contracts';
 import type { ExecutionPresentation } from './execution-presentation';
@@ -6,32 +7,33 @@ import { ExecutionStatus } from './ExecutionStatus';
 import { TaskCockpit } from './TaskCockpit';
 import { TaskProgress } from './TaskProgress';
 import { WorkflowPanel } from './WorkflowPanel';
-import { runtimeProblem } from './presentation';
+import { WideTaskContext } from './WideTaskContext';
+import { WideWorkList } from './WideWorkList';
+import { planDecision } from './PlanDecision';
+import { taskStatusLabel } from './task-presentation';
 
-type TaskOverviewActions = {
+export type TaskOverviewActions = {
   onApprove: (gate: GateSnapshot) => void;
   onRevise: (feedback: string) => void;
   onStart: () => void;
   onSetup: () => void;
   onClarify: () => void;
   onReplan: () => void;
+  onRecover: (nodeId?: string) => void;
   onOpenEvidence: (evidence: ProofEvidence, artifactId?: string) => void;
   onOpenArtifact: (artifactId: string) => void;
   onAcceptRequirement?: (requirementId: string, reason: string) => void;
-  onOpenTechnical: () => void;
+  onOpenTechnical: (nodeId?: string) => void;
 };
 
-const proofLabels = {
-  PROVEN: 'Результат подтвержден',
-  UNPROVEN: 'Результат пока не подтвержден',
-  STALE: 'Нужна повторная проверка',
-  FAILED: 'Проверка не пройдена',
-  BLOCKED: 'Работа заблокирована',
-  RUNNING: 'Работа продолжается',
-};
 
 export function TaskOverview({
   snapshot,
+  wide = false,
+  contextOpen,
+  onContextChange,
+  feedbackOpen,
+  onFeedbackToggle,
   plan,
   busy,
   unavailable = false,
@@ -40,6 +42,11 @@ export function TaskOverview({
   onFeedbackChange,
   actions,
 }: {
+  wide?: boolean;
+  contextOpen: boolean;
+  onContextChange: (open: boolean) => void;
+  feedbackOpen?: boolean;
+  onFeedbackToggle?: (open: boolean) => void;
   snapshot: Snapshot;
   plan: GraphPlan | null;
   busy: boolean;
@@ -49,32 +56,23 @@ export function TaskOverview({
   onFeedbackChange: (value: string) => void;
   actions: TaskOverviewActions;
 }) {
+  const [selectedWorkId, setSelectedWorkId] = useState<string | null>(null);
+  const { gate } = planDecision(snapshot, plan, unavailable);
+  const showContext = wide && (!snapshot.proof || Boolean(gate));
+  const selectWork = (id: string) => { setSelectedWorkId(id); onContextChange(true); };
   const title = snapshot.task?.title || snapshot.task?.goal || 'Задача';
   const description = snapshot.task?.description || snapshot.task?.goal || '';
-  const executionFocused = !snapshot.proof && execution.kind !== 'idle';
-  const failedNode = snapshot.nodes.find(node => node.status === 'failed');
-  const failure = runtimeProblem(snapshot.failureReason || failedNode?.reason);
-  const status = unavailable || !snapshot.integrity.valid
-    ? 'Состояние недоступно'
-    : snapshot.status === 'cancelled'
-      ? 'Остановлено пользователем'
-    : snapshot.status === 'failed'
-      ? failure?.title ?? 'Ошибка выполнения'
-    : snapshot.status === 'uncertain' && snapshot.resolutionKind === 'semantic'
-      ? 'Нужно уточнение'
-    : snapshot.proof
-      ? proofLabels[snapshot.proof.status]
-      : execution.kind === 'idle'
-        ? 'Подготовка задачи'
-        : execution.title;
+  const executionFocused = !unavailable && snapshot.integrity.valid && !snapshot.proof && execution.kind !== 'idle';
+  const status = taskStatusLabel(snapshot, execution, unavailable);
   return (
-    <article className="task-overview" aria-label="Обзор задачи">
-      <header className="task-heading">
+    <article className={`task-overview${wide ? ' is-wide' : ''}${showContext && contextOpen ? ' with-context' : ''}`} aria-label="Обзор задачи">
+      {!wide && <header className="task-heading">
         {snapshot.task?.taskNumber && <p className="task-number">{snapshot.task.taskNumber}</p>}
         <div className="task-heading-line">
           <h2>{title}</h2>
-          <span className="proof-status" data-testid="task-proof-status">{status}</span>
+          <span className={`proof-status${!unavailable && snapshot.integrity.valid && status === execution.title ? ' visually-hidden' : ''}`} data-testid="task-proof-status">{status}</span>
         </div>
+        <details className="task-description"><summary>Описание задачи</summary>
         {description && description !== title && (
           <CollapsibleText id={`task-description-${snapshot.runId}`} text={description} />
         )}
@@ -86,8 +84,21 @@ export function TaskOverview({
             <dt>План</dt><dd><code>{snapshot.planHash?.slice(0, 10) ?? '—'}</code></dd>
           </dl>
         </details>
-      </header>
-      <ExecutionStatus value={execution} />
+        </details>
+      </header>}
+
+      <div className="task-content-layout"><div className="task-content-primary">
+      {!unavailable && snapshot.integrity.valid && <ExecutionStatus value={execution} />}
+      {(execution.kind === 'stop-uncertain' || snapshot.proof?.status === 'STALE') && <div className="task-next-action">
+        {execution.kind === 'stop-uncertain' && !unavailable && snapshot.integrity.valid &&
+          (snapshot.capabilities.recover?.allowed || snapshot.nodes.some(node => node.capabilities.recover?.allowed))
+          ? <button className="button primary" type="button" disabled={busy}
+              onClick={() => actions.onRecover(snapshot.capabilities.recover?.allowed ? undefined : snapshot.nodes.find(node => node.capabilities.recover?.allowed)?.id)}>Проверить остановку</button>
+          : <><p>{unavailable ? 'Дождитесь обновления состояния. Действия временно недоступны.'
+              : execution.kind === 'stop-uncertain' ? 'Откройте этап и его отчеты, чтобы проверить причину. Новый запуск пока небезопасен.'
+              : 'Прежние доказательства устарели. Откройте этап и доступные действия для повторной проверки.'}</p>
+            <button className="button" type="button" onClick={() => actions.onOpenTechnical()}>Открыть этап и отчеты</button></>}
+      </div>}
       {snapshot.status === 'cancelled' && <div className="context-recovery">
         <p>Предыдущий процесс завершен. Новый план начнет отдельную подтверждаемую попытку.</p>
         <button className="button primary" type="button" disabled={busy || !snapshot.capabilities.requestReplan?.allowed}
@@ -103,11 +114,13 @@ export function TaskOverview({
         <button className="button primary" type="button" disabled={busy || !snapshot.capabilities.requestReplan?.allowed}
           onClick={actions.onClarify}>Уточнить контекст</button>
       </div>}
-      {executionFocused ? (
-        <TaskProgress snapshot={snapshot} execution={execution} />
-      ) : snapshot.proof ? (
+      {executionFocused && !(wide && gate) ? (
+        <><TaskProgress snapshot={snapshot} execution={execution} summaryOnly={wide} />
+          {wide && <WideWorkList snapshot={snapshot} plan={plan} selectedId={selectedWorkId} onSelect={selectWork} />}</>
+      ) : snapshot.proof && !(wide && gate) ? (
         <TaskCockpit
           snapshot={snapshot}
+          wide={wide}
           busy={busy}
           unavailable={unavailable}
           embedded
@@ -117,6 +130,11 @@ export function TaskOverview({
         />
       ) : (
         <WorkflowPanel
+          wide={wide}
+          selectedWorkId={selectedWorkId}
+          onSelectWork={selectWork}
+          feedbackOpen={feedbackOpen}
+          onFeedbackToggle={onFeedbackToggle}
           snapshot={snapshot}
           plan={plan}
           busy={busy}
@@ -130,15 +148,10 @@ export function TaskOverview({
           onSetup={actions.onSetup}
         />
       )}
-      <footer className="task-overview-footer">
-        <button className="technical-view-link" type="button" aria-label="Граф · детали исполнения" onClick={actions.onOpenTechnical}>
-          <svg aria-hidden="true" viewBox="0 0 24 24" width="20" height="20">
-            <circle cx="5" cy="18" r="2" /><circle cx="12" cy="6" r="2" /><circle cx="19" cy="18" r="2" />
-            <path d="M6.4 16.4 10.8 8M13.2 8l4.4 8.4M7 18h10" />
-          </svg>
-          Граф и технические детали
-        </button>
-      </footer>
+      </div>
+      {showContext && contextOpen && <WideTaskContext snapshot={snapshot} plan={plan} selectedId={selectedWorkId} unavailable={unavailable}
+        onBack={() => setSelectedWorkId(null)} onClose={() => onContextChange(false)} onOpenWork={actions.onOpenTechnical} />}
+      </div>
     </article>
   );
 }
