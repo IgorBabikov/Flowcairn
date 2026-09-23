@@ -122,7 +122,12 @@ export async function collectOnboarding(root, options = {}, terminal = {}) {
     if (provider === 'codex' && process.platform !== 'darwin') fail('PROVIDER_PLATFORM', 'Исполнение Codex пока доступно только на macOS.');
     if (provider === 'codex') {
       const cli = inspectCodexInstallation();
-      if (!cli.available) fail('RUNNER_TOOLCHAIN_INVALID', 'Codex CLI не прошел проверку. Установите поддерживаемую версию 0.145.0 или 0.154.0. Настройка не сохранена.');
+      if (!cli.available) {
+        const message = cli.reason === 'RUNNER_TOOLCHAIN_CAPABILITY'
+          ? 'Codex CLI не поддерживает обязательные параметры безопасного запуска. Обновите Codex CLI или Flowcairn. Настройка не сохранена.'
+          : 'Codex CLI не прошел проверку. Укажите безопасную npm-установку @openai/codex или выполните codex login. Настройка не сохранена.';
+        fail('RUNNER_TOOLCHAIN_INVALID', message);
+      }
     }
     const advanced = options.advanced === true;
     step(output, 2, 'Как выбирать модель');

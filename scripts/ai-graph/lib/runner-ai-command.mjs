@@ -17,7 +17,6 @@ import { fitPromptBudget } from './prompt-budget.mjs';
 import { fingerprintDirectWorkspace } from './direct-workspace.mjs';
 
 // Prepared commands contain the bounded input and exact sandbox policy; process ownership stays in runner.
-export const CODEX_VERSION = 'codex-cli 0.154.0';
 export const EXTERNAL_WORKER_FILE = fileURLToPath(new URL('./external-worker.mjs', import.meta.url));
 export const MAX_AI_PROCESS_OUTPUT = 2 * 1024 * 1024;
 const MAX_EXTERNAL_PROMPT_BYTES = 128 * 1024;
@@ -275,7 +274,7 @@ export function makeAiCommand({
       maxOutputBytes: MAX_AI_PROCESS_OUTPUT,
       execution: Object.freeze({
         provider: 'codex',
-        cliVersion: toolchain.identity?.codexVersion ? `codex-cli ${toolchain.identity.codexVersion}` : CODEX_VERSION,
+        cliVersion: toolchain.identity?.codexVersion ? `codex-cli ${toolchain.identity.codexVersion}` : 'codex-cli unknown',
         model: effectiveModel,
         reasoningEffort: effectiveEffort,
         context: measurePromptContext(prompt, preparedPrompt.priorEvidence),

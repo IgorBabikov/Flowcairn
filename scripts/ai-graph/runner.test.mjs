@@ -9,6 +9,7 @@ import {
   fstatSync,
   openSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
@@ -20,7 +21,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { inspectProcess, probeRunner, runRegisteredAction } from './lib/runner.mjs';
+import { inspectCodexInstallation, inspectProcess, probeRunner, runRegisteredAction } from './lib/runner.mjs';
 import { buildPrompt } from './lib/codex.mjs';
 import { AIResultSchema } from './lib/schemas.mjs';
 import { aiResponseSchema } from './lib/runner-ai-command.mjs';
@@ -94,8 +95,46 @@ function fixture() {
   return directory;
 }
 
+function compatibleCodexFixture(version = '9.9.9') {
+  const root = fixture();
+  const platformName = process.arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64';
+  const triple = process.arch === 'arm64' ? 'aarch64-apple-darwin' : 'x86_64-apple-darwin';
+  const entry = path.join(root, 'bin', 'codex.js');
+  const native = path.join(root, 'node_modules', '@openai', `codex-${platformName}`, 'vendor', triple, 'bin', 'codex');
+  mkdirSync(path.dirname(entry), { recursive: true, mode: 0o700 });
+  mkdirSync(path.dirname(native), { recursive: true, mode: 0o700 });
+  writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: '@openai/codex', version }), { mode: 0o600 });
+  writeFileSync(
+    path.join(root, 'node_modules', '@openai', `codex-${platformName}`, 'package.json'),
+    JSON.stringify({ name: '@openai/codex', version: `${version}-${platformName}` }),
+    { mode: 0o600 },
+  );
+  writeFileSync(entry, `
+const args = process.argv.slice(2);
+if (args[0] === 'login' && args[1] === 'status') process.exit(0);
+if (args[0] === 'exec' && args[1] === '--help') {
+  console.log('--ignore-user-config --ignore-rules --strict-config --ephemeral --skip-git-repo-check --json --output-schema --output-last-message --cd --config --model');
+  process.exit(0);
+}
+if (args[0] === 'sandbox' && args[1] === '--help') { console.log('--permission-profile'); process.exit(0); }
+if (args[0] === '--version') { console.log('codex-cli ${version}'); process.exit(0); }
+process.exit(1);
+`, { mode: 0o600 });
+  writeFileSync(native, '#!/bin/sh\nexit 0\n', { mode: 0o700 });
+  return entry;
+}
+
 test.after(() => {
   for (const directory of fixtures) rmSync(directory, { recursive: true, force: true });
+});
+
+test('Codex принимается по возможностям, а не по зашитому номеру версии', (t) => {
+  if (process.platform !== 'darwin' || !/^v22\./.test(process.version)) {
+    t.skip('Проверка Codex требует macOS и Node 22.');
+    return;
+  }
+  const cli = inspectCodexInstallation({ codexPath: compatibleCodexFixture('9.9.9') });
+  assert.deepEqual(cli, { available: true, reason: null, version: '9.9.9' });
 });
 
 function canonicalJson(value) {
