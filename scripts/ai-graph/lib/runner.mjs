@@ -35,11 +35,10 @@ import { hasTrustedLocalChecksBinding, loadProjectProfile, resolveProjectCheckSc
 import { providerToolchain } from './providers.mjs';
 import { codexModelSettings } from './codex-settings.mjs';
 import { buildProjectInstructionContext } from './project-instruction-context.mjs';
-import { CODEX_VERSION, EXTERNAL_WORKER_FILE, MAX_AI_PROCESS_OUTPUT, assertNoSymlinkAncestors, safeEnvironment, aiEnvironment, createExclusiveFile, makeAiCommand, makeExternalCommand, instructionDenials, selectedSourceContext, cleanupPrepared, aiResponseSchema } from './runner-ai-command.mjs';
+import { EXTERNAL_WORKER_FILE, MAX_AI_PROCESS_OUTPUT, assertNoSymlinkAncestors, safeEnvironment, aiEnvironment, createExclusiveFile, makeAiCommand, makeExternalCommand, instructionDenials, selectedSourceContext, cleanupPrepared, aiResponseSchema } from './runner-ai-command.mjs';
 
 const NODE_BINARY = realpathSync(process.execPath);
 const NODE_BIN = path.dirname(NODE_BINARY);
-const CODEX_VERSIONS = ['0.145.0', '0.154.0'];
 const PNPM_VERSION = '11.8.0';
 const SANDBOX_EXEC = '/usr/bin/sandbox-exec';
 const SUPERVISOR_FILE = fileURLToPath(new URL('./supervisor.mjs', import.meta.url));
@@ -284,7 +283,7 @@ function fileDigest(candidate) {
   return hash.digest('hex');
 }
 
-function packageVersion(packageRoot, expectedName, expectedVersion) {
+function packageIdentity(packageRoot, expectedName) {
   const manifest = path.join(packageRoot, 'package.json');
   if (!regularReadable(manifest) || statSync(manifest).size > 64 * 1024) {
     fail('RUNNER_TOOLCHAIN_INVALID', `Package manifest недоступен: ${expectedName}`);
@@ -295,39 +294,74 @@ function packageVersion(packageRoot, expectedName, expectedVersion) {
   } catch {
     fail('RUNNER_TOOLCHAIN_INVALID', `Package manifest поврежден: ${expectedName}`);
   }
-  if (parsed?.name !== expectedName || parsed?.version !== expectedVersion) {
-    fail('RUNNER_TOOLCHAIN_VERSION', `Ожидался ${expectedName}@${expectedVersion}`);
+  if (
+    parsed?.name !== expectedName ||
+    typeof parsed.version !== 'string' ||
+    !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(parsed.version)
+  ) {
+    fail('RUNNER_TOOLCHAIN_INVALID', `Package manifest недопустим: ${expectedName}`);
   }
   return { manifest, version: parsed.version };
 }
 
+function codexCandidates(ai) {
+  if (ai.codexPath) return [ai.codexPath];
+  const pathEntries = (process.env.PATH ?? '')
+    .split(path.delimiter)
+    .filter((entry) => path.isAbsolute(entry) && entry.length > 1)
+    .map((entry) => path.join(entry, 'codex'));
+  return [...new Set([
+    path.join(NODE_BIN, 'codex'),
+    ...pathEntries,
+    '/usr/local/bin/codex',
+    '/opt/homebrew/bin/codex',
+    '/usr/bin/codex',
+  ])];
+}
+
 function discoverCodex(ai) {
-  const candidates = ai.codexPath
-    ? [ai.codexPath]
-    : [
-        path.join(NODE_BIN, 'codex'),
-        '/usr/local/bin/codex',
-        '/opt/homebrew/bin/codex',
-        '/usr/bin/codex',
-      ];
-  for (const candidate of candidates) {
+  for (const candidate of codexCandidates(ai)) {
     try {
       if (!regularReadable(candidate)) continue;
       const entry = realpathSync(candidate);
       if (path.basename(entry) !== 'codex.js') continue;
       const root = path.resolve(path.dirname(entry), '..');
-      for (const version of CODEX_VERSIONS) {
-        try { return { root, entry, manifest: packageVersion(root, '@openai/codex', version) }; }
-        catch { /* Try the next explicit compatible release. */ }
-      }
+      return { root, entry, manifest: packageIdentity(root, '@openai/codex') };
     } catch {
-      /* Only a verified pinned installation is eligible. */
+      /* Try the next safe official-package candidate. */
     }
   }
   fail(
     'RUNNER_TOOLCHAIN_INVALID',
-    'Укажите ai.codexPath для проверенной установки @openai/codex версии 0.145.0 или 0.154.0',
+    'Не найдена безопасная npm-установка @openai/codex. Укажите ai.codexPath или установите официальный Codex CLI.',
   );
+}
+
+function codexHelp(entry, args, requiredFlags) {
+  const result = spawnSync(NODE_BINARY, [entry, ...args], {
+    encoding: 'utf8', timeout: 10_000, maxBuffer: 512 * 1024, env: aiEnvironment(), shell: false,
+  });
+  const output = typeof result.stdout === 'string' ? result.stdout : '';
+  return result.error === undefined && result.status === 0 && requiredFlags.every((flag) => output.includes(flag));
+}
+
+function verifyCodexCapabilities(entry) {
+  const execFlags = [
+    '--ignore-user-config',
+    '--ignore-rules',
+    '--strict-config',
+    '--ephemeral',
+    '--skip-git-repo-check',
+    '--json',
+    '--output-schema',
+    '--output-last-message',
+    '--cd',
+    '--config',
+    '--model',
+  ];
+  if (!codexHelp(entry, ['exec', '--help'], execFlags) || !codexHelp(entry, ['sandbox', '--help'], ['--permission-profile'])) {
+    fail('RUNNER_TOOLCHAIN_CAPABILITY', 'Codex CLI не поддерживает обязательные параметры изолированного запуска. Обновите Codex CLI или Flowcairn.');
+  }
 }
 
 function runnerToolchain(profile) {
@@ -348,10 +382,13 @@ function runnerToolchain(profile) {
   const platformName = process.arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64';
   const triple = process.arch === 'arm64' ? 'aarch64-apple-darwin' : 'x86_64-apple-darwin';
   const nativeRoot = path.join(codex.root, 'node_modules', '@openai', `codex-${platformName}`);
-  const nativeManifest = packageVersion(nativeRoot, '@openai/codex', `${codex.manifest.version}-${platformName}`);
+  const nativeManifest = packageIdentity(nativeRoot, '@openai/codex');
+  if (nativeManifest.version !== `${codex.manifest.version}-${platformName}`)
+    fail('RUNNER_TOOLCHAIN_INVALID', 'Нативный пакет Codex не соответствует версии CLI');
   const native = path.join(nativeRoot, 'vendor', triple, 'bin', 'codex');
   if (!regularExecutable(native))
     fail('RUNNER_TOOLCHAIN_INVALID', 'Codex native binary небезопасен');
+  verifyCodexCapabilities(codex.entry);
   const identity = {
     nodeVersion: process.version,
     nodeDigest: fileDigest(NODE_BINARY),
@@ -991,7 +1028,7 @@ export async function probeRunner({ root }) {
     platform: `${process.platform}/${process.arch}`,
     node: { expectedMajor: 22, actual: null },
     codex: {
-      expected: CODEX_VERSION,
+      requirement: 'изолированный запуск с необходимыми параметрами',
       actual: null,
       authenticated: null,
     },
@@ -1102,38 +1139,13 @@ export async function probeRunner({ root }) {
   });
   details.codex.actual =
     typeof codexVersion.stdout === 'string' ? codexVersion.stdout.trim() : null;
-  const execHelp = spawnSync(toolchain.node, [toolchain.codexEntry, 'exec', '--help'], {
-    encoding: 'utf8',
-    timeout: 10_000,
-    maxBuffer: 512 * 1024,
-    env: aiEnvironment(),
-  });
-  const sandboxHelp = spawnSync(toolchain.node, [toolchain.codexEntry, 'sandbox', '--help'], {
-    encoding: 'utf8',
-    timeout: 10_000,
-    maxBuffer: 512 * 1024,
-    env: aiEnvironment(),
-  });
-  const execText = typeof execHelp.stdout === 'string' ? execHelp.stdout : '';
-  const sandboxText = typeof sandboxHelp.stdout === 'string' ? sandboxHelp.stdout : '';
-  const execFlagsReady = [
-    '--ignore-user-config',
-    '--strict-config',
-    '--ephemeral',
-    '--output-schema',
-    '--output-last-message',
-  ].every((flag) => execText.includes(flag));
-  details.sandbox.permissionProfiles = sandboxText.includes('--permission-profile');
   const binariesReady =
     nodeVersion.error === undefined &&
     codexVersion.error === undefined &&
-    execHelp.error === undefined &&
-    sandboxHelp.error === undefined &&
     regularExecutable(SANDBOX_EXEC) &&
     details.node.actual === process.version &&
-    details.codex.actual === `codex-cli ${Reflect.get(toolchain.identity, 'codexVersion')}` &&
-    execFlagsReady &&
-    details.sandbox.permissionProfiles;
+    details.codex.actual === `codex-cli ${Reflect.get(toolchain.identity, 'codexVersion')}`;
+  details.sandbox.permissionProfiles = binariesReady;
   return {
     ai: {
       available: binariesReady,

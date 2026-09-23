@@ -152,8 +152,12 @@ export function initializeProject(input, options = {}) {
       options = { ...options, model: 'provider-default', 'model-mode': 'provider' };
     if (options['model-mode'] === 'provider' || options.model === 'provider-default') codexModelSettings();
     const cli = inspectCodexInstallation({ codexPath: options['codex-path'] });
-    if (!cli.available)
-      fail('RUNNER_TOOLCHAIN_INVALID', 'Codex CLI не прошел проверку или не авторизован. Выполните codex login и повторите. Настройка не сохранена.');
+    if (!cli.available) {
+      const message = cli.reason === 'RUNNER_TOOLCHAIN_CAPABILITY'
+        ? 'Codex CLI не поддерживает обязательные параметры безопасного запуска. Обновите Codex CLI или Flowcairn. Настройка не сохранена.'
+        : 'Codex CLI не прошел проверку или не авторизован. Укажите безопасную npm-установку @openai/codex или выполните codex login. Настройка не сохранена.';
+      fail('RUNNER_TOOLCHAIN_INVALID', message);
+    }
   }
   if (!existingProfile && !options.model)
     fail(
