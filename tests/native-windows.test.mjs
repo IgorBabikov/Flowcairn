@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, realpathSync, rmSync, copyFileSync, chmodSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, realpathSync, rmSync, copyFileSync, chmodSync, existsSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { initializeProject } from '../bin/flowcairn.mjs';
@@ -54,6 +54,10 @@ process.stdin.on('end', () => { fs.writeFileSync(args[args.indexOf('--output-las
   writeFileSync(path.join(root, 'native-check.cjs'), `const fs=require('node:fs'); const path=require('node:path'); setTimeout(()=>{fs.mkdirSync('dist',{recursive:true});fs.writeFileSync(path.join('dist','marker.txt'), process.cwd());console.log('native-check-marker');}, ${delay});`);
   for (const file of [entry, path.join(cliRoot, 'package.json'), path.join(nativeRoot, 'package.json')]) chmodSync(file, 0o600);
   const cliProbe = inspectCodexInstallation({ codexPath: entry });
+  if (!cliProbe.available) {
+    const nodeStat = statSync(realpathSync(process.execPath));
+    t.diagnostic(JSON.stringify({ node: process.version, uid: process.getuid?.(), executable: { mode: nodeStat.mode, uid: nodeStat.uid, nlink: nodeStat.nlink } }));
+  }
   assert.equal(cliProbe.available, true, JSON.stringify(cliProbe));
   const installed = initializeProject(root, { provider: 'codex', 'codex-path': entry, model: 'fixture-model', 'model-mode': 'manual', 'reasoning-effort': 'medium', checks: 'tests', outputs: 'dist' });
   assert.equal(installed.profile.workspaceMode, 'direct');

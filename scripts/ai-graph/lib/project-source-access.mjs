@@ -1,5 +1,6 @@
+import { lstatHostSync as lstatSync, fstatHostSync as fstatSync } from './host-filesystem.mjs';
 import { createHash } from 'node:crypto';
-import { closeSync, fstatSync, lstatSync, openSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
+import { closeSync, openSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { isPathWithin, sameHostPath, noFollowReadFlags, crossStatIdentity } from './host-filesystem.mjs';
 import { GraphError } from './io.mjs';

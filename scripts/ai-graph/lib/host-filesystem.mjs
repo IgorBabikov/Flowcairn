@@ -99,15 +99,45 @@ function windowsStats(raw, bigint) {
   return result;
 }
 
+// Some Windows hosts on Node22.13.1/libuv1.49.2 return dev=0 from the
+// GetFileInformationByName path API. Obtain the missing volume from a handle;
+// never treat zero as a wildcard in an identity comparison. Only regular files
+// need this bridge: directory guards use path/path stat, lstat links stay links.
+function completeWindowsFileStat(file, initial, pathStat, {
+  open = openSync, handleStat = nativeFstatSync, close = closeSync,
+} = {}) {
+  if (!initial?.isFile() || initial.dev !== 0n) return initial;
+  const fields = ['ino', 'mode', 'nlink', 'size', 'mtimeNs', 'ctimeNs', 'birthtimeNs'];
+  const same = (left, right) => fields.every((field) => left[field] === right[field]);
+  const changed = () => { throw Object.assign(new Error('Filesystem identity changed during inspection'), { code: 'ESTALE' }); };
+  const fd = open(file, noFollowReadFlags());
+  try {
+    const opened = handleStat(fd, { bigint: true });
+    if (!opened.isFile() || !same(initial, opened)) changed();
+    const live = pathStat(file, { bigint: true });
+    const after = handleStat(fd, { bigint: true });
+    if (!live?.isFile() || live.dev !== initial.dev || !same(initial, live)
+      || after.dev !== opened.dev || !same(opened, after)) changed();
+    // initial is a new native Stats instance; preserve its type predicates and
+    // timestamps while repairing only the missing device value from the handle.
+    initial.dev = opened.dev;
+    return initial;
+  } finally { close(fd); }
+}
+
+export const HOST_FILESYSTEM_TESTING = Object.freeze({ completeWindowsFileStat });
+
 /** @returns {any} */
 export function lstatHostSync(file, options = {}) {
   if (process.platform !== 'win32') return nativeLstatSync(file, options);
-  return windowsStats(nativeLstatSync(file, { ...options, bigint: true }), Reflect.get(options, 'bigint') === true);
+  const raw = nativeLstatSync(file, { ...options, bigint: true });
+  return windowsStats(completeWindowsFileStat(file, raw, nativeLstatSync), Reflect.get(options, 'bigint') === true);
 }
 /** @returns {any} */
 export function statHostSync(file, options = {}) {
   if (process.platform !== 'win32') return nativeStatSync(file, options);
-  return windowsStats(nativeStatSync(file, { ...options, bigint: true }), Reflect.get(options, 'bigint') === true);
+  const raw = nativeStatSync(file, { ...options, bigint: true });
+  return windowsStats(completeWindowsFileStat(file, raw, nativeStatSync), Reflect.get(options, 'bigint') === true);
 }
 /** @returns {any} */
 export function fstatHostSync(fd, options = {}) {

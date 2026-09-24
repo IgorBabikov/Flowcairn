@@ -1,5 +1,6 @@
+import { lstatHostSync as lstatSync, fstatHostSync as fstatSync } from './host-filesystem.mjs';
 import { hasSecretContent } from './source-policy.mjs';
-import { closeSync, fstatSync, lstatSync, openSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
+import { closeSync, openSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { noFollowReadFlags, crossStatIdentity } from './host-filesystem.mjs';
 import { TextDecoder } from 'node:util';

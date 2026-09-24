@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, realpathSync, rmSync, linkSync, renameSync, symlinkSync, lstatSync, fstatSync, openSync, closeSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { isPrivateMode, isTrustedMode, assertPrivateMode, sameHostPath, isPathWithin, noFollowReadFlags, fsyncParentDirectory, canonicalStatDevice, crossStatIdentity } from './lib/host-filesystem.mjs';
+import { isPrivateMode, isTrustedMode, assertPrivateMode, sameHostPath, isPathWithin, noFollowReadFlags, fsyncParentDirectory, canonicalStatDevice, crossStatIdentity, lstatHostSync, fstatHostSync, HOST_FILESYSTEM_TESTING } from './lib/host-filesystem.mjs';
 import { inspectProjectSource, readProjectSourcePage } from './lib/project-source-access.mjs';
 import { fingerprintDirectWorkspace } from './lib/direct-workspace.mjs';
 import { captureDirectSource, verifyDirectSource } from './lib/direct-source.mjs';
@@ -105,8 +105,37 @@ test('new fixture path and descriptor stat identities agree on the current nativ
       // Only this newly created, public four-byte fixture; no project paths/data.
       t.diagnostic(JSON.stringify({ node: process.versions.node, uv: process.versions.uv, pathStat: values(before), fdStat: values(opened) }));
     }
-    assert.equal(crossStatIdentity(before), crossStatIdentity(opened));
+    assert.equal(crossStatIdentity(lstatHostSync(file, { bigint: true })), crossStatIdentity(fstatHostSync(fd, { bigint: true })));
     assert.equal(lstatSync(file, { bigint: true }).dev, before.dev);
     assert.equal(fstatSync(fd, { bigint: true }).dev, opened.dev);
   } finally { closeSync(fd); }
+});
+
+
+test('Windows missing path dev is recovered from a stable descriptor, never treated as wildcard', () => {
+  const base = { dev: 0n, ino: 1125899908200345n, mode: 33206n, nlink: 1n, size: 4n,
+    mtimeNs: 1790246620547666000n, ctimeNs: 1790246620547666000n, birthtimeNs: 1790246620547666000n,
+    isFile: () => true };
+  const handle = { ...base, dev: 3606225537n };
+  let closed = 0;
+  const { completeWindowsFileStat } = HOST_FILESYSTEM_TESTING;
+  const result = completeWindowsFileStat('synthetic-fixture', { ...base }, () => ({ ...base }), {
+    open: () => 123, handleStat: () => ({ ...handle }), close: (fd) => { assert.equal(fd, 123); closed++; },
+  });
+  assert.equal(result.dev, handle.dev);
+  assert.equal(closed, 1);
+  assert.equal(crossStatIdentity(result, 'win32'), crossStatIdentity(handle, 'win32'));
+  for (const field of ['ino', 'mode', 'nlink', 'size', 'mtimeNs', 'ctimeNs', 'birthtimeNs']) {
+    closed = 0;
+    assert.throws(() => completeWindowsFileStat('synthetic-fixture', { ...base }, () => ({ ...base, [field]: base[field] + 1n }), {
+      open: () => 123, handleStat: () => ({ ...handle }), close: () => { closed++; },
+    }), { code: 'ESTALE' });
+    assert.equal(closed, 1);
+  }
+  let calls = 0;
+  assert.throws(() => completeWindowsFileStat('synthetic-fixture', { ...base }, () => ({ ...base }), {
+    open: () => 123, handleStat: () => ({ ...handle, dev: ++calls === 1 ? handle.dev : handle.dev + 1n }), close: () => {},
+  }), { code: 'ESTALE' });
+  const link = { ...base, isFile: () => false };
+  assert.equal(completeWindowsFileStat('synthetic-fixture', link, () => { throw Error('Must not follow'); }), link);
 });
