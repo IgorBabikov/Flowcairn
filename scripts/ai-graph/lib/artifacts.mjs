@@ -1,3 +1,4 @@
+import { hasSecretContent } from './source-policy.mjs';
 import {
   closeSync,
   constants,
@@ -22,7 +23,7 @@ function content(root, entry) {
   for (let cursor = file; cursor !== root; cursor = path.dirname(cursor))
     if (lstatSync(cursor).isSymbolicLink())
       throw new GraphError('ARTIFACT_PATH', 'Artifact path содержит ссылку');
-  const handle = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+  const handle = openSync(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
   try {
     const stat = fstatSync(handle);
     if (!stat.isFile() || stat.nlink !== 1 || stat.size !== entry.size || stat.size > MAX_BYTES)
@@ -63,11 +64,8 @@ function text(bytes) {
     return null;
   }
 }
-function sensitive(value) {
-  return /-----BEGIN .*PRIVATE KEY-----|\bsk-[A-Za-z0-9_-]{16,}|\b(?:Bearer\s+[A-Za-z0-9._-]{12,})/i.test(
-    value,
-  );
-}
+const sensitive = hasSecretContent;
+
 const incomplete = (reason) => ({ content: `${reason}\n`, complete: false, mediaType: 'text/x-diff' });
 
 /** Exact attempt operations. Structural records are deterministic evidence, never an AI summary. */

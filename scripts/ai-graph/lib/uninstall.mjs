@@ -1,11 +1,12 @@
+import { gitExecutable, hostNullDevice } from './host-executables.mjs';
 import { spawnSync } from 'node:child_process';
 import { canonicalInstructionRoot, inspectInstructions, instructionError } from './instructions.mjs';
 import { INTEGRATION_JOURNAL, inspectIntegration, ownedBlockRange, readIntegrationJournal, readIntegrationTarget, replaceIntegrationFile, withIntegrationLock, writeIntegrationJournal } from './integration.mjs';
 
 function git(root, args, allowNonAncestor = false) {
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')));
-  Object.assign(env, { GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0' });
-  const result = spawnSync('/usr/bin/git', ['--no-optional-locks', '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', '-C', root, ...args], { encoding: 'utf8', timeout: 5000, maxBuffer: 1024 * 1024, env, stdio: ['ignore', 'pipe', 'pipe'] });
+  Object.assign(env, { GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: hostNullDevice, GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0' });
+  const result = spawnSync(gitExecutable(), ['--no-optional-locks', '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', '-C', root, ...args], { encoding: 'utf8', timeout: 5000, maxBuffer: 1024 * 1024, env, stdio: ['ignore', 'pipe', 'pipe'] });
   if (!result.error && result.status === 1 && allowNonAncestor) return null;
   if (result.error || result.status !== 0) instructionError('UNINSTALL_WORKTREE_UNKNOWN', 'Worktree state could not be verified; preserve it and resolve before uninstall.');
   return result.stdout.trim();

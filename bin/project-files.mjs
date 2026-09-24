@@ -1,3 +1,4 @@
+import { gitExecutable } from '../scripts/ai-graph/lib/host-executables.mjs';
 import { execFileSync } from 'node:child_process';
 import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
@@ -11,7 +12,7 @@ function fail(code, message) {
 }
 
 export function git(root, args) {
-  return execFileSync('/usr/bin/git', ['-C', root, ...args], {
+  return execFileSync(gitExecutable(), ['-C', root, ...args], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
   }).trim();

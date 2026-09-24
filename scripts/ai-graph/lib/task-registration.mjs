@@ -1,3 +1,4 @@
+import { gitExecutable, hostNullDevice, hostSystemEnvironment } from './host-executables.mjs';
 // Shared domain registration for CLI and local UI. No browser or CLI dependencies.
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -17,12 +18,12 @@ function fail(code, message) {
   throw new GraphError(code, message);
 }
 function git(root, args) {
-  return execFileSync('/usr/bin/git', ['-C', root, '-c', 'core.fsmonitor=false', ...args], {
+  return execFileSync(gitExecutable(), ['-C', root, '-c', 'core.fsmonitor=false', ...args], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
     timeout: 10_000,
     maxBuffer: 2 * 1024 * 1024,
-    env: { PATH: '/usr/bin:/bin', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_OPTIONAL_LOCKS: '0' },
+    env: { ...hostSystemEnvironment(), PATH: '/usr/bin:/bin', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: hostNullDevice, GIT_OPTIONAL_LOCKS: '0' },
   }).trim();
 }
 
@@ -229,7 +230,7 @@ export async function createTask(input, taskInput, options = {}) {
       resources: task.resources ?? [],
       dependsOn: [],
       acceptance: task.acceptance,
-      checks: [['/usr/bin/git', 'diff', '--check']],
+      checks: [[gitExecutable(), 'diff', '--check']],
       model: profile.ai.model,
       effort: 'medium',
     };

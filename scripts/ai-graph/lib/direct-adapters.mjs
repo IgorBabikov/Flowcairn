@@ -1,9 +1,11 @@
 import path from 'node:path';
+import { sameHostPath } from './host-filesystem.mjs';
 import { existsSync, realpathSync } from 'node:fs';
 import { GraphError, hashObject } from './io.mjs';
 import { isInstructionPath, isSensitivePath, overlaps } from './registry.mjs';
 import { projectContextPaths } from './project.mjs';
 import { fingerprintDirectWorkspace } from './direct-workspace.mjs';
+import { fingerprintProjectSource } from './project-source-access.mjs';
 import { selectDirectTaskScope } from './direct-scope.mjs';
 import { inspectDirectChanges } from './direct-fingerprint.mjs';
 import { captureDirectSource, verifyDirectSource } from './direct-source.mjs';
@@ -15,25 +17,30 @@ export function directAdapters(root, profile, base) {
   const projectRoot = realpathSync(root);
   let previewSnapshot = null;
   const fingerprint = (worktree) => {
-    if (realpathSync(worktree) !== projectRoot) throw new GraphError('DIRECT_ROOT', 'Работа вышла за текущий проект');
+    if (!sameHostPath(realpathSync(worktree), projectRoot)) throw new GraphError('DIRECT_ROOT', 'Работа вышла за текущий проект');
     // Dependency directories are already excluded by the direct scanner and
     // bound separately by verifyToolchain; they are not user output paths.
     return fingerprintDirectWorkspace(projectRoot, { outputPaths: profile.outputPaths });
   };
+  const safeInventory = () => {
+    const snapshot = fingerprintProjectSource(projectRoot, { outputPaths: profile.outputPaths, denyGlobs: profile.aiDenyGlobs ?? [] });
+    return { ...snapshot, files: snapshot.files.filter((file) => !file.path.split('/').includes('.DS_Store')) };
+  };
   const projectSummary = () => {
     const snapshot = fingerprint(projectRoot);
-    previewSnapshot = snapshot;
-    const files = snapshot.files.map((file) => file.path);
+    const safeSource = safeInventory();
+    previewSnapshot = { files: safeSource.files, hash: snapshot.hash };
+    const files = safeSource.files.map((file) => file.path);
     const excluded = ['.flowcairn.json', ...profile.outputPaths];
     const scopeCandidates = [...new Set(files.filter((file) => !isInstructionPath(file) &&
       !excluded.some((entry) => overlaps(file, entry))).map((file) => file.includes('/') ? file.split('/')[0] : file))].sort();
     if (scopeCandidates.length > 256) throw new GraphError('INTAKE_SCOPE_LIMIT', 'Уточните область задачи');
-    const contextPaths = [...new Set([...projectContextPaths(projectRoot, profile), ...base.instructionPaths()])].sort();
+    const contextPaths = [...new Set([...projectContextPaths(projectRoot, profile), ...base.instructionPaths()])].filter((file) => files.includes(file)).sort();
     const firstTask = !existsSync(path.join(projectRoot, '.ai-orchestrator', 'graph', 'state.json'));
     const bootstrap = { firstTask, required: false, changedPaths: [], untrackedCandidates: [], requiredUntracked: [],
       snapshotHash: hashObject({ source: snapshot.hash }) };
     return { schemaVersion: 2, name: path.basename(projectRoot), sourceHash: snapshot.hash,
-      contextHash: hashObject({ runtimeHash: base.identity(), sourceHash: snapshot.hash, contextPaths, scopeCandidates, profile }),
+      contextHash: hashObject({ runtimeHash: base.identity(), sourceHash: snapshot.hash, contextPaths, scopeCandidates, profile, safeSourceHash: safeSource.hash }),
       contextPaths, scopeCandidates, bootstrap, checks: profile.checks,
       ai: { provider: profile.ai.provider, model: profile.ai.model },
       capabilities: { intake: { allowed: scopeCandidates.length > 0, reason: scopeCandidates.length ? null : 'Не найдены файлы проекта для задачи' } } };
@@ -44,18 +51,18 @@ export function directAdapters(root, profile, base) {
     taskContextInventory: () => {
       // Match the project summary's exact snapshot. Intake/capture rechecks
       // freshness before mutation; a preview does not need a second full scan.
-      const snapshot = previewSnapshot ?? fingerprint(projectRoot);
+      const snapshot = previewSnapshot ?? { files: safeInventory().files, hash: fingerprint(projectRoot).hash };
       return { files: snapshot.files.map((file) => file.path), sourceHash: snapshot.hash };
     },
     selectTaskScope: (description, candidates) =>
-      selectDirectTaskScope(description, fingerprint(projectRoot).files.map((file) => file.path), candidates),
+      selectDirectTaskScope(description, safeInventory().files.map((file) => file.path), candidates),
     registerTask: async (selectedRoot, task, options) => {
-      if (realpathSync(selectedRoot) !== projectRoot) throw new GraphError('DIRECT_ROOT', 'Задача относится к другому проекту');
+      if (!sameHostPath(realpathSync(selectedRoot), projectRoot)) throw new GraphError('DIRECT_ROOT', 'Задача относится к другому проекту');
       if (options.contextHash && options.contextHash !== projectSummary().contextHash)
         throw new GraphError('STALE_CONTEXT', 'Файлы изменились после проверки области задачи. Проверьте ее заново.');
       const selected = task.includeUntracked ?? [];
       if (selected.length) {
-        const available = new Set(fingerprint(projectRoot).files.map((file) => file.path));
+        const available = new Set(safeInventory().files.map((file) => file.path));
         if (selected.some((file) => file === '.flowcairn.json' || isSensitivePath(file) || !available.has(file)))
           throw new GraphError('DIRECT_SCOPE', 'Явно выбранный файл недоступен для задачи');
       }

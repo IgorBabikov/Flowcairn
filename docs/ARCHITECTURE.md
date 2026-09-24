@@ -38,7 +38,8 @@ flowchart TD
 | `task-proof-service.mjs`, `task-snapshot.mjs` | Подключают доказательства к проверенному живому состоянию и создают read model для UI |
 | `store.mjs`, `workspace.mjs`, `patch.mjs` | Durable local state, fingerprint файлов и безопасное применение изменений |
 | `json-transfers.mjs`, `change-evidence.mjs`, `unified-diff.mjs` | Точный перенос ключей большого JSON и проверяемое описание изменений без передачи целого файла в review |
-| `docker-checks.mjs`, `docker-stop-proof.mjs` | Исполнение контейнера отделено от хранения и проверки доказательств остановки |
+| `runner.mjs`, `supervisor.mjs` | Локальные проверки в рабочем каталоге проекта, ограничение времени и подтверждение остановки |
+| `docker-checks.mjs`, `docker-stop-proof.mjs` | Legacy код для восстановления старых контейнерных receipts; новые checks сюда не направляются |
 | `orchestrator-*.mjs` | Отдельные границы registry/locks, Git, Graph leases, delivery, integration, inspection и source bootstrap Orchestrator |
 | `bin/installation.mjs`, `bin/project-files.mjs` | Установка и безопасные операции с проектом отделены от CLI dispatch |
 | `AppFrame.tsx`, `TaskOverview.tsx`, `TaskCockpit.tsx`, `ResourcePanel.tsx`, `ProjectStatus.tsx` | Стабильный каркас, основной экран задачи, требования, evidence и ресурсы; семантика PROVEN не вычисляется в React |
@@ -75,6 +76,32 @@ Store использует CAS, locks, durable revisions и fsync. Текущи�
 
 Для реализации compiler использует paths текущего шага, explicit readPaths, необходимые зависимости и проектные инструкции. Полный review bundle имеет отдельный предел 512 KiB и не обрезается молча. Провайдеры получают структурированные данные, а executable actions выбирает registry.
 
-Для нового локального проекта default — `trusted-local`: runtime регистрирует только найденные conventional scripts и связывает их точные имена и команды hash локальной установки. Изменившиеся scripts не запускаются до повторного `setup`. `none` и `hardened` остаются явными настройками. Произвольные команды из model/task JSON не исполняются. Внешние side effects, commit, push и deploy не следуют из PROVEN.
+Для нового локального проекта default — `trusted-local`: runtime регистрирует найденные conventional scripts и связывает их имена и профиль с локальной установкой. Эта привязка не означает отдельный hash содержимого каждого script. `none` и `hardened` остаются явными настройками. Команды проверок выбирает registry, а не model/task JSON. Штатные инструменты AI-клиента подчиняются его собственным правам. Внешние side effects, commit, push и deploy не следуют из PROVEN.
 
 Фундаментальные сущности — Task, Requirement, Work, Artifact, Evidence, Finding и Result. Полноценный текущий executor работает с software development; поддержка других доменов требует собственных действий и verifiers, а не нового значения зеленого статуса. [Подробные ограничения](LIMITATIONS.md).
+
+## Прямое исполнение и защита данных
+
+Рабочий каталог Codex, Claude Code или Cursor — `projectRoot` (либо явно выбранный Git worktree). Клиент читает нужные исходники штатными инструментами. Flowcairn не создает обязательную копию проекта или дополнительную OS sandbox и не отключает permission controls клиента. Worktree нужен для организации ветки, а не для изоляции секретов.
+
+Executor получает структурированный результат и применяет patches через существующий broker: разрешенные пути, исходные хеши, ownership и scope проверяются перед записью. Сам факт доступности native tools не расширяет согласованный план. Прямые сторонние изменения учитываемых исходников могут сделать evidence stale.
+
+`source-policy.mjs` задает общие проверки имен и содержимого; `aiDenyGlobs` дополняет их из локального профиля. Они действуют на формируемые Flowcairn prompts, контекст broker, правки, артефакты и logs. Адаптер использует доступные ограничения клиента, но глобального посредника для всех native tools и произвольных scripts нет. Недоступность секретов любому дочернему процессу не гарантируется.
+
+`trusted-local` и совместимое имя `hardened` запускают обычные проверки в рабочем каталоге с установленными зависимостями. Docker и отдельная копия зависимостей не нужны. Старые контейнерные receipts восстанавливаются отдельным legacy-кодом.
+
+CLI использует собственную официальную авторизацию; отдельный HOME с копиями credentials не создается. Flowcairn не сохраняет токены и не подставляет обходные флаги разрешений.
+
+
+## Нативный Windows
+
+`host-filesystem.mjs` разделяет проверки ссылок/идентичности файла и POSIX mode;
+NTFS ACL не имитируются через chmod. `host-executables.mjs` разрешает Git для
+текущей ОС, `provider-process-platform.mjs` сохраняет системное окружение и
+официальную авторизацию CLI. Shell shims не запускаются через `shell: true`.
+
+`windows-job.mjs` компилирует небольшой включенный в пакет C# launcher системным
+компилятором .NET Framework. Процесс создается suspended, прикрепляется к Job
+Object и только затем запускается. Завершение подтверждается после остановки
+процессов job; обычный exit без проверяемого подтверждения не становится PASS.
+Это механизм жизненного цикла, а не дополнительная файловая изоляция.

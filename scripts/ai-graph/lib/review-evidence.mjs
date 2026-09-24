@@ -1,3 +1,5 @@
+import { isPrivateMode } from './host-filesystem.mjs';
+import { assertSafeText } from './source-policy.mjs';
 import { randomUUID } from 'node:crypto';
 import {
   fchmodSync,
@@ -261,6 +263,7 @@ export function validateReviewEvidence(value, { node, task, plan }) {
     if (before && after && before !== after) fail('Цепочка fingerprint между версиями неполная');
   }
   const content = canonicalJson(evidence);
+  assertSafeText(content);
   if (Buffer.byteLength(content) > MAX_REVIEW_EVIDENCE_BYTES)
     throw new GraphError(
       'REVIEW_EVIDENCE_LIMIT',
@@ -365,7 +368,7 @@ function physicalDirectory(directory) {
   if (realpathSync(directory) !== directory) fail('Review file directory содержит ссылку');
   for (let cursor = directory; cursor !== path.dirname(cursor); cursor = path.dirname(cursor))
     if (lstatSync(cursor).isSymbolicLink()) fail('Review file ancestor содержит ссылку');
-  if (lstatSync(directory).mode & 0o077) fail('Review file directory должен быть private');
+  if (!isPrivateMode(lstatSync(directory))) fail('Review file directory должен быть private');
 }
 export function createReviewEvidenceFile(directory, bundle) {
   physicalDirectory(directory);
@@ -377,7 +380,7 @@ export function createReviewEvidenceFile(directory, bundle) {
     identity = { path: file, dev: stat.dev, ino: stat.ino };
     writeFileSync(writer, bundle.content);
     fchmodSync(writer, 0o400);
-    fd = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+    fd = openSync(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
     const descriptor = { ...identity, fd, hash: bundle.hash, bytes: bundle.bytes };
     verifyReviewEvidenceFile(descriptor);
     return descriptor;
@@ -397,7 +400,7 @@ export function verifyReviewEvidenceFile(file) {
     if (
       !stat.isFile() ||
       stat.nlink !== 1 ||
-      (stat.mode & 0o777) !== 0o400 ||
+      (process.platform !== 'win32' && (stat.mode & 0o777) !== 0o400) ||
       stat.uid !== process.getuid() ||
       stat.size !== file.bytes ||
       stat.size > MAX_REVIEW_EVIDENCE_BYTES ||

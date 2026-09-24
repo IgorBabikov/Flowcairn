@@ -1,3 +1,4 @@
+import { isTrustedMode } from './host-filesystem.mjs';
 import { lstatSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
@@ -12,13 +13,13 @@ const ExternalProviderConsentSchema = z.strictObject({
   instructionsHash: Hash,
   skillsHash: Hash,
   artifactsHash: Hash,
-  transmitted: z.array(z.enum(['approved-scope', 'approved-instructions', 'approved-skills', 'approved-artifacts'])).min(1).max(4),
-  excluded: z.array(z.enum(['secrets', 'environment-files', 'git-history', 'unapproved-files', 'project-host-shell'])).min(5).max(5),
+  transmitted: z.array(z.enum(['project-files', 'safe-project', 'approved-scope', 'approved-instructions', 'approved-skills', 'approved-artifacts'])).min(1).max(4),
+  excluded: z.array(z.enum(['secrets', 'environment-files', 'git-history', 'unapproved-files', 'policy-denied-files', 'project-host-shell'])).min(5).max(5),
 }).refine((value) => new Set(value.transmitted).size === value.transmitted.length && new Set(value.excluded).size === value.excluded.length);
 
 export const EXTERNAL_PROVIDER_CONSENT = Object.freeze({
-  transmitted: Object.freeze(['approved-scope', 'approved-instructions', 'approved-skills', 'approved-artifacts']),
-  excluded: Object.freeze(['secrets', 'environment-files', 'git-history', 'unapproved-files', 'project-host-shell']),
+  transmitted: Object.freeze(['project-files', 'approved-instructions', 'approved-skills', 'approved-artifacts']),
+  excluded: Object.freeze(['secrets', 'environment-files', 'git-history', 'policy-denied-files', 'project-host-shell']),
 });
 
 /** External execution binds this exact disclosure to an immutable plan and receipt. */
@@ -55,7 +56,7 @@ export const HARNESS_DESCRIPTORS = Object.freeze({
     runtime: Object.freeze({
       status: 'available-after-probe',
       execution: 'safe-readonly-cli-adapter',
-      reason: 'CLI запускается только в пустом private workspace в sandbox и Ask mode. Его JSON-ответ дополнительно валидируется flowcairn; нужна точная версия и отдельное согласие.',
+      reason: 'Прямое чтение проекта в штатном ask/sandbox режиме Cursor; ограничения зависят от клиента. Нужны закрепленная версия и согласие.',
     }),
   }),
 });
@@ -64,7 +65,7 @@ function regularExecutable(candidate) {
   try {
     const resolved = realpathSync(candidate);
     const stat = statSync(resolved);
-    return stat.isFile() && !lstatSync(candidate).isDirectory() && (stat.mode & 0o111) !== 0 && (stat.mode & 0o022) === 0;
+    return stat.isFile() && !lstatSync(candidate).isDirectory() && (process.platform === 'win32' || (stat.mode & 0o111) !== 0) && isTrustedMode(stat);
   } catch {
     return false;
   }

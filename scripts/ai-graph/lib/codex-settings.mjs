@@ -1,3 +1,4 @@
+import { isTrustedMode } from './host-filesystem.mjs';
 import { parse } from 'smol-toml';
 import { closeSync, constants, fstatSync, openSync, readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -8,9 +9,9 @@ import { GraphError } from './io.mjs';
 export function codexModelSettings(configPath = path.join(process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex'), 'config.toml')) {
   let fd;
   try {
-    fd = openSync(configPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+    fd = openSync(configPath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
     const before = fstatSync(fd);
-    if (!before.isFile() || before.nlink !== 1 || before.size > 256 * 1024 || (before.mode & 0o022)) throw new Error('unsafe config');
+    if (!before.isFile() || before.nlink !== 1 || before.size > 256 * 1024 || !isTrustedMode(before)) throw new Error('unsafe config');
     const bytes = readFileSync(fd);
     const after = fstatSync(fd);
     if (before.size !== bytes.length || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs) throw new Error('changed config');

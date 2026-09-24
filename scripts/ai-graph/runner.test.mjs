@@ -570,7 +570,7 @@ test('review file transport grants exactly one trusted read without enlarging pr
   const prepared = RUNNER_TESTING.makeAiCommand({
     ...contract,
     node,
-    worktree: '/private/tmp/isolated-worktree',
+    worktree: realpathSync(fixture()),
     skills: [],
     priorEvidence: { path: '/private/tmp/forged-evidence' },
     reviewBundle: { content, bytes: Buffer.byteLength(content), hash: sha256(content) },
@@ -587,7 +587,7 @@ test('review file transport grants exactly one trusted read without enlarging pr
     assert.ok(filesystem.includes(JSON.stringify(prepared.reviewFile.path)));
     assert.ok(!filesystem.includes('/private/tmp/forged-evidence'));
     assert.ok(!filesystem.includes(`${JSON.stringify(outputPath)}="read"`));
-    assert.ok(filesystem.includes('"/private/tmp/isolated-worktree/.git"="deny"'));
+    assert.ok(filesystem.includes(`${JSON.stringify(prepared.sourceIndex.root)}="read"`));
     assert.ok(prepared.input.includes(prepared.reviewFile.path));
     assert.ok(prepared.input.includes('Прочитай весь JSON'));
     assert.ok(prepared.input.includes('не ограничивайся первым фрагментом'));
@@ -636,7 +636,7 @@ test('failed prompt preparation releases the private evidence file and schema/re
         ...contract,
         node,
         task: { ...contract.task, instructions: 'x'.repeat(128 * 1024) },
-        worktree: '/private/tmp/isolated-worktree',
+        worktree: realpathSync(fixture()),
         skills: [],
         priorEvidence: null,
         reviewBundle: { content, bytes: Buffer.byteLength(content), hash: sha256(content) },
@@ -711,7 +711,7 @@ test('ручной выбор сохраняет модель и усилени�
   const node = { ...contract.node, id: 'review', action: { id: 'ai-review' } };
   contract.plan.nodes = [node];
   const content = '{}';
-  const prepared = RUNNER_TESTING.makeAiCommand({ ...contract, node, worktree: '/private/tmp/isolated-worktree', skills: [], priorEvidence: null,
+  const prepared = RUNNER_TESTING.makeAiCommand({ ...contract, node, worktree: realpathSync(fixture()), skills: [], priorEvidence: null,
     reviewBundle: { content, bytes: 2, hash: sha256(content) }, outputPath: realpathSync(fixture()),
     toolchain: { node: NODE_BINARY, codexEntry: '/trusted/codex.js', digest: 'a'.repeat(64) },
     profile: { outputPaths: [], ai: { provider: 'codex', model: 'chosen-model', reviewModel: 'other-model', modelMode: 'manual', reasoningEffort: 'low', reviewReasoningEffort: 'high' } },
@@ -732,7 +732,7 @@ test('auto effort follows contract rigor and records actual prompt bytes', async
     const contract = runnerContract();
     contract.plan.taskContract = buildTaskContract(contract.task);
     contract.plan.taskContract.rigor.level = level;
-    const prepared = RUNNER_TESTING.makeAiCommand({ ...contract, worktree: '/private/tmp/isolated-worktree', skills: [], priorEvidence: null,
+    const prepared = RUNNER_TESTING.makeAiCommand({ ...contract, worktree: realpathSync(fixture()), skills: [], priorEvidence: null,
       reviewBundle: null, outputPath: realpathSync(fixture()),
       toolchain: { node: NODE_BINARY, codexEntry: '/trusted/codex.js', digest: 'a'.repeat(64) },
       profile: { outputPaths: [], ai: { provider: 'codex', model: 'chosen-model', modelMode: 'auto' } },
@@ -752,7 +752,7 @@ test('режим provider передает только модель и усил
   const previousHome = process.env.CODEX_HOME;
   process.env.CODEX_HOME = outputPath;
   writeFileSync(path.join(outputPath, 'config.toml'), 'model="gpt-5.6-sol"\nmodel_reasoning_effort="high"\nnotify=["untrusted-command"]\n');
-  const prepared = RUNNER_TESTING.makeAiCommand({ ...contract, worktree: '/private/tmp/isolated-worktree', skills: [], priorEvidence: null, outputPath,
+  const prepared = RUNNER_TESTING.makeAiCommand({ ...contract, worktree: realpathSync(fixture()), skills: [], priorEvidence: null, outputPath,
     profile: { outputPaths: [], ai: { provider: 'codex', model: 'provider-default', modelMode: 'provider' } },
     toolchain: { node: NODE_BINARY, codexEntry: '/trusted/codex.js', digest: 'a'.repeat(64) },
     dependencyToolchain: { dependencyPaths: [], hash: 'b'.repeat(64) },
@@ -760,7 +760,7 @@ test('режим provider передает только модель и усил
   try {
     assert.equal(prepared.command.args[prepared.command.args.indexOf('--model') + 1], 'gpt-5.6-sol');
     assert.ok(prepared.command.args.includes('model_reasoning_effort="high"'));
-    assert.ok(prepared.command.args.includes('--ignore-user-config'));
+    assert.ok(!prepared.command.args.includes('--ignore-user-config'));
     assert.equal(prepared.execution.model, 'gpt-5.6-sol');
     assert.equal(JSON.stringify(prepared.command.args).includes('untrusted-command'), false);
   } finally {
@@ -769,7 +769,7 @@ test('режим provider передает только модель и усил
   }
 });
 
-test('большой lock исключается из AI context, его hash остается частью workspace integrity', async () => {
+test('большой lock требует страниц и остается частью workspace integrity', async () => {
   const { RUNNER_TESTING } = await import('./lib/runner.mjs');
   const { fingerprintWorkspace } = await import('./lib/workspace.mjs');
   const { spawnSync } = await import('node:child_process');
@@ -781,15 +781,14 @@ test('большой lock исключается из AI context, его hash о
   const node={resources:{reads:['form.mjs','package-lock.json']}};
   const task={scope:node.resources.reads,contextPaths:[],forbiddenPaths:[]};
   const before=fingerprintWorkspace(root);
-  const selected=RUNNER_TESTING.selectedSourceContext(root,node,task,profile);
-  assert.deepEqual(selected.map(file=>file.path),['form.mjs']);
+  assert.throws(() => RUNNER_TESTING.selectedSourceContext(root,node,task,profile), { code: 'AI_CONTEXT_LIMIT' });
   assert.ok(before.files.some(file=>file.path==='package-lock.json'));
   assert.ok(RUNNER_TESTING.instructionDenials(root,node,profile).includes('package-lock.json'));
   writeFileSync(path.join(root,'package-lock.json'),'{}');
   assert.notEqual(fingerprintWorkspace(root).hash,before.hash);
 });
 
-test('соседний AGENT.md не входит в scoped AI context и запрещен Codex sandbox', async () => {
+test('соседний AGENT.md доступен как данные безопасного снимка', async () => {
  const { RUNNER_TESTING } = await import('./lib/runner.mjs');
  const { spawnSync } = await import('node:child_process');
  const { mkdirSync } = await import('node:fs');
@@ -801,7 +800,7 @@ test('соседний AGENT.md не входит в scoped AI context и зап
  const node={resources:{reads:['apps','apps/api/AGENT.md']}};const profile={outputPaths:[]};
  const selected=RUNNER_TESTING.selectedSourceContext(root,node,task,profile);
  assert.ok(selected.some(file=>file.path==='apps/api/AGENT.md'));
- assert.ok(!selected.some(file=>file.path==='apps/web/AGENT.md'));
+ assert.ok(selected.some(file=>file.path==='apps/web/AGENT.md'));
  assert.ok(RUNNER_TESTING.instructionDenials(root,node,profile).includes('apps/web/AGENT.md'));
 });
 
@@ -811,7 +810,7 @@ test('схема edits ограничена буквальными путями 
   const outputPath = realpathSync(fixture());
   const contract = runnerContract();
   const node = { ...contract.node, action: { id: 'ai-implement', version: 1, inputs: {} }, skills: ['project-context'], resources: { reads: ['src', 'styles.css'], writes: ['src/form.mjs', 'styles.css'], exclusive: [] } };
-  const prepared = RUNNER_TESTING.makeAiCommand({ ...contract, node, plan: { ...contract.plan, nodes: [node] }, worktree: '/private/tmp/isolated-worktree', skills: [], priorEvidence: null, outputPath,
+  const prepared = RUNNER_TESTING.makeAiCommand({ ...contract, node, plan: { ...contract.plan, nodes: [node] }, worktree: realpathSync(fixture()), skills: [], priorEvidence: null, outputPath,
     profile: { ai: { model: 'fixture-model' }, outputPaths: [] },
     toolchain: { node: process.execPath, codexEntry: '/trusted/codex.js', digest: 'a'.repeat(64) },
     dependencyToolchain: { dependencyPaths: [], hash: 'b'.repeat(64) },
@@ -831,7 +830,7 @@ test('read-only AI schemas forbid every mutation channel including structured JS
   for (const action of ['ai-analyze', 'ai-plan', 'ai-review']) {
     const node = { ...contract.node, action: { id: action, version: 1, inputs: {} }, resources: { ...contract.node.resources, writes: [] } };
     const prepared = RUNNER_TESTING.makeAiCommand({ ...contract, node, plan: { ...contract.plan, nodes: [node] },
-      worktree: '/private/tmp/isolated-worktree', skills: [], priorEvidence: null, outputPath: realpathSync(fixture()),
+      worktree: realpathSync(fixture()), skills: [], priorEvidence: null, outputPath: realpathSync(fixture()),
       profile: { ai: { model: 'fixture-model' }, outputPaths: [] },
       toolchain: { node: process.execPath, codexEntry: '/trusted/codex.js', digest: 'a'.repeat(64) },
       dependencyToolchain: { dependencyPaths: [], hash: 'b'.repeat(64) },
@@ -844,7 +843,7 @@ test('read-only AI schemas forbid every mutation channel including structured JS
   }
 });
 
-test('prompt отделяет запрет корня worktree от разрешенных read paths', async () => {
+test('prompt и native permissions используют исходный проект' , async () => {
   const { RUNNER_TESTING } = await import('./lib/runner.mjs');
   const outputPath = realpathSync(fixture());
   const contract = runnerContract();
@@ -853,7 +852,7 @@ test('prompt отделяет запрет корня worktree от разреш
     action: { id: 'ai-implement', version: 1, inputs: {} },
     resources: { reads: ['index.html', 'styles.css', 'src'], writes: ['src/form.mjs'], exclusive: [] },
   };
-  const worktree = '/private/tmp/isolated-worktree';
+  const worktree = realpathSync(fixture());
   const prepared = RUNNER_TESTING.makeAiCommand({ ...contract, node, plan: { ...contract.plan, nodes: [node] }, worktree, skills: [], priorEvidence: null, outputPath,
     profile: { ai: { model: 'fixture-model' }, outputPaths: [] },
     toolchain: { node: process.execPath, codexEntry: '/trusted/codex.js', digest: 'a'.repeat(64) },
@@ -861,10 +860,8 @@ test('prompt отделяет запрет корня worktree от разреш
   });
   try {
     const filesystem = prepared.command.args.find((item) => item.startsWith('permissions.graph-ai-implement.filesystem='));
-    assert.ok(filesystem.includes(`${JSON.stringify(worktree)}="deny"`));
-    for (const relative of node.resources.reads)
-      assert.ok(filesystem.includes(`${JSON.stringify(path.join(worktree, relative))}="read"`));
-    assert.match(prepared.input, /не запускай ls \./i);
-    assert.match(prepared.input, /точно перечисленные paths/i);
+    assert.equal(prepared.command.cwd, worktree);
+    assert.ok(filesystem.includes(`${JSON.stringify(prepared.sourceIndex.root)}="read"`));
+    assert.match(prepared.input, /исходн(?:ый|ом) (?:проект|каталог)/i);
   } finally { RUNNER_TESTING.cleanupPrepared(prepared); }
 });

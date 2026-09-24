@@ -127,17 +127,17 @@ test('rejects ignored, sensitive and traversal paths from allowedUntracked', () 
     (error) => error.code === 'UNTRACKED_NOT_ALLOWED',
   );
   writeFileSync(path.join(root, '.env'), 'TOKEN=test\n');
-  writeFileSync(path.join(root, '.env.local.example'), 'TOKEN=placeholder\n');
-  writeFileSync(path.join(root, 'secret-boundary.spec.ts'), 'export const value = true;\n');
+  writeFileSync(path.join(root, '.env.local.example'), 'TOKEN=\n');
+  writeFileSync(path.join(root, 'boundary.spec.ts'), 'export const value = true;\n');
   const templates = captureSourceBundle(root, storage(), {
-    allowedUntracked: ['.env.local.example', 'secret-boundary.spec.ts'],
+    allowedUntracked: ['.env.local.example', 'boundary.spec.ts'],
   });
   assert.equal(
     templates.manifest.entries.some((entry) => entry.path === '.env.local.example'),
     true,
   );
   assert.equal(
-    templates.manifest.entries.some((entry) => entry.path === 'secret-boundary.spec.ts'),
+    templates.manifest.entries.some((entry) => entry.path === 'boundary.spec.ts'),
     true,
   );
   assert.throws(
@@ -529,4 +529,73 @@ test('rejects executable mode drift during final materialization verification', 
     context.mock.restoreAll();
     syncBuiltinESMExports();
   }
+});
+
+
+test('rejects secret content in historical index blobs before writing a source bundle', () => {
+  const root = repository();
+  writeFileSync(path.join(root, 'src', 'value.txt'), 'api_key="' + 'z'.repeat(24) + '"');
+  git(root, ['add', 'src/value.txt']);
+  writeFileSync(path.join(root, 'src', 'value.txt'), 'clean current content');
+  assert.throws(() => captureSourceBundle(root, storage()), (error) =>
+    error.code === 'SENSITIVE_SOURCE_CONTENT' && !error.message.includes(root) && !error.message.includes('value.txt'));
+});
+
+test('shared sensitive names are denied but host control profile remains reconstructable', () => {
+  const root = repository();
+  writeFileSync(path.join(root, 'access-token.json'), '{}');
+  assert.throws(() => captureSourceBundle(root, storage(), { allowedUntracked: ['access-token.json'] }), (error) => error.code === 'SENSITIVE_SOURCE_PATH');
+  writeFileSync(path.join(root, '.flowcairn.json'), '{"version":1}');
+  const bundle = captureSourceBundle(root, storage(), { allowedUntracked: ['.flowcairn.json'] });
+  assert.ok(bundle.manifest.entries.some((entry) => entry.path === '.flowcairn.json'));
+});
+
+function supplementalRepository() {
+  const root = mkdtempSync(path.join(TEST_TMP_ROOT, 'flowcairn-supplemental-'));
+  git(root, ['init', '-b', 'develop']);
+  writeFileSync(path.join(root, '.gitignore'), 'local/\n');
+  writeFileSync(path.join(root, 'app.js'), 'console.log("safe")');
+  git(root, ['add', '.gitignore', 'app.js']);
+  mkdirSync(path.join(root, 'local'));
+  writeFileSync(path.join(root, 'local', 'settings.json'), '{"theme":"dark"}');
+  writeFileSync(path.join(root, 'local', '.env'), 'PRIVATE=hidden');
+  writeFileSync(path.join(root, 'local', 'unsafe.txt'), 'api_key="' + 'z'.repeat(24) + '"');
+  writeFileSync(path.join(root, 'unapproved.js'), 'console.log("not selected")');
+  return root;
+}
+
+test('trusted profile adds only safe ignored files to materialized source without staging originals', () => {
+  const root = supplementalRepository();
+  const output = storage();
+  const beforeIndex = execFileSync('/usr/bin/git', ['ls-files', '--stage'], { cwd: root });
+  const bundle = captureSourceBundle(root, output, { profile: { outputPaths: [], aiDenyGlobs: [] } });
+  const target = path.join(path.dirname(output), 'materialized');
+  materializeSourceBundle(bundle.bundlePath, target);
+  assert.equal(readFileSync(path.join(target, 'local/settings.json'), 'utf8'), '{"theme":"dark"}');
+  assert.equal(existsSync(path.join(target, 'local/.env')), false);
+  assert.equal(existsSync(path.join(target, 'local/unsafe.txt')), false);
+  assert.equal(existsSync(path.join(target, 'unapproved.js')), false);
+  assert.deepEqual(execFileSync('/usr/bin/git', ['ls-files', '--stage'], { cwd: root }), beforeIndex);
+  assert.equal(verifySourceBundle(bundle.bundlePath).sourceHash, bundle.manifest.sourceHash);
+  writeFileSync(path.join(root, 'local/settings.json'), '{"theme":"light"}');
+  assert.notEqual(captureSourceBundle(root, storage(), { profile: { outputPaths: [] } }).manifest.sourceHash, bundle.manifest.sourceHash);
+});
+
+test('supplemental ignored source drift during capture fails closed', () => {
+  const root = supplementalRepository();
+  const original = childProcess.spawnSync;
+  let changed = false;
+  childProcess.spawnSync = (file, args, options) => {
+    const result = original(file, args, options);
+    if (!changed && args.includes('cat-file')) {
+      changed = true;
+      writeFileSync(path.join(root, 'local/settings.json'), '{"theme":"changed"}');
+    }
+    return result;
+  };
+  syncBuiltinESMExports();
+  try {
+    assert.throws(() => captureSourceBundle(root, storage(), { profile: { outputPaths: [] } }), (error) => error.code === 'SOURCE_CHANGED');
+    assert.equal(changed, true);
+  } finally { childProcess.spawnSync = original; syncBuiltinESMExports(); }
 });

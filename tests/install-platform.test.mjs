@@ -9,16 +9,18 @@ import { openBrowser } from '../bin/browser.mjs';
 import { checkUpdate } from '../bin/update.mjs';
 import { instructionsCommand } from '../bin/instructions.mjs';
 
-test('native Windows and WSL1 refuse POSIX runtime, WSL2 refuses Windows FS even outside /mnt/c', (t) => {
-  assert.throws(() => assertRuntimePlatform({ platform: 'win32', node: '22.1.0' }), { code: 'PLATFORM' });
+test('native Windows supports Node22 while WSL requires its own Linux filesystem', (t) => {
+  assertRuntimePlatform({ platform: 'win32', node: '22.13.1' });
+  assertProjectPlatform('C:\\Projects\\fixture', { platform: 'win32' });
+  assert.throws(() => assertProjectPlatform('\\\\server\\share', { platform: 'win32' }), { code: 'WINDOWS_FILESYSTEM' });
   assert.throws(() => assertRuntimePlatform({ platform: 'linux', node: '24.0.0' }), { code: 'NODE_VERSION' });
   for (const platform of ['linux', 'darwin']) assertRuntimePlatform({ platform, node: '22.13.1' });
   assert.equal(defaultProvider('linux'), 'claude');
   assert.equal(defaultProvider('darwin'), 'codex');
-  assert.throws(() => defaultProvider('win32'), { code: 'PLATFORM' });
+  assert.equal(defaultProvider('win32'), 'codex');
   const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'flowcairn-platform-')));
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  const opts = { platform: 'linux', kernel: '6.6.87-microsoft-standard-WSL2', filesystem: () => ({ type: 0xef53 }), mountInfo: () => '1 0 8:1 / / rw - ext4 /dev/sda rw' };
+  const opts = { platform: 'linux', kernel: '6.6.87-microsoft-standard-WSL2', filesystem: () => ({ type: 0xef53 }), mountInfo: () => `1 0 8:1 / ${root} rw - ext4 /dev/sda rw` };
   assertProjectPlatform(root, opts);
   assert.throws(() => assertProjectPlatform(root, { ...opts, kernel: '4.4-Microsoft' }), { code: 'WSL_VERSION' });
   assert.throws(() => assertProjectPlatform(root, { ...opts, filesystem: () => ({ type: 0x9fa0 }) }), { code: 'WSL_FILESYSTEM' });

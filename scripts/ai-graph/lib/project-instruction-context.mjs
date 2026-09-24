@@ -1,3 +1,4 @@
+import { assertSafeText } from './source-policy.mjs';
 import { TextDecoder } from 'node:util';
 import { GraphError, hashObject } from './io.mjs';
 import { effectiveInstructionFiles, inspectInstructions, readInstructionFile } from './instructions.mjs';
@@ -41,6 +42,7 @@ export function buildProjectInstructionContext({ projectRoot, node, task, profil
     try { content = new TextDecoder('utf-8', { fatal: true }).decode(data.bytes); }
     catch { fail('INSTRUCTION_ENCODING', 'Инструкция не является UTF-8 текстом'); }
     if (content.includes('\0')) fail('INSTRUCTION_ENCODING', 'Инструкция содержит бинарные данные');
+    assertSafeText(content);
     return { ...file, content };
   });
   const effective = new Set(effectiveInstructionFiles(inspection, { provider: profile.ai.provider }).map((file) => file.path));

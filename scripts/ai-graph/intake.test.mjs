@@ -51,7 +51,7 @@ test('first UI intake snapshots approved package/lock/rules changes and excludes
   assert.equal(preview.bootstrap.untrackedCandidates.includes('.flowcairn.json'), false);
   assert.deepEqual(preview.bootstrap.requiredUntracked.map((file) => file.path), ['.flowcairn.json']);
   assert.match(preview.bootstrap.requiredUntracked[0].hash, /^[a-f0-9]{64}$/);
-  assert.equal(preview.scopeCandidates.includes('scratch.txt'), false);
+  assert.equal(preview.scopeCandidates.includes('scratch.txt'), true); // Discoverable; capture still requires explicit selection.
   const body = { prompt: 'Исправь значение в src/main.mjs', operationId: 'intake-bootstrap', contextHash: preview.contextHash,
     snapshot: true, snapshotHash: preview.bootstrap.snapshotHash, includeUntracked: ['package-lock.json'] };
   const snapshot = await s.intake(body);
@@ -97,13 +97,13 @@ test('modified private registry configuration stays local and does not block a s
   assert.deepEqual(readFileSync(config), localBytes);
 });
 
-test('modified installer profile loses required ownership and is shown as an optional candidate', async (t) => {
+test('modified installer profile is not offered as AI source', async (t) => {
   const f = fixture(t), s = await service(f.root, f.profile);
   const file = path.join(f.root, '.flowcairn.json');
   writeFileSync(file, readFileSync(file, 'utf8') + '\n');
   const preview = s.project();
   assert.equal(preview.bootstrap.requiredUntracked.some((item) => item.path === '.flowcairn.json'), false);
-  assert.equal(preview.bootstrap.untrackedCandidates.includes('.flowcairn.json'), true);
+  assert.equal(preview.bootstrap.untrackedCandidates.includes('.flowcairn.json'), false);
 });
 
 test('packaged capture worker returns a verified snapshot without executing AI', async (t) => {

@@ -1,5 +1,7 @@
-import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
+import { hasSecretContent } from './source-policy.mjs';
+import { closeSync, fstatSync, lstatSync, openSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import path from 'node:path';
+import { noFollowReadFlags } from './host-filesystem.mjs';
 import { TextDecoder } from 'node:util';
 import { GraphError, canonicalJson, sha256 } from './io.mjs';
 import { isSensitivePath } from './registry.mjs';
@@ -28,7 +30,7 @@ function readRegular(file, relative) {
     fail('DIRECT_FILE', `Небезопасный или слишком большой файл: ${relative}`);
   let fd;
   try {
-    fd = openSync(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    fd = openSync(file, noFollowReadFlags());
     const opened = fstatSync(fd);
     if (!opened.isFile() || opened.nlink !== 1 || opened.ino !== before.ino || opened.dev !== before.dev || opened.size !== before.size)
       fail('DIRECT_CHANGED', `Файл изменился до чтения: ${relative}`);
@@ -38,7 +40,7 @@ function readRegular(file, relative) {
     if (body.length !== before.size || [after, live].some((stat) => stat.ino !== before.ino || stat.dev !== before.dev ||
       stat.size !== before.size || stat.mtimeMs !== before.mtimeMs || stat.ctimeMs !== before.ctimeMs))
       fail('DIRECT_CHANGED', `Файл изменился во время чтения: ${relative}`);
-    return { path: relative, hash: sha256(body), size: body.length,
+    return { path: relative, hash: sha256(body), size: body.length, privateContent: hasSecretContent(body.toString('utf8')),
       mode: (before.mode & 0o111) ? '100755' : '100644' };
   } finally { if (fd !== undefined) closeSync(fd); }
 }
@@ -67,10 +69,10 @@ function scan(root, outputPaths) {
       if (stat.isSymbolicLink()) fail('DIRECT_LINK', `Недопустимая ссылка: ${file}`);
       if (stat.isDirectory()) { walk(target, file, depth + 1); continue; }
       if (files.length + privateFiles.length >= MAX_FILES) fail('DIRECT_LIMIT', 'Слишком много файлов проекта');
-      const descriptor = readRegular(target, file);
+      const { privateContent, ...descriptor } = readRegular(target, file);
       totalBytes += descriptor.size;
       if (totalBytes > MAX_TOTAL_BYTES) fail('DIRECT_LIMIT', 'Проект превышает предел проверки');
-      if (isSensitivePath(file)) privateFiles.push({ path: file, hash: descriptor.hash });
+      if (isSensitivePath(file) || privateContent) privateFiles.push({ path: file, hash: descriptor.hash });
       else files.push(descriptor);
     }
     const after = lstatSync(directory);

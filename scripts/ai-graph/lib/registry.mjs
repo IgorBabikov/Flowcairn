@@ -1,3 +1,5 @@
+import { isSensitivePath, classifySource } from './source-policy.mjs';
+export { isSensitivePath } from './source-policy.mjs';
 import { z } from 'zod';
 import { GraphError, hashObject } from './io.mjs';
 import { SKILL_ROUTES } from './config.mjs';
@@ -96,33 +98,12 @@ function isForbidden(candidate, scopes) {
 export function pathAllowed(candidate, task) {
   return (
     candidate.normalize('NFC').toLowerCase() !== '.flowcairn.json' &&
-    !isSensitivePath(candidate) &&
+    !classifySource(candidate, undefined).reason &&
     task.scope.some((scope) => isWithin(candidate, scope)) &&
     !isForbidden(candidate, task.forbiddenPaths)
   );
 }
 
-export function isSensitivePath(candidate) {
-  return candidate.split('/').some((segment) => {
-    const name = segment.toLowerCase();
-    return (
-      name === '.env' ||
-      name.startsWith('.env.') ||
-      [
-        'node_modules',
-        'credentials',
-        'credentials.json',
-        '.npmrc',
-        '.pypirc',
-        '.netrc',
-        'id_rsa',
-        'id_ed25519',
-      ].includes(name) ||
-      /\.(?:pem|key|p12|pfx)$/.test(name) ||
-      /(?:^|[._-])secrets?(?:[._-](?:json|ya?ml|toml|txt))?$/.test(name)
-    );
-  });
-}
 
 export function contextPathAllowed(candidate, task) {
   const declared =

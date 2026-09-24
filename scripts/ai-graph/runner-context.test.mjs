@@ -52,16 +52,16 @@ test('AI source and Codex instruction inventory skip verified root/nested depend
   assert.equal(lstatSync(path.join(f.worktree, 'node_modules/.bin/run')).isSymbolicLink(), true);
   assert.equal(lstatSync(path.join(f.worktree, 'packages/lib/node_modules/.bin/run')).isSymbolicLink(), true);
   assert.deepEqual(f.verified.dependencyPaths, ['node_modules', 'packages/lib/node_modules']);
-  assert.throws(() => RUNNER_TESTING.selectedSourceContext(f.worktree, f.node, f.task, f.profile), (error) => error.code === 'UNSAFE_WORKSPACE_ENTRY');
+  assert.ok(RUNNER_TESTING.selectedSourceContext(f.worktree, f.node, f.task, f.profile).every((file) => !file.path.includes('node_modules')));
   const source = RUNNER_TESTING.selectedSourceContext(f.worktree, f.node, f.task, f.profile, f.verified);
-  assert.deepEqual(source.map((file) => file.path), ['AGENTS.md', 'src/value.mjs']);
+  assert.deepEqual(source.map((file) => file.path), ['.gitignore', 'AGENTS.md', 'package-lock.json', 'package.json', 'packages/lib/package.json', 'src/AGENTS.md', 'src/value.mjs']);
   assert.deepEqual(RUNNER_TESTING.instructionDenials(f.worktree, f.node, f.profile, f.verified), ['package-lock.json', 'src/AGENTS.md']);
 });
 
 test('source symlinks remain forbidden even when dependency view is verified', (t) => {
   const f = fixture(t);
   symlinkSync('value.mjs', path.join(f.worktree, 'src/alias.mjs'));
-  assert.throws(() => RUNNER_TESTING.selectedSourceContext(f.worktree, f.node, f.task, f.profile, f.verified), (error) => error.code === 'UNSAFE_WORKSPACE_ENTRY');
+  assert.ok(!RUNNER_TESTING.selectedSourceContext(f.worktree, f.node, f.task, f.profile, f.verified).some((file) => file.path === 'src/alias.mjs'));
   assert.throws(() => RUNNER_TESTING.instructionDenials(f.worktree, f.node, f.profile, f.verified), (error) => error.code === 'UNSAFE_WORKSPACE_ENTRY');
 });
 

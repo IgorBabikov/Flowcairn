@@ -3,6 +3,7 @@ import { lstatSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 import { GraphError, hashObject } from './io.mjs';
+import { providerEnvironment, providerCandidates, assertProviderExecutablePlatform } from './provider-process-platform.mjs';
 import { EXTERNAL_PROVIDER_CONSENT } from './harnesses.mjs';
 
 const Provider = z.enum(['claude', 'cursor']);
@@ -11,12 +12,11 @@ const Hash = z.string().regex(/^[a-f0-9]{64}$/);
 export const ExternalConsentSchema = z.strictObject({
   version: z.literal(1), provider: Provider, planHash: Hash, scopeHash: Hash,
   instructionsHash: Hash, skillsHash: Hash, artifactsHash: Hash,
-  transmitted: z.array(z.enum(['approved-scope', 'approved-instructions', 'approved-skills', 'approved-artifacts'])).min(1).max(4),
-  excluded: z.array(z.enum(['secrets', 'environment-files', 'git-history', 'unapproved-files', 'project-host-shell'])).length(5),
+  transmitted: z.array(z.enum(['project-files', 'safe-project', 'approved-scope', 'approved-instructions', 'approved-skills', 'approved-artifacts'])).min(1).max(4),
+  excluded: z.array(z.enum(['secrets', 'environment-files', 'git-history', 'unapproved-files', 'policy-denied-files', 'project-host-shell'])).length(5),
   cliPath: z.string().min(1).max(1024), cliVersion: Version, createdAt: z.iso.datetime(),
 });
-const safeEnv = { PATH: '/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin', LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8', NO_COLOR: '1' };
-const names = { claude: ['claude'], cursor: ['cursor-agent', 'agent'] };
+const safeEnv = providerEnvironment();
 function verifiedClaudePackage(executable) {
   const marker = `${path.sep}node_modules${path.sep}@anthropic-ai${path.sep}claude-code${path.sep}bin${path.sep}claude.exe`;
   if (!executable.endsWith(marker)) return null;
@@ -34,9 +34,11 @@ function verifiedClaudePackage(executable) {
 
 function safeProviderExecutable(candidate, provider) {
   try {
+    assertProviderExecutablePlatform(candidate);
     const resolved = realpathSync(candidate), stat = statSync(resolved), uid = process.getuid?.();
+    assertProviderExecutablePlatform(resolved);
     const claudePackage = provider === 'claude' ? verifiedClaudePackage(resolved) : null;
-    return stat.isFile() && (provider === 'claude' ? Boolean(claudePackage) : stat.nlink === 1) && (stat.mode & 0o111) !== 0 && (stat.mode & 0o022) === 0 && (uid === undefined || stat.uid === 0 || stat.uid === uid) ? resolved : null;
+    return stat.isFile() && (provider === 'claude' ? Boolean(claudePackage) : stat.nlink === 1) && (process.platform === 'win32' || ((stat.mode & 0o111) !== 0 && (stat.mode & 0o022) === 0)) && (uid === undefined || stat.uid === 0 || stat.uid === uid) ? resolved : null;
   } catch { return null; }
 }
 function supportsClaudeSafeVersion(version) {
@@ -57,10 +59,11 @@ function supportsCursorSafeExecution(executable) {
   if (run.error || run.status !== 0 || !['--print', '--output-format', '--sandbox', '--mode'].every((flag) => help.includes(flag)))
     throw new GraphError('PROVIDER_CAPABILITY_UNAVAILABLE', 'Cursor не поддерживает безопасный non-interactive режим flowcairn.');
 }
-function hasExternalAuthentication(provider, executable) {
+function hasExternalAuthentication(provider, executable, env) {
+  const authenticationEnvironment = providerEnvironment(env);
   const run = spawnSync(executable, provider === 'claude' ? ['auth', 'status'] : ['status'], {
     encoding: 'utf8', timeout: 10_000, maxBuffer: 16 * 1024,
-    env: { ...safeEnv, ...(process.env.HOME ? { HOME: process.env.HOME } : {}) }, shell: false,
+    env: authenticationEnvironment, shell: false,
   });
   if (run.error || run.status !== 0) return false;
   if (provider !== 'claude') return true;
@@ -69,7 +72,8 @@ function hasExternalAuthentication(provider, executable) {
 /** @param {'claude'|'cursor'} provider @param {{executable?: string, env?: NodeJS.ProcessEnv}} [options] */
 export function probeExternalProvider(provider, { executable, env = process.env } = {}) {
   const parsed = Provider.parse(provider);
-  const candidates = executable ? [executable] : names[parsed].flatMap((name) => String(env.PATH ?? '').split(path.delimiter).filter(Boolean).map((dir) => path.join(dir, name)));
+  if (executable && process.platform === 'win32' && !/\.exe$/i.test(executable)) return { available: false, reason: 'PROVIDER_NATIVE_EXECUTABLE_REQUIRED' };
+  const candidates = executable ? [executable] : providerCandidates(parsed, env);
   let reason = 'PROVIDER_CLI_UNAVAILABLE_OR_UNSAFE';
   for (const candidate of candidates) {
     const resolved = safeProviderExecutable(candidate, parsed);
@@ -78,7 +82,7 @@ export function probeExternalProvider(provider, { executable, env = process.env 
       const version = versionOf(resolved), packageVersion = parsed === 'claude' ? verifiedClaudePackage(resolved) : null;
       if (parsed === 'claude' && (!packageVersion || !version.startsWith(packageVersion) || !supportsClaudeSafeVersion(packageVersion))) continue;
       if (parsed === 'cursor') supportsCursorSafeExecution(resolved);
-      if (!hasExternalAuthentication(parsed, resolved)) { reason = 'PROVIDER_AUTH_REQUIRED'; continue; }
+      if (!hasExternalAuthentication(parsed, resolved, env)) { reason = 'PROVIDER_AUTH_REQUIRED'; continue; }
       return { available: true, executable: resolved, version };
     } catch { /* try next candidate */ }
   }

@@ -125,16 +125,16 @@ export function projectSnapshot(host, runId, verifySource) {
           : unique(plan.nodes.flatMap((n) => n.permissions)),
         risks: [
           ...(node.action.id === 'human-provider-consent' ? [
-            `Передача: ${host.adapters.project?.ai.provider === 'claude' ? 'Claude Code / Anthropic' : 'Cursor'}. Будут переданы только approved scope, instructions, Skills и artifacts текущего плана.`,
-            'Не передаются .env и другие secrets, Git history, unapproved files и доступ к shell проекта. Можно отменить без передачи данных.',
+            `Передача: ${host.adapters.project?.ai.provider === 'claude' ? 'Claude Code / Anthropic' : 'Cursor'}. CLI работает в каталоге проекта и читает необходимые файлы штатными инструментами, включая несекретные Git-ignored файлы. Передаются также инструкции, Skills и artifacts плана.`,
+            'Flowcairn фильтрует свой контекст и артефакты по именам, содержимому и aiDenyGlobs. Доступ инструментов определяется правами CLI. Полная недоступность секретов через произвольные команды не гарантируется. Можно отменить передачу.',
             `План: ${state.planHash}; scope: ${hashObject({ scope: task.scope, readPaths: plan.nodes.filter((item) => item.action.id.startsWith('ai-')).flatMap((item) => item.resources.reads).sort(), sourceHash: state.sourceHash })}.`,
           ] : []),
           `AI provider: ${host.adapters.project?.ai.provider ?? 'codex'}; model: ${host.adapters.project?.ai.model ?? 'configured'}. Вызов может расходовать платный лимит.`,
           plan.workflow === 'autonomous'
             ? 'После согласования начнутся изменения, проверки и ревью. Разрешение чтения задано в настройках проекта.'
-            : 'Задание, исходники в readPaths и назначенные инструкции/Skills будут переданы выбранному AI после отдельного Run.',
+            : 'После отдельного Run CLI читает проект напрямую; readPaths обозначают релевантные файлы, а область применения правок остается ограниченной.',
           'AI может ошибаться. Приемка опирается на diff, checks и review.',
-          'Разрешенная запись изменяет только изолированный workspace.',
+          'Правки применяются в текущем проекте либо в явно выбранном Git worktree.',
         ],
         evidence: unique(nodes.flatMap((n) => n.artifacts.map((a) => a.id))),
         consequences: {

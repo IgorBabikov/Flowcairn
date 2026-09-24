@@ -1,3 +1,4 @@
+import { isPrivateMode, fsyncParentDirectory } from './host-filesystem.mjs';
 import { randomUUID } from 'node:crypto';
 import {
   closeSync,
@@ -245,7 +246,7 @@ function assertPrivateDirectory(directory, label = 'Store directory') {
   if (!stat || !stat.isDirectory() || stat.isSymbolicLink()) {
     fail('INSECURE_STORE', `${label} должен быть обычной directory`);
   }
-  if ((stat.mode & 0o077n) !== 0n) {
+  if (!isPrivateMode(stat)) {
     fail('INSECURE_STORE', `${label} должен быть private`);
   }
   return stat;
@@ -268,13 +269,7 @@ function ensurePrivateChild(parent, name) {
 }
 
 function fsyncDirectory(directory) {
-  let handle;
-  try {
-    handle = openSync(directory, constants.O_RDONLY);
-    fsyncSync(handle);
-  } finally {
-    if (handle !== undefined) closeSync(handle);
-  }
+  fsyncParentDirectory(directory);
 }
 
 function readPrivateJson(file, { code = 'STORE_TAMPERED', maxBytes = MAX_JSON_BYTES } = {}) {
@@ -283,7 +278,7 @@ function readPrivateJson(file, { code = 'STORE_TAMPERED', maxBytes = MAX_JSON_BY
   if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1n) {
     fail(code, 'Persistent object должен быть regular file без hardlinks');
   }
-  if ((before.mode & 0o077n) !== 0n)
+  if (!isPrivateMode(before))
     fail('INSECURE_STORE', 'Persistent object должен быть private');
   if (before.size > BigInt(maxBytes))
     fail('STORE_LIMIT_EXCEEDED', 'Persistent object слишком велик');

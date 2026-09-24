@@ -34,7 +34,7 @@ test('actual Codex prompt removes exact duplicate feedback and measures only the
   const originalPrompt = render();
   assert.ok(Buffer.byteLength(originalPrompt) > 128 * 1024);
   const prepared = RUNNER_TESTING.makeAiCommand({ node: currentNode, task: currentTask, plan, skills, priorEvidence, projectInstructions,
-    worktree: '/private/tmp/isolated-worktree', outputPath, reviewBundle: null,
+    worktree: outputPath, outputPath, reviewBundle: null,
     profile: { ai: { model: 'fixture-model' }, outputPaths: [] },
     toolchain: { node: process.execPath, codexEntry: '/trusted/codex.js', digest: 'a'.repeat(64) },
     dependencyToolchain: { dependencyPaths: [], hash: 'b'.repeat(64) } });

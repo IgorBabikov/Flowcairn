@@ -1,5 +1,6 @@
-import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
+import { closeSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { isPrivateMode, noFollowReadFlags } from './host-filesystem.mjs';
 import { GraphError, canonicalJson, sha256 } from './io.mjs';
 import { fingerprintDirectWorkspace } from './direct-workspace.mjs';
 
@@ -11,7 +12,7 @@ function privateDirectory(root, relative) {
     current = path.join(current, segment);
     try { mkdirSync(current, { mode: 0o700 }); } catch (error) { if (error.code !== 'EEXIST') throw error; }
     const stat = lstatSync(current);
-    if (!stat.isDirectory() || stat.isSymbolicLink() || (stat.mode & 0o077))
+    if (!stat.isDirectory() || stat.isSymbolicLink() || !isPrivateMode(stat))
       fail('DIRECT_STORAGE', 'Локальное хранилище должно быть закрытым каталогом');
   }
   return current;
@@ -20,9 +21,11 @@ function privateDirectory(root, relative) {
 export function verifyDirectSource(file) {
   let fd;
   try {
-    fd = openSync(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    const before = lstatSync(file);
+    if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1) fail('DIRECT_SOURCE', 'Снимок исходников поврежден');
+    fd = openSync(file, noFollowReadFlags());
     const stat = fstatSync(fd);
-    if (!stat.isFile() || stat.nlink !== 1 || (stat.mode & 0o077) || stat.size > 4 * 1024 * 1024)
+    if (!stat.isFile() || stat.ino !== before.ino || stat.dev !== before.dev || stat.nlink !== 1 || !isPrivateMode(stat) || stat.size > 4 * 1024 * 1024)
       fail('DIRECT_SOURCE', 'Снимок исходников поврежден');
     const bytes = readFileSync(fd), record = JSON.parse(bytes.toString('utf8'));
     if (record.version !== 1 || !/^[a-f0-9]{64}$/.test(record.sourceHash ?? '') ||

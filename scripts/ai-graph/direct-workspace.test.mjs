@@ -6,6 +6,7 @@ import test from 'node:test';
 import { fingerprintDirectWorkspace } from './lib/direct-workspace.mjs';
 import { captureDirectSource, verifyDirectSource } from './lib/direct-source.mjs';
 import { allocateDirectBinding, replaceDirectBinding, verifyDirectBinding } from './lib/direct-binding.mjs';
+import { taskContextInventory } from './lib/intake.mjs';
 import { directAdapters } from './lib/direct-adapters.mjs';
 import { instructionDenials } from './lib/runner-ai-command.mjs';
 import { projectContextPaths } from './lib/project.mjs';
@@ -130,4 +131,30 @@ test('direct project does not silently send README as planning context', (t) => 
   assert.deepEqual(projectContextPaths(root, profile), ['package.json']);
   assert.deepEqual(projectContextPaths(root, { ...profile, contextPaths: ['README.md'] }),
     ['README.md', 'package.json']);
+});
+
+
+test('AI inventories include ignored safe names and exclude content secrets and project denials', (t) => {
+  const root = fixture(t);
+  writeFileSync(path.join(root, '.gitignore'), 'ignored.md\n');
+  writeFileSync(path.join(root, 'ignored.md'), 'safe ignored project note');
+  writeFileSync(path.join(root, 'internal.md'), 'confidential note');
+  writeFileSync(path.join(root, 'ordinary.json'), JSON.stringify({ value: ['ghp_', 'A'.repeat(36)].join('') }));
+  const profile = { outputPaths: [], aiDenyGlobs: ['internal.*'], manifests: [], contextPaths: ['internal.md'],
+    checks: [], ai: { provider: 'codex', model: 'test' } };
+  const adapters = directAdapters(root, profile, { identity: () => 'test-runtime', instructionPaths: () => [] });
+  const project = adapters.projectSummary();
+  for (const inventory of [adapters.taskContextInventory(), taskContextInventory(root, profile)]) {
+    assert.ok(inventory.files.includes('ignored.md'));
+    assert.ok(!inventory.files.includes('internal.md'));
+    assert.ok(!inventory.files.includes('ordinary.json'));
+    assert.ok(!inventory.files.includes('.npmrc'));
+  }
+  assert.ok(!project.contextPaths.includes('internal.md'));
+  assert.ok(!project.scopeCandidates.includes('internal.md'));
+  const rawBefore = adapters.fingerprint(root);
+  assert.ok(rawBefore.files.some((entry) => entry.path === 'internal.md'));
+  writeFileSync(path.join(root, 'internal.md'), 'changed confidential note');
+  assert.notEqual(adapters.fingerprint(root).hash, rawBefore.hash);
+  assert.notEqual(adapters.projectSummary().contextHash, project.contextHash);
 });

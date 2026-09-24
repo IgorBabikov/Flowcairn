@@ -7,8 +7,8 @@ try {
     input += chunk;
     if (input.length > 1024 * 1024) throw new Error('input limit');
   }
-  const { root, storage, allowedUntracked } = JSON.parse(input);
-  const result = captureSourceBundle(root, storage, { allowedUntracked });
+  const { root, storage, allowedUntracked, profile } = JSON.parse(input);
+  const result = captureSourceBundle(root, storage, { allowedUntracked, profile });
   process.stdout.write(JSON.stringify(result));
 } catch (error) {
   process.stdout.write(JSON.stringify({ error: { code: error.code ?? 'SOURCE_CAPTURE', message: 'Не удалось сохранить snapshot проекта.' } }));

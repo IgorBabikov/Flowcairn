@@ -1,3 +1,5 @@
+import { fsyncParentDirectory } from './host-filesystem.mjs';
+import { classifySource, assertSafeText } from './source-policy.mjs';
 import { randomUUID } from 'node:crypto';
 import {
   closeSync,
@@ -23,20 +25,6 @@ const MAX_MOVES = 100;
 const MAX_EDIT_BYTES = 128 * 1024;
 const MAX_TOTAL_BYTES = 1024 * 1024;
 const HASH_PATTERN = /^[a-f0-9]{64}$/;
-const PROTECTED_SEGMENTS = new Set([
-  '.git',
-  '.ai-orchestrator',
-  '.next',
-  'dist',
-  'node_modules',
-  '.npmrc',
-  '.pypirc',
-  '.netrc',
-  'credentials',
-  'credentials.json',
-  'id_rsa',
-  'id_ed25519',
-]);
 
 function deny(message) {
   throw new GraphError('PATCH_DENIED', message);
@@ -75,20 +63,7 @@ function relativePath(value, { scope = false } = {}) {
 
 function safeEditPath(value) {
   const normalized = relativePath(value);
-  for (const original of normalized.split('/')) {
-    const part = original.toLowerCase();
-    const allowedEnvironmentTemplate = /^\.env(?:\.[^/]+)*\.(?:example|sample|template)$/.test(
-      part,
-    );
-    if (
-      PROTECTED_SEGMENTS.has(part) ||
-      (!allowedEnvironmentTemplate && (part === '.env' || part.startsWith('.env.'))) ||
-      /(?:^|[._-])secrets?(?:[._-](?:json|ya?ml|toml|txt))?$/.test(part) ||
-      /\.(?:key|pem|p12|pfx)$/.test(part)
-    ) {
-      deny('Patch затрагивает protected path');
-    }
-  }
+  if (classifySource(normalized, undefined).reason) deny('Patch затрагивает protected path');
   return normalized;
 }
 
@@ -97,12 +72,7 @@ function fileMode(stat) {
 }
 
 function fsyncDirectory(directory) {
-  const handle = openSync(directory, constants.O_RDONLY | (constants.O_DIRECTORY ?? 0));
-  try {
-    fsyncSync(handle);
-  } finally {
-    closeSync(handle);
-  }
+  fsyncParentDirectory(directory);
 }
 
 function ensureParents(root, relativePath) {
@@ -159,12 +129,14 @@ function inspectTarget(target) {
 
 function verifyDescriptor(handle, expected) {
   const stat = fstatSync(handle);
+  const body = readFileSync(handle);
+  assertSafeText(body.toString('utf8'));
   if (
     !stat.isFile() ||
     stat.nlink !== 1 ||
     stat.size !== expected.size ||
     fileMode(stat) !== expected.mode ||
-    sha256(readFileSync(handle)) !== expected.hash
+    sha256(body) !== expected.hash
   ) {
     deny('Файл изменился после начала попытки');
   }
@@ -172,7 +144,7 @@ function verifyDescriptor(handle, expected) {
 }
 
 function verifyExisting(target, expected) {
-  const handle = openSync(target, constants.O_RDONLY | constants.O_NOFOLLOW);
+  const handle = openSync(target, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
   try {
     return verifyDescriptor(handle, expected);
   } finally {
@@ -200,6 +172,7 @@ function validateEdit(edit) {
   if (edit.content !== null && typeof edit.content !== 'string') deny('content недопустим');
   if (typeof edit.executable !== 'boolean') deny('executable недопустим');
   if (edit.content === null && edit.executable) deny('Удаление не может менять executable mode');
+  if (edit.content !== null) assertSafeText(edit.content);
   const size = edit.content === null ? 0 : Buffer.byteLength(edit.content);
   if (size > MAX_EDIT_BYTES) deny('Один edit превышает 128 KiB');
   return { ...edit, path: editPath, size };
@@ -215,7 +188,7 @@ function validateMove(move) {
   return { from, to, previousHash: move.previousHash };
 }
 
-function preflight(root, before, node, task, edits, moves, jsonTransfers) {
+function preflight(root, before, node, task, edits, moves, jsonTransfers, denyGlobs) {
   if (!Array.isArray(node?.permissions) || !node.permissions.includes('workspace.source.write')) {
     deny('Нет разрешения source.write');
   }
@@ -261,6 +234,7 @@ function preflight(root, before, node, task, edits, moves, jsonTransfers) {
     ...normalized.map((edit) => edit.path),
     ...normalizedMoves.flatMap((move) => [move.from, move.to]),
   ];
+  if ([...claimedPaths, ...normalizedTransfers.flatMap((item) => [item.from, item.to])].some((file) => classifySource(file, undefined, { denyGlobs }).reason)) deny('Patch запрещен локальной политикой');
   if (new Set(claimedPaths).size !== claimedPaths.length)
     deny('Edits и moves не могут использовать один путь дважды');
   const transferredPaths = new Set(normalizedTransfers.flatMap((transfer) => [transfer.from, transfer.to]));
@@ -317,11 +291,12 @@ function preflight(root, before, node, task, edits, moves, jsonTransfers) {
       return null;
     }
     if (!current || expected.size > JSON_TRANSFER_LIMITS.fileBytes) deny('JsonTransfer source отсутствует или превышает 8 MiB');
-    const handle = openSync(target, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const handle = openSync(target, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
     try {
       const stat = fstatSync(handle);
       if (!stat.isFile() || stat.nlink !== 1 || stat.size !== expected.size || fileMode(stat) !== expected.mode) deny('JsonTransfer source изменился');
       const bytes = readFileSync(handle);
+      assertSafeText(bytes.toString('utf8'));
       if (bytes.length !== expected.size || sha256(bytes) !== expected.hash) deny('JsonTransfer source bytes изменились');
       verifyIdentity(target, { dev: stat.dev, ino: stat.ino });
       return bytes;
@@ -343,7 +318,7 @@ function recheck(root, item) {
 
 function applyDelete(root, item) {
   const identity = recheck(root, item);
-  const handle = openSync(item.target, constants.O_RDONLY | constants.O_NOFOLLOW);
+  const handle = openSync(item.target, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
   try {
     const current = verifyDescriptor(handle, item.expected);
     if (current.dev !== identity.dev || current.ino !== identity.ino) {
@@ -393,12 +368,12 @@ function applyMove(root, item) {
 }
 
 /** AI has no write access. Only this trusted handler applies schema-validated, hash-bound edits. */
-export function applyProposedEdits(worktree, before, node, task, edits, moves = [], jsonTransfers = []) {
+export function applyProposedEdits(worktree, before, node, task, edits, moves = [], jsonTransfers = [], { denyGlobs = [] } = {}) {
   const requested = lstatSync(worktree);
   if (!requested.isDirectory() || requested.isSymbolicLink())
     deny('Worktree должен быть директорией');
   const root = realpathSync(worktree);
-  const batch = preflight(root, before, node, task, edits, moves, jsonTransfers);
+  const batch = preflight(root, before, node, task, edits, moves, jsonTransfers, denyGlobs);
   // Every edit is preflighted before the first write. A later I/O/race failure remains uncertain.
   for (const item of batch.moves) applyMove(root, item);
   for (const item of batch.edits) {

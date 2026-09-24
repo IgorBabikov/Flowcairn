@@ -1,3 +1,4 @@
+import { gitExecutable, hostNullDevice, hostSystemEnvironment } from './host-executables.mjs';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
@@ -18,16 +19,16 @@ export function unifiedDiff(file, previous, current, oldBytes, newBytes) {
   try {
     writeFileSync(path.join(directory, 'before'), oldBytes, { mode: 0o600, flag: 'wx' });
     writeFileSync(path.join(directory, 'after'), newBytes, { mode: 0o600, flag: 'wx' });
-    const result = spawnSync('/usr/bin/git', [
+    const result = spawnSync(gitExecutable(), [
       'diff', '--no-index', '--text', '--no-ext-diff', '--no-textconv', '--no-color', '--no-renames',
       '--diff-algorithm=myers', '--no-indent-heuristic', '--unified=3', '--', 'before', 'after',
     ], { cwd: directory, encoding: 'utf8', timeout: 10000, maxBuffer: MAX_DIFF_BYTES, shell: false,
-      env: { PATH: '/usr/bin:/bin', HOME: directory, XDG_CONFIG_HOME: directory, LC_ALL: 'C',
-        GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_ATTR_NOSYSTEM: '1' } });
+      env: { ...hostSystemEnvironment(), PATH: '/usr/bin:/bin', HOME: directory, XDG_CONFIG_HOME: directory, LC_ALL: 'C',
+        GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: hostNullDevice, GIT_ATTR_NOSYSTEM: '1' } });
     if (result.error || result.status !== 1 || typeof result.stdout !== 'string')
       throw new GraphError('DIFF_UNAVAILABLE', 'Не удалось получить полный ограниченный diff начала и конца попытки');
     const hunk = result.stdout.indexOf('\n@@ ');
     if (hunk < 0) throw new GraphError('DIFF_UNAVAILABLE', 'Git не предоставил проверяемые текстовые hunks');
-    return `${header}--- ${previous ? JSON.stringify(`a/${file}`) : '/dev/null'}\n+++ ${current ? JSON.stringify(`b/${file}`) : '/dev/null'}\n${result.stdout.slice(hunk + 1)}`;
+    return `${header}--- ${previous ? JSON.stringify(`a/${file}`) : hostNullDevice}\n+++ ${current ? JSON.stringify(`b/${file}`) : hostNullDevice}\n${result.stdout.slice(hunk + 1)}`;
   } finally { rmSync(directory, { recursive: true, force: true }); }
 }

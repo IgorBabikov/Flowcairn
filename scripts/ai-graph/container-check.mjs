@@ -29,7 +29,6 @@ const MAX_FILES = 20_000;
 const MAX_FILE_BYTES = 64 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 512 * 1024 * 1024;
 const MAX_CHECK_OUTPUT = 4 * 1024 * 1024;
-const MAX_SUMMARY = 1_600;
 const RESULT_PREFIX = 'FLOWCAIRN_CHECK_RESULT ';
 
 function fail(message) {
@@ -79,9 +78,7 @@ function relativePath(value) {
         !part ||
         part === '.' ||
         part === '..' ||
-        ['.git', '.ai-orchestrator', 'node_modules', '.npmrc', '.netrc', '.pypirc'].includes(part.toLowerCase()) ||
-        /^(?:\.env(?:\.|$)|credentials(?:\.json)?$|id_rsa$|id_ed25519$)/i.test(part) ||
-        /\.(?:pem|key|p12|pfx)$/i.test(part),
+        ['.git', '.ai-orchestrator', 'node_modules'].includes(part.toLowerCase()),
     )
   ) {
     fail('INVALID_SOURCE_PATH');
@@ -229,40 +226,11 @@ export function copyFingerprintSource({ input, workspace, files }) {
   }
 }
 
-function sanitizeDiagnosticLine(value) {
-  return (
-    value
-      // eslint-disable-next-line no-control-regex -- Diagnostics must remove ANSI escape bytes.
-      .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '')
-      .replaceAll('file:///workspace/', '')
-      .replaceAll('/workspace/', '')
-      .replaceAll('/input/', '')
-      .replaceAll('/tmp/', '<tmp>/')
-      .replace(
-        /\b(authorization|bearer|token|secret|password|api[-_]?key)\b\s*[:=]\s*\S+/gi,
-        '$1=<redacted>',
-      )
-      .replace(/https?:\/\/\S+/gi, '<url>')
-      .replace(/\b[A-Za-z0-9+/_=-]{40,}\b/g, '<redacted>')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .slice(0, 240)
-  );
-}
-
-export function summarizeCheckFailure(stdout, stderr, { outputLimit = false } = {}) {
-  if (outputLimit) return `Check output exceeded ${MAX_CHECK_OUTPUT} byte limit`;
-  const lines =
-    `${typeof stderr === 'string' ? stderr : ''}\n${typeof stdout === 'string' ? stdout : ''}`
-      .split(/\r?\n/)
-      .map(sanitizeDiagnosticLine)
-      .filter(Boolean);
-  const diagnostic = lines.filter((line) =>
-    /(?:\berror\b|\bfailed\b|\bfailure\b|\bERR_[A-Z_]+\b|\bTS\d{4}\b|\bELIFECYCLE\b)/i.test(line),
-  );
-  const selected = (diagnostic.length ? diagnostic : lines).slice(-8);
-  const summary = selected.join('\n');
-  return summary ? summary.slice(0, MAX_SUMMARY) : 'Check failed without diagnostic output';
+// Raw child diagnostics can contain project secrets. Never persist them in Docker logs.
+export function summarizeCheckFailure(_stdout, _stderr, { outputLimit = false } = {}) {
+  return outputLimit
+    ? `Check output exceeded ${MAX_CHECK_OUTPUT} byte limit`
+    : 'Check failed; raw diagnostic omitted';
 }
 
 function emitResult(exitCode, summary) {
@@ -406,10 +374,10 @@ export async function main({
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main().catch((error) => {
+  main().catch(() => {
     emitResult(
       125,
-      sanitizeDiagnosticLine(error instanceof Error ? error.message : 'CHECK_FAILED'),
+      'CHECK_FAILED',
     );
     process.exitCode = 125;
   });
