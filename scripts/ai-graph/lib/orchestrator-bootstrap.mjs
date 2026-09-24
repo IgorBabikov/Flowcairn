@@ -1,4 +1,4 @@
-import { gitExecutable, hostNullDevice, hostSystemEnvironment } from './host-executables.mjs';
+import { gitExecutable, gitNullDevice, hostSystemEnvironment } from './host-executables.mjs';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, lstatSync, mkdtempSync, readdirSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -33,7 +33,7 @@ function trustedBootstrapGit(root, args) {
         GIT_NO_LAZY_FETCH: '1',
         GIT_NO_REPLACE_OBJECTS: '1',
         GIT_CONFIG_NOSYSTEM: '1',
-        GIT_CONFIG_GLOBAL: hostNullDevice,
+        GIT_CONFIG_GLOBAL: gitNullDevice,
         GIT_ATTR_NOSYSTEM: '1',
         LC_ALL: 'C',
       },

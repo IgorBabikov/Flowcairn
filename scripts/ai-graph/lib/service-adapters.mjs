@@ -1,4 +1,4 @@
-import { gitExecutable, hostNullDevice, hostSystemEnvironment } from './host-executables.mjs';
+import { gitExecutable, gitNullDevice, hostSystemEnvironment } from './host-executables.mjs';
 import { isPrivateMode } from './host-filesystem.mjs';
 import { lstatSync, mkdirSync, readFileSync, readdirSync, existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
@@ -221,7 +221,7 @@ export async function defaultAdapters(root) {
             env: { ...hostSystemEnvironment(),
               PATH: '/usr/bin:/bin',
               GIT_CONFIG_NOSYSTEM: '1',
-              GIT_CONFIG_GLOBAL: hostNullDevice,
+              GIT_CONFIG_GLOBAL: gitNullDevice,
               GIT_OPTIONAL_LOCKS: '0',
             },
           },

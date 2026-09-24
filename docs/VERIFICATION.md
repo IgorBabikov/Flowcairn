@@ -6,7 +6,7 @@
 
 | Проверка | Результат |
 | --- | --- |
-| Полный `npm test` | 729 успешно; 3 Windows-only теста не запускались на macOS; ошибок и отмененных тестов нет |
+| Полный `npm test` | 739 успешно; 5 Windows-only тестов не запускались на macOS; ошибок и отмененных тестов нет |
 | `npm run typecheck`, `npm run lint` | Успешно |
 | `npm run build` | Успешно, собран локальный интерфейс |
 | `npm run test:ui` | Chromium: 125 успешно; 1 внешний smoke пропущен без `FLOWCAIRN_TEST_URL` |

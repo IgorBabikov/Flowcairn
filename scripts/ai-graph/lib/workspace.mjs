@@ -1,5 +1,5 @@
 import { lstatHostSync as lstatSync, fstatHostSync as fstatSync } from './host-filesystem.mjs';
-import { gitExecutable, hostNullDevice } from './host-executables.mjs';
+import { gitExecutable, gitNullDevice } from './host-executables.mjs';
 import { spawnSync } from 'node:child_process';
 import {
   closeSync,
@@ -137,7 +137,7 @@ function gitEnvironment() {
     GIT_NO_LAZY_FETCH: '1',
     GIT_NO_REPLACE_OBJECTS: '1',
     GIT_CONFIG_NOSYSTEM: '1',
-    GIT_CONFIG_GLOBAL: hostNullDevice,
+    GIT_CONFIG_GLOBAL: gitNullDevice,
     GIT_ATTR_NOSYSTEM: '1',
     LC_ALL: 'C',
   };

@@ -1,4 +1,4 @@
-import { gitExecutable, hostNullDevice, hostSystemEnvironment } from '../scripts/ai-graph/lib/host-executables.mjs';
+import { gitExecutable, gitNullDevice, hostSystemEnvironment } from '../scripts/ai-graph/lib/host-executables.mjs';
 import { spawnSync } from 'node:child_process';
 import {
   closeSync,
@@ -187,7 +187,7 @@ function gitPaths(root, ignored) {
         LC_ALL: 'C',
         GIT_OPTIONAL_LOCKS: '0',
         GIT_CONFIG_NOSYSTEM: '1',
-        GIT_CONFIG_GLOBAL: hostNullDevice,
+        GIT_CONFIG_GLOBAL: gitNullDevice,
       },
     },
   );

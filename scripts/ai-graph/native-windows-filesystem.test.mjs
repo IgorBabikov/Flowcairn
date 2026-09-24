@@ -5,7 +5,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, realpathSync, rmSy
 import os from 'node:os';
 import path from 'node:path';
 import { isPrivateMode, isTrustedMode, assertPrivateMode, sameHostPath, isPathWithin, noFollowReadFlags, fsyncParentDirectory, canonicalStatDevice, crossStatIdentity, lstatHostSync, fstatHostSync, HOST_FILESYSTEM_TESTING } from './lib/host-filesystem.mjs';
-import { gitExecutable, hostNullDevice, hostSystemEnvironment } from './lib/host-executables.mjs';
+import { gitExecutable, gitNullDevice, hostSystemEnvironment } from './lib/host-executables.mjs';
 import { captureSourceBundle, materializeSourceBundle } from './lib/source.mjs';
 import { inspectProjectSource, readProjectSourcePage } from './lib/project-source-access.mjs';
 import { fingerprintDirectWorkspace } from './lib/direct-workspace.mjs';
@@ -158,9 +158,9 @@ test('native Git worktree capture/materialization and live pages retain source f
   });
   const root = path.join(base, 'repo'), worktree = path.join(base, 'worktree');
   mkdirSync(root, { mode: 0o700 });
-  const git = (cwd, ...args) => execFileSync(gitExecutable(), ['-c', `core.hooksPath=${hostNullDevice}`, ...args], {
+  const git = (cwd, ...args) => execFileSync(gitExecutable(), ['-c', `core.hooksPath=${gitNullDevice}`, ...args], {
     cwd, encoding: 'utf8', timeout: 10000, stdio: ['ignore', 'pipe', 'pipe'], shell: false,
-    env: { ...hostSystemEnvironment(), PATH: process.env.PATH, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: hostNullDevice },
+    env: { ...hostSystemEnvironment(), PATH: process.env.PATH, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: gitNullDevice },
   });
   git(root, 'init', '--initial-branch=main');
   git(root, 'config', '--local', 'user.name', 'Native fixture');
@@ -170,14 +170,20 @@ test('native Git worktree capture/materialization and live pages retain source f
   mkdirSync(path.join(root, 'src'));
   writeFileSync(path.join(root, 'src', 'value.txt'), 'original source\n');
   writeFileSync(path.join(root, '.gitignore'), '.ai-orchestrator/\n');
+  writeFileSync(path.join(root, 'src', 'run.sh'), '#!/bin/sh\necho native-fixture\n');
   git(root, 'add', '.');
+  git(root, 'update-index', '--chmod=+x', 'src/run.sh');
   git(root, 'commit', '-m', 'Native fixture baseline');
   git(root, 'worktree', 'add', '--detach', worktree, 'HEAD');
   const index = inspectProjectSource(worktree);
   assert.equal(readProjectSourcePage(index, { path: 'src/value.txt' }).text, 'original source\n');
   const captured = captureSourceBundle(worktree, path.join(base, 'sources'));
+  const script = captured.manifest.entries.find((entry) => entry.path === 'src/run.sh');
+  assert.equal(script.index.mode, '100755');
+  assert.equal(script.worktree.mode, '100755');
   const materialized = path.join(base, 'materialized');
   assert.equal(materializeSourceBundle(captured.bundlePath, materialized).sourceHash, captured.manifest.sourceHash);
+  assert.equal(readFileSync(path.join(materialized, 'src/run.sh'), 'utf8'), '#!/bin/sh\necho native-fixture\n');
   const restored = inspectProjectSource(materialized);
   assert.equal(readProjectSourcePage(restored, { path: 'src/value.txt' }).text, 'original source\n');
   writeFileSync(path.join(worktree, 'src', 'value.txt'), 'changed worktree\n');

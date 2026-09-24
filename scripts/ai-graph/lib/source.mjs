@@ -1,6 +1,6 @@
 import { lstatHostSync as lstatSync, fstatHostSync as fstatSync } from './host-filesystem.mjs';
-import { gitExecutable, hostNullDevice, hostSystemEnvironment } from './host-executables.mjs';
-import { isPrivateMode } from './host-filesystem.mjs';
+import { gitExecutable, gitNullDevice, hostSystemEnvironment } from './host-executables.mjs';
+import { isPrivateMode, sameHostPath, isPathWithin } from './host-filesystem.mjs';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import {
@@ -149,7 +149,7 @@ function runGit(
   } catch {
     fail('GIT_FAILED', 'System Git не найден');
   }
-  if (!gitStat.isFile() || gitStat.isSymbolicLink() || (gitStat.mode & 0o111) === 0) {
+  if (!gitStat.isFile() || gitStat.isSymbolicLink() || (process.platform !== 'win32' && (gitStat.mode & 0o111) === 0)) {
     fail('GIT_FAILED', 'System Git executable недопустим');
   }
   const result = spawnSync(
@@ -168,7 +168,7 @@ function runGit(
         GIT_NO_LAZY_FETCH: '1',
         GIT_NO_REPLACE_OBJECTS: '1',
         GIT_CONFIG_NOSYSTEM: '1',
-        GIT_CONFIG_GLOBAL: hostNullDevice,
+        GIT_CONFIG_GLOBAL: gitNullDevice,
         GIT_ATTR_NOSYSTEM: '1',
         LC_ALL: 'C',
       },
@@ -187,7 +187,7 @@ function runGit(
 function repositoryRoot(root) {
   const requested = realpathSync(root);
   const top = runGit(requested, ['rev-parse', '--show-toplevel']).stdout.toString('utf8').trim();
-  if (realpathSync(top) !== requested) {
+  if (!sameHostPath(realpathSync(top), requested)) {
     fail('NOT_REPOSITORY_ROOT', '--root должен быть корнем Git');
   }
   return requested;
@@ -356,7 +356,7 @@ function assertSafeSymlink(relativePath, buffer) {
   return target;
 }
 
-function readWorktreeEntry(root, relativePath) {
+function readWorktreeEntry(root, relativePath, indexMode = undefined) {
   const ancestorsBefore = ancestorState(root, relativePath);
   if (!ancestorsBefore.available) {
     return { data: null, mode: null, statIdentity: `${ancestorsBefore.identity}|absent` };
@@ -381,7 +381,7 @@ function readWorktreeEntry(root, relativePath) {
       fail('SOURCE_CHANGED', 'Source ancestor изменился во время capture');
     try {
       const resolved = realpathSync(absolute);
-      if (resolved !== root && !resolved.startsWith(`${root}${path.sep}`)) {
+      if (!isPathWithin(root, resolved)) {
         fail('UNSAFE_SYMLINK', 'Symlink выходит за source root');
       }
     } catch (error) {
@@ -416,7 +416,10 @@ function readWorktreeEntry(root, relativePath) {
       fail('SOURCE_CHANGED', 'Source ancestor изменился во время capture');
     return {
       data,
-      mode: (Number(after.mode) & 0o111) === 0 ? '100644' : '100755',
+      // Windows has no POSIX executable bit: Git's index is authoritative
+      // for tracked regular files; new files default to non-executable.
+      mode: process.platform === 'win32' ? (indexMode === '100755' ? '100755' : '100644')
+        : (Number(after.mode) & 0o111) === 0 ? '100644' : '100755',
       statIdentity: `${ancestorsBefore.identity}|${statIdentity(current)}`,
     };
   } finally {
@@ -485,9 +488,9 @@ function ensurePrivateDirectory(directory) {
 
 function assertOutputLocation(root, outputRoot) {
   const resolved = path.resolve(outputRoot);
-  if (resolved === root)
+  if (sameHostPath(resolved, root))
     fail('INSECURE_STORAGE', 'Source root нельзя использовать как bundle storage');
-  if (resolved.startsWith(`${root}${path.sep}`)) {
+  if (isPathWithin(root, resolved)) {
     const relative = path.relative(root, resolved).split(path.sep).join('/');
     if (relative === '.git' || relative.startsWith('.git/'))
       fail('INSECURE_STORAGE', 'Bundle storage запрещен внутри .git');
@@ -657,7 +660,7 @@ export function captureSourceBundle(root, outputRoot, { allowedUntracked = [], p
       if (value.type === 'symlink') assertSafeSymlink(relativePath, data);
       addObject(data);
       index = value;
-      const current = readWorktreeEntry(repository, relativePath);
+      const current = readWorktreeEntry(repository, relativePath, indexEntry.mode);
       worktreeStats.set(relativePath, current.statIdentity);
       if (current.data !== null) {
         addWorktreeBytes(current.data);
@@ -1051,7 +1054,7 @@ export function materializeSourceBundle(bundlePath, targetRoot) {
       if (value.type === 'file' && (!stat.isFile() || stat.nlink !== 1n))
         fail('UNSAFE_MATERIALIZATION', 'Materialized file недопустим');
       if (
-        value.type === 'file' &&
+        value.type === 'file' && process.platform !== 'win32' &&
         ((Number(stat.mode) & 0o111) !== 0) !== (value.mode === '100755')
       ) {
         fail('SOURCE_BUNDLE_TAMPERED', 'Materialized executable mode не совпадает');
@@ -1085,7 +1088,7 @@ export function materializeSourceBundle(bundlePath, targetRoot) {
       fail('SOURCE_BUNDLE_TAMPERED', 'Post-materialization hash не совпадает');
     const stat = lstatSync(destination, { bigint: true });
     if (
-      entry.worktree.type === 'file' &&
+      entry.worktree.type === 'file' && process.platform !== 'win32' &&
       ((Number(stat.mode) & 0o111) !== 0) !== (entry.worktree.mode === '100755')
     ) {
       fail('SOURCE_BUNDLE_TAMPERED', 'Post-materialization executable mode не совпадает');

@@ -1,4 +1,4 @@
-import { gitExecutable, hostNullDevice, hostSystemEnvironment } from './host-executables.mjs';
+import { gitExecutable, gitNullDevice, hostSystemEnvironment } from './host-executables.mjs';
 // Shared domain registration for CLI and local UI. No browser or CLI dependencies.
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -23,7 +23,7 @@ function git(root, args) {
     stdio: ['ignore', 'pipe', 'pipe'],
     timeout: 10_000,
     maxBuffer: 2 * 1024 * 1024,
-    env: { ...hostSystemEnvironment(), PATH: '/usr/bin:/bin', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: hostNullDevice, GIT_OPTIONAL_LOCKS: '0' },
+    env: { ...hostSystemEnvironment(), PATH: '/usr/bin:/bin', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: gitNullDevice, GIT_OPTIONAL_LOCKS: '0' },
   }).trim();
 }
 

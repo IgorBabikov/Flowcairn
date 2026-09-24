@@ -1,5 +1,4 @@
 import path from 'node:path';
-import os from 'node:os';
 import { existsSync, realpathSync, statSync } from 'node:fs';
 
 /** Resolve Git for the host; never use a .cmd/.bat shell shim. Git remains optional in direct mode. */
@@ -23,4 +22,6 @@ export function hostSystemEnvironment({ platform = process.platform, env = proce
   return Object.fromEntries(names.flatMap((name) => normalized.get(name.toUpperCase()) ? [[name, normalized.get(name.toUpperCase())]] : []));
 }
 
-export const hostNullDevice = os.devNull;
+// Git for Windows maps this spelling to NUL; Node's os.devNull is rejected.
+// https://github.com/git-for-windows/git/blob/main/compat/mingw.c
+export const gitNullDevice = '/dev/null';

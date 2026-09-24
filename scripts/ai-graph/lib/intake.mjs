@@ -1,4 +1,4 @@
-import { gitExecutable, hostNullDevice, hostSystemEnvironment } from './host-executables.mjs';
+import { gitExecutable, gitNullDevice, hostSystemEnvironment } from './host-executables.mjs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readFileSync } from 'node:fs';
@@ -13,7 +13,7 @@ import { fingerprintProjectSource } from './project-source-access.mjs';
 function git(root, args) {
   const result = spawnSync(gitExecutable(), ['-c', 'core.fsmonitor=false', ...args], {
     cwd: root, encoding: 'utf8', timeout: 10000, maxBuffer: 1024 * 1024,
-    env: { ...hostSystemEnvironment(), PATH: '/usr/bin:/bin', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: hostNullDevice, GIT_OPTIONAL_LOCKS: '0' },
+    env: { ...hostSystemEnvironment(), PATH: '/usr/bin:/bin', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: gitNullDevice, GIT_OPTIONAL_LOCKS: '0' },
   });
   if (result.error || result.status !== 0) throw new GraphError('PROJECT_CONTEXT_UNAVAILABLE', 'Не удалось прочитать Git inventory проекта');
   return result.stdout;
