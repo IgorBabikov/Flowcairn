@@ -382,7 +382,7 @@ test('public runner validates registry identity before touching runtime paths', 
   );
 });
 
-test('system temporary directories fail closed for execution, recovery, and probing', async () => {
+test('macOS system temporary directories fail closed for execution, recovery, and probing', { skip: process.platform !== 'darwin' }, async () => {
   const contract = runnerContract();
   const systemTemp = realpathSync(fixture());
   writeFileSync(

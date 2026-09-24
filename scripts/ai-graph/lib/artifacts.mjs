@@ -1,9 +1,8 @@
+import { lstatHostSync as lstatSync, fstatHostSync as fstatSync } from './host-filesystem.mjs';
 import { hasSecretContent } from './source-policy.mjs';
 import {
   closeSync,
   constants,
-  fstatSync,
-  lstatSync,
   openSync,
   readFileSync,
   realpathSync,

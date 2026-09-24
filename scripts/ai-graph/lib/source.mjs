@@ -1,3 +1,4 @@
+import { lstatHostSync as lstatSync, fstatHostSync as fstatSync } from './host-filesystem.mjs';
 import { gitExecutable, hostNullDevice, hostSystemEnvironment } from './host-executables.mjs';
 import { isPrivateMode } from './host-filesystem.mjs';
 import { spawnSync } from 'node:child_process';
@@ -7,8 +8,6 @@ import {
   closeSync,
   constants,
   existsSync,
-  fstatSync,
-  lstatSync,
   mkdirSync,
   openSync,
   readFileSync,

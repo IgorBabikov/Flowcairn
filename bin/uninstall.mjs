@@ -1,5 +1,6 @@
+import { lstatHostSync as lstatSync, fstatHostSync as fstatSync } from '../scripts/ai-graph/lib/host-filesystem.mjs';
 import { randomUUID } from 'node:crypto';
-import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { GraphError, sha256 } from '../scripts/ai-graph/lib/io.mjs';
 

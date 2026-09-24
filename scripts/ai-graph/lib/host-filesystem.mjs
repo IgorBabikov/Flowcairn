@@ -1,4 +1,4 @@
-import { constants, openSync, fsyncSync, closeSync } from 'node:fs';
+import { constants, openSync, fsyncSync, closeSync, Stats, lstatSync as nativeLstatSync, statSync as nativeStatSync, fstatSync as nativeFstatSync } from 'node:fs';
 import path from 'node:path';
 
 /** Windows stat mode bits do not describe NTFS ACLs. On Windows callers rely on
@@ -60,4 +60,57 @@ export function fsyncParentDirectory(directory, platform = process.platform) {
   const fd = openSync(directory, constants.O_RDONLY);
   try { fsyncSync(fd); } finally { closeSync(fd); }
   return { synced: true, reason: null };
+}
+
+/** Node 22.13.1/libuv Windows path stat exposes a 64-bit volume serial while
+ * handle fstat exposes its low 32 bits. Match upstream libuv fix 82cdfb75f:
+ * https://github.com/libuv/libuv/commit/82cdfb75f
+ * Use bigint stats: a rounded 64-bit Number has already lost identity bits. */
+export function canonicalStatDevice(stat, platform = process.platform) {
+  if (typeof stat.dev !== 'bigint' && !Number.isSafeInteger(stat.dev))
+    throw new Error('Filesystem identity requires bigint stats');
+  const device = BigInt(stat.dev);
+  return platform === 'win32' ? BigInt.asUintN(32, device) : device;
+}
+
+/** For path-stat versus handle-stat comparisons only. Same-origin stability
+ * checks must retain every original device bit. */
+export function crossStatIdentity(stat, platform = process.platform) {
+  return `${canonicalStatDevice(stat, platform)}:${stat.ino}:${stat.mode}:${stat.nlink}:${stat.size}:${stat.mtimeNs ?? stat.mtimeMs}:${stat.ctimeNs ?? stat.ctimeMs}`;
+}
+
+
+// Node 22.13.1's Windows lstat fast path exposes a 64-bit volume serial while
+// fstat exposes LowPart. Match libuv's upstream fix using exact bigint input.
+// https://github.com/libuv/libuv/commit/82cdfb75f
+function windowsStats(raw, bigint) {
+  if (!raw) return raw;
+  raw.dev = BigInt.asUintN(32, raw.dev);
+  if (bigint) return raw;
+  const result = Object.create(Stats.prototype);
+  for (const [key, value] of Object.entries(raw)) {
+    if (key.endsWith('Ns')) continue;
+    result[key] = typeof value === 'bigint' ? Number(value) : value;
+  }
+  for (const name of ['atime', 'mtime', 'ctime', 'birthtime']) {
+    const ns = raw[`${name}Ns`];
+    result[`${name}Ms`] = Number(ns / 1000000n) + Number(ns % 1000000n) / 1000000;
+  }
+  return result;
+}
+
+/** @returns {any} */
+export function lstatHostSync(file, options = {}) {
+  if (process.platform !== 'win32') return nativeLstatSync(file, options);
+  return windowsStats(nativeLstatSync(file, { ...options, bigint: true }), Reflect.get(options, 'bigint') === true);
+}
+/** @returns {any} */
+export function statHostSync(file, options = {}) {
+  if (process.platform !== 'win32') return nativeStatSync(file, options);
+  return windowsStats(nativeStatSync(file, { ...options, bigint: true }), Reflect.get(options, 'bigint') === true);
+}
+/** @returns {any} */
+export function fstatHostSync(fd, options = {}) {
+  if (process.platform !== 'win32') return nativeFstatSync(fd, options);
+  return windowsStats(nativeFstatSync(fd, { ...options, bigint: true }), Reflect.get(options, 'bigint') === true);
 }

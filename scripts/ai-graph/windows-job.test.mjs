@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, linkSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { hashObject, sha256 } from './lib/io.mjs';
-import { prepareWindowsJob } from './lib/windows-job.mjs';
+import { prepareWindowsJob, WINDOWS_JOB_TESTING } from './lib/windows-job.mjs';
 
 function fixture(t) { const root = mkdtempSync(path.join(tmpdir(), 'flowcairn-job-test-')); t.after(() => rmSync(root, { recursive: true, force: true })); return root; }
 
@@ -90,4 +90,46 @@ test('native Windows supervisor timeout persists reaped proof and removes launch
   assert.equal(existsSync(ticket.actionIdentity.executable), false);
   const childPid = Number(readFileSync(pidFile, 'utf8'));
   assert.throws(() => process.kill(childPid, 0), { code: 'ESRCH' });
+});
+
+
+test('trusted fixed Windows compiler accepts OS hardlinks but refuses redirect or symlink', () => {
+  const compiler = WINDOWS_JOB_TESTING.compiler;
+  const base = { system: 'C:\\Windows', statFile: () => ({ isFile: () => true, isSymbolicLink: () => false, nlink: 3 }), canonical: (file) => file };
+  assert.equal(compiler(base), 'C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe');
+  for (const patch of [
+    { canonical: () => 'C:\\untrusted\\csc.exe' },
+    { statFile: () => ({ isFile: () => true, isSymbolicLink: () => true, nlink: 1 }) },
+  ]) {
+    assert.throws(() => compiler({ ...base, ...patch }), (error) => {
+      assert.equal(error.code, 'WINDOWS_JOB_UNAVAILABLE');
+      assert.equal(error.details.stage, 'compiler-discovery');
+      assert.equal(error.details.candidates.length, 2);
+      assert.doesNotMatch(JSON.stringify(error.details), /untrusted|Windows/);
+      return true;
+    });
+  }
+});
+
+test('OS compiler exception does not permit hardlinked generated helper', (t) => {
+  const root = fixture(t);
+  assert.throws(() => prepareWindowsJob({ executable: process.execPath, args: [] }, {
+    platform: 'win32', parent: root, findCompiler: () => 'test-compiler', run: (_file, args) => {
+      const output = args.find((arg) => arg.startsWith('/out:')).slice(5);
+      writeFileSync(output, 'MZfixture');
+      linkSync(output, path.join(root, 'linked-helper.exe'));
+      return { status: 0 };
+    },
+  }), { code: 'WINDOWS_JOB_UNAVAILABLE', details: { stage: 'generated-file-validation' } });
+});
+
+test('compiler failures preserve bounded stage diagnostics without compiler output', () => {
+  assert.throws(() => prepareWindowsJob({ executable: process.execPath, args: [] }, {
+    platform: 'win32', findCompiler: () => 'test-compiler', run: () => ({ status: 1, stdout: 'private-source-and-credentials', stderr: 'private-path' }),
+  }), (error) => {
+    assert.equal(error.details.stage, 'compile');
+    assert.equal(error.details.status, 1);
+    assert.doesNotMatch(JSON.stringify(error), /private-/);
+    return true;
+  });
 });

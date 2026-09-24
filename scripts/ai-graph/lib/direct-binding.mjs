@@ -1,5 +1,6 @@
+import { lstatHostSync as lstatSync, fstatHostSync as fstatSync } from './host-filesystem.mjs';
 import { randomUUID } from 'node:crypto';
-import { closeSync, existsSync, fstatSync, lstatSync, openSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { isPrivateMode, noFollowReadFlags, sameHostPath } from './host-filesystem.mjs';
 import { GraphError, canonicalJson } from './io.mjs';

@@ -1,3 +1,5 @@
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, realpathSync, rmSync, copyFileSync, chmodSync, existsSync } from 'node:fs';
@@ -50,7 +52,9 @@ process.stdin.on('end', () => { fs.writeFileSync(args[args.indexOf('--output-las
   writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: 'native-fixture', version: '1.0.0', scripts: { test: 'node native-check.cjs' } }));
   writeFileSync(path.join(root, 'package-lock.json'), '{"name":"native-fixture","lockfileVersion":3,"packages":{}}');
   writeFileSync(path.join(root, 'native-check.cjs'), `const fs=require('node:fs'); const path=require('node:path'); setTimeout(()=>{fs.mkdirSync('dist',{recursive:true});fs.writeFileSync(path.join('dist','marker.txt'), process.cwd());console.log('native-check-marker');}, ${delay});`);
-  assert.equal(inspectCodexInstallation({ codexPath: entry }).available, true);
+  for (const file of [entry, path.join(cliRoot, 'package.json'), path.join(nativeRoot, 'package.json')]) chmodSync(file, 0o600);
+  const cliProbe = inspectCodexInstallation({ codexPath: entry });
+  assert.equal(cliProbe.available, true, JSON.stringify(cliProbe));
   const installed = initializeProject(root, { provider: 'codex', 'codex-path': entry, model: 'fixture-model', 'model-mode': 'manual', 'reasoning-effort': 'medium', checks: 'tests', outputs: 'dist' });
   assert.equal(installed.profile.workspaceMode, 'direct');
   assert.equal(installed.profile.checkMode, 'trusted-local');
@@ -58,7 +62,7 @@ process.stdin.on('end', () => { fs.writeFileSync(args[args.indexOf('--output-las
   const output = path.join(root, '.ai-orchestrator', 'graph', 'native-output');
   mkdirSync(output, { recursive: true, mode: 0o700 });
   mkdirSync(path.join(root, '.ai-orchestrator', 'graph', 'runner-tickets'), { recursive: true, mode: 0o700 });
-  return { root, output, toolchain: prepareToolchain({ root, worktree: root }) };
+  return { root, output, cliEntry: entry, toolchain: prepareToolchain({ root, worktree: root }) };
 }
 
 function contract(root, actionId, timeoutMs = 15000) {
@@ -107,4 +111,26 @@ test('native registered check timeout terminates the process tree', { timeout: 4
   assert.equal(result.failureReason, 'TIMEOUT', JSON.stringify(result));
   assert.equal(result.timedOut, true);
   assert.equal(existsSync(path.join(f.root, 'dist', 'marker.txt')), false);
+});
+
+
+test('native Windows fresh npm archive install preserves project files and runs installed CLI', { skip: process.platform !== 'win32', timeout: 240000 }, (t) => {
+  const f = fixture(t);
+  const directory = path.dirname(f.root), installed = path.join(directory, 'installed-project');
+  mkdirSync(installed);
+  const owner = '# Existing owner rules\n';
+  writeFileSync(path.join(installed, 'AGENTS.md'), owner);
+  writeFileSync(path.join(installed, 'package.json'), '{"name":"existing-native-project","version":"1.0.0","private":true}\n');
+  const npm = path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js');
+  const runtime = fileURLToPath(new URL('..', import.meta.url));
+  const cache = path.join(directory, 'npm-cache');
+  const packed = JSON.parse(execFileSync(process.execPath, [npm, 'pack', '--ignore-scripts', '--json', '--cache', cache, '--pack-destination', directory], { cwd: runtime, encoding: 'utf8', timeout: 60000 }));
+  execFileSync(process.execPath, [npm, 'install', path.join(directory, packed[0].filename), '--ignore-scripts', '--no-audit', '--no-fund', '--cache', cache], { cwd: installed, encoding: 'utf8', timeout: 120000 });
+  const bin = path.join(installed, 'node_modules', 'flowcairn', 'bin', 'flowcairn.mjs');
+  const created = JSON.parse(execFileSync(process.execPath, [bin, 'init', '--provider', 'codex', '--codex-path', f.cliEntry, '--model', 'fixture-model', '--model-mode', 'manual', '--reasoning-effort', 'medium', '--check-mode', 'none', '--json'], { cwd: installed, encoding: 'utf8', timeout: 30000 }));
+  assert.equal(created.result.profile.workspaceMode, 'direct');
+  assert.equal(readFileSync(path.join(installed, 'AGENTS.md'), 'utf8'), owner);
+  assert.equal(JSON.parse(readFileSync(path.join(installed, 'package.json'))).name, 'existing-native-project');
+  assert.ok(existsSync(path.join(installed, 'node_modules', 'flowcairn', 'scripts', 'ai-graph', 'lib', 'windows-job.cs')));
+  assert.equal(existsSync(path.join(installed, '.git')), false);
 });

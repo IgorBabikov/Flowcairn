@@ -1,6 +1,7 @@
+import { lstatHostSync as lstatSync, fstatHostSync as fstatSync } from '../scripts/ai-graph/lib/host-filesystem.mjs';
 import { gitExecutable } from '../scripts/ai-graph/lib/host-executables.mjs';
 import { execFileSync } from 'node:child_process';
-import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readFileSync, realpathSync } from 'node:fs';
+import { closeSync, constants, existsSync, openSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { GraphError } from '../scripts/ai-graph/lib/io.mjs';
 import { assertRuntimePlatform, assertProjectPlatform } from '../scripts/ai-graph/lib/platform.mjs';

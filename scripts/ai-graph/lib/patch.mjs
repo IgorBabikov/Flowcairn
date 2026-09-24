@@ -1,12 +1,11 @@
+import { lstatHostSync as lstatSync, fstatHostSync as fstatSync } from './host-filesystem.mjs';
 import { fsyncParentDirectory } from './host-filesystem.mjs';
 import { classifySource, assertSafeText } from './source-policy.mjs';
 import { randomUUID } from 'node:crypto';
 import {
   closeSync,
   constants,
-  fstatSync,
   fsyncSync,
-  lstatSync,
   mkdirSync,
   openSync,
   readFileSync,

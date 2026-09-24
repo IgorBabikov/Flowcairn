@@ -1,11 +1,10 @@
+import { lstatHostSync as lstatSync, fstatHostSync as fstatSync } from './host-filesystem.mjs';
 import { isPrivateMode, fsyncParentDirectory } from './host-filesystem.mjs';
 import { randomUUID } from 'node:crypto';
 import {
   closeSync,
   constants,
-  fstatSync,
   fsyncSync,
-  lstatSync,
   mkdirSync,
   openSync,
   readFileSync,

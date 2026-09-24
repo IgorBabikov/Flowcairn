@@ -1,3 +1,4 @@
+import { lstatHostSync as lstatSync, fstatHostSync as fstatSync } from './host-filesystem.mjs';
 import { isPrivateMode } from './host-filesystem.mjs';
 import { assertSafeText } from './source-policy.mjs';
 import { randomUUID } from 'node:crypto';
@@ -5,8 +6,6 @@ import {
   fchmodSync,
   closeSync,
   constants,
-  fstatSync,
-  lstatSync,
   openSync,
   readSync,
   realpathSync,
@@ -401,7 +400,7 @@ export function verifyReviewEvidenceFile(file) {
       !stat.isFile() ||
       stat.nlink !== 1 ||
       (process.platform !== 'win32' && (stat.mode & 0o777) !== 0o400) ||
-      stat.uid !== process.getuid() ||
+      (process.getuid && stat.uid !== process.getuid()) ||
       stat.size !== file.bytes ||
       stat.size > MAX_REVIEW_EVIDENCE_BYTES ||
       linked.isSymbolicLink() ||

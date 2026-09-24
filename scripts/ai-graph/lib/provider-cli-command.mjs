@@ -1,5 +1,6 @@
+import { lstatHostSync as lstatSync, fstatHostSync as fstatSync } from './host-filesystem.mjs';
 import path from 'node:path';
-import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, realpathSync } from 'node:fs';
+import { closeSync, constants, openSync, readFileSync, realpathSync } from 'node:fs';
 import { GraphError, sha256 } from './io.mjs';
 import { assertSafeText } from './source-policy.mjs';
 import { externalProviderPrompt } from './codex.mjs';

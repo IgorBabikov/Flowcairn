@@ -1,4 +1,5 @@
-import { closeSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
+import { lstatHostSync as lstatSync, fstatHostSync as fstatSync } from './host-filesystem.mjs';
+import { closeSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { isPrivateMode, noFollowReadFlags } from './host-filesystem.mjs';
 import { GraphError, canonicalJson, sha256 } from './io.mjs';

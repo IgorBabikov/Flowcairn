@@ -1,7 +1,7 @@
 import { hasSecretContent } from './source-policy.mjs';
 import { closeSync, fstatSync, lstatSync, openSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import path from 'node:path';
-import { noFollowReadFlags } from './host-filesystem.mjs';
+import { noFollowReadFlags, crossStatIdentity } from './host-filesystem.mjs';
 import { TextDecoder } from 'node:util';
 import { GraphError, canonicalJson, sha256 } from './io.mjs';
 import { isSensitivePath } from './registry.mjs';
@@ -25,23 +25,24 @@ function pathName(buffer) {
 }
 
 function readRegular(file, relative) {
-  const before = lstatSync(file);
-  if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1 || before.size > MAX_FILE_BYTES)
+  const before = lstatSync(file, { bigint: true });
+  if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1n || before.size > BigInt(MAX_FILE_BYTES))
     fail('DIRECT_FILE', `Небезопасный или слишком большой файл: ${relative}`);
   let fd;
   try {
     fd = openSync(file, noFollowReadFlags());
-    const opened = fstatSync(fd);
-    if (!opened.isFile() || opened.nlink !== 1 || opened.ino !== before.ino || opened.dev !== before.dev || opened.size !== before.size)
+    const opened = fstatSync(fd, { bigint: true });
+    if (!opened.isFile() || opened.nlink !== 1n || crossStatIdentity(opened) !== crossStatIdentity(before))
       fail('DIRECT_CHANGED', `Файл изменился до чтения: ${relative}`);
     const body = readFileSync(fd);
-    const after = fstatSync(fd);
-    const live = lstatSync(file);
-    if (body.length !== before.size || [after, live].some((stat) => stat.ino !== before.ino || stat.dev !== before.dev ||
-      stat.size !== before.size || stat.mtimeMs !== before.mtimeMs || stat.ctimeMs !== before.ctimeMs))
+    const after = fstatSync(fd, { bigint: true });
+    const live = lstatSync(file, { bigint: true });
+    if (BigInt(body.length) !== before.size || [[after, opened], [live, before]].some(([stat, expected]) =>
+      stat.ino !== expected.ino || stat.dev !== expected.dev || stat.mode !== expected.mode || stat.nlink !== expected.nlink ||
+      stat.size !== expected.size || stat.mtimeNs !== expected.mtimeNs || stat.ctimeNs !== expected.ctimeNs))
       fail('DIRECT_CHANGED', `Файл изменился во время чтения: ${relative}`);
     return { path: relative, hash: sha256(body), size: body.length, privateContent: hasSecretContent(body.toString('utf8')),
-      mode: (before.mode & 0o111) ? '100755' : '100644' };
+      mode: (before.mode & 0o111n) ? '100755' : '100644' };
   } finally { if (fd !== undefined) closeSync(fd); }
 }
 

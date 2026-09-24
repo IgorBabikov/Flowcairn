@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { closeSync, fstatSync, lstatSync, openSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import path from 'node:path';
-import { isPathWithin, sameHostPath, noFollowReadFlags } from './host-filesystem.mjs';
+import { isPathWithin, sameHostPath, noFollowReadFlags, crossStatIdentity } from './host-filesystem.mjs';
 import { GraphError } from './io.mjs';
 import { classifySource, normalizeSourcePath } from './source-policy.mjs';
 
@@ -26,10 +26,10 @@ function safeRead(file, expected, root) {
   const fd = openSync(file, noFollowReadFlags());
   try {
     const before = fstatSync(fd, { bigint: true });
-    if (identity(before) !== identity(expected)) fail();
+    if (crossStatIdentity(before) !== crossStatIdentity(expected)) fail();
     const bytes = readFileSync(fd);
     if (bytes.length > MAX_FILE_BYTES || identity(fstatSync(fd, { bigint: true })) !== identity(before)
-      || identity(lstatSync(file, { bigint: true })) !== identity(before) || !sameHostPath(realpathSync(file), file)) fail();
+      || identity(lstatSync(file, { bigint: true })) !== identity(expected) || !sameHostPath(realpathSync(file), file)) fail();
     return bytes;
   } finally { closeSync(fd); }
 }

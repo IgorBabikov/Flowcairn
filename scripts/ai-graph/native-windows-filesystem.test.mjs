@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, realpathSync, rmSync, linkSync, renameSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, realpathSync, rmSync, linkSync, renameSync, symlinkSync, lstatSync, fstatSync, openSync, closeSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { isPrivateMode, isTrustedMode, assertPrivateMode, sameHostPath, isPathWithin, noFollowReadFlags, fsyncParentDirectory } from './lib/host-filesystem.mjs';
+import { isPrivateMode, isTrustedMode, assertPrivateMode, sameHostPath, isPathWithin, noFollowReadFlags, fsyncParentDirectory, canonicalStatDevice, crossStatIdentity } from './lib/host-filesystem.mjs';
 import { inspectProjectSource, readProjectSourcePage } from './lib/project-source-access.mjs';
 import { fingerprintDirectWorkspace } from './lib/direct-workspace.mjs';
 import { captureDirectSource, verifyDirectSource } from './lib/direct-source.mjs';
@@ -76,4 +76,37 @@ test('native record hardlinks and directory junction/symlink escapes remain reje
   renameSync(storage, moved);
   symlinkSync(moved, storage, process.platform === 'win32' ? 'junction' : 'dir');
   assert.throws(() => captureDirectSource(root, { outputPaths: [] }));
+});
+
+
+test('Windows device normalization matches libuv low32 representation without losing other identity fields', () => {
+  const stat = { dev: 0xabcdeff123456789n, ino: 123456789012345678n, mode: 0o100666n, nlink: 1n, size: 4n, mtimeNs: 123456789012345n, ctimeNs: 123456789012346n };
+  const handle = { ...stat, dev: 0x23456789n };
+  assert.equal(canonicalStatDevice(stat, 'win32'), handle.dev);
+  assert.equal(crossStatIdentity(stat, 'win32'), crossStatIdentity(handle, 'win32'));
+  assert.notEqual(crossStatIdentity(stat, 'linux'), crossStatIdentity(handle, 'linux'));
+  for (const field of ['dev', 'ino', 'mode', 'nlink', 'size', 'mtimeNs', 'ctimeNs']) {
+    assert.notEqual(crossStatIdentity(stat, 'win32'), crossStatIdentity({ ...handle, [field]: handle[field] + 1n }, 'win32'), field);
+  }
+  assert.throws(() => canonicalStatDevice({ dev: Number(stat.dev) }, 'win32'));
+});
+
+test('new fixture path and descriptor stat identities agree on the current native host', (t) => {
+  const root = fixture(t);
+  const file = path.join(root, 'stat-fixture.txt');
+  writeFileSync(file, 'safe');
+  const before = lstatSync(file, { bigint: true });
+  const fd = openSync(file, noFollowReadFlags());
+  try {
+    const opened = fstatSync(fd, { bigint: true });
+    if (process.platform === 'win32') {
+      const fields = ['dev', 'ino', 'mode', 'nlink', 'size', 'mtimeNs', 'ctimeNs'];
+      const values = (stat) => Object.fromEntries(fields.map((key) => [key, String(stat[key])]));
+      // Only this newly created, public four-byte fixture; no project paths/data.
+      t.diagnostic(JSON.stringify({ node: process.versions.node, uv: process.versions.uv, pathStat: values(before), fdStat: values(opened) }));
+    }
+    assert.equal(crossStatIdentity(before), crossStatIdentity(opened));
+    assert.equal(lstatSync(file, { bigint: true }).dev, before.dev);
+    assert.equal(fstatSync(fd, { bigint: true }).dev, opened.dev);
+  } finally { closeSync(fd); }
 });
