@@ -1,4 +1,5 @@
-import { constants, closeSync, fstatSync, lstatSync, openSync, readSync, realpathSync } from 'node:fs';
+import { lstatHostSync as lstatSync, fstatHostSync as fstatSync } from './host-filesystem.mjs';
+import { constants, closeSync, openSync, readSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { GraphError, hashObject, sha256 } from './io.mjs';
 import { discoverWorkspaceManifests } from '../../../bin/workspaces.mjs';

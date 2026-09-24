@@ -120,7 +120,7 @@ test('reports rename with Unicode and newline paths as sorted delete and add ent
 
 test('binds executable mode changes and permits non-secret env templates', () => {
   const root = repository();
-  writeFileSync(path.join(root, '.env.local.example'), 'TOKEN=placeholder\n');
+  writeFileSync(path.join(root, '.env.local.example'), 'TOKEN=\n');
   const before = fingerprint(root);
   chmodSync(path.join(root, 'src', 'tracked.txt'), 0o755);
   const after = fingerprint(root);
@@ -220,7 +220,7 @@ test('rejects traversal, sensitive paths, symlinks and hardlinks', () => {
 test('builds bounded metadata evidence without exposing changed file contents', () => {
   const root = repository();
   const before = fingerprint(root);
-  writeFileSync(path.join(root, 'src', 'tracked.txt'), 'PASSWORD=do-not-leak\n');
+  writeFileSync(path.join(root, 'src', 'tracked.txt'), 'ordinary content do-not-leak\n');
   const after = fingerprint(root);
   const artifact = buildDiffArtifact(root, before, after);
   assert.equal(artifact.complete, false);
@@ -285,4 +285,24 @@ test('rejects a tampered persisted fingerprint', () => {
     () => compareWorkspaces(value, tampered),
     (error) => error.code === 'INVALID_WORKSPACE_FINGERPRINT',
   );
+});
+
+
+test('host freshness hashes content without exposing secret values in descriptors', () => {
+  const root = repository();
+  const value = 'api_key="' + 'z'.repeat(24) + '"';
+  const before = fingerprint(root);
+  writeFileSync(path.join(root, 'src', 'tracked.txt'), value);
+  const after = fingerprint(root);
+  assert.notEqual(after.hash, before.hash);
+  assert.equal(JSON.stringify(after).includes('z'.repeat(24)), false);
+});
+
+test('shared sensitive paths are denied while host control profile remains fingerprinted', () => {
+  const root = repository();
+  writeFileSync(path.join(root, '.flowcairn.json'), '{"version":1}');
+  assert.ok(fingerprint(root).files.some((file) => file.path === '.flowcairn.json'));
+  writeFileSync(path.join(root, 'access-token.json'), '{}');
+  assert.throws(() => fingerprint(root), (error) => error.code === 'SENSITIVE_WORKSPACE_PATH'
+    && !error.message.includes('access-token.json'));
 });

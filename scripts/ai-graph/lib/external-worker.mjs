@@ -1,24 +1,25 @@
 #!/usr/bin/env node
+import { providerCliCommand } from './provider-cli-command.mjs';
+import { assertSafeText } from './source-policy.mjs';
 import { spawnSync } from 'node:child_process';
 import { closeSync, constants, fstatSync, fsyncSync, lstatSync, openSync, readFileSync, writeFileSync } from 'node:fs';
-import path from 'node:path';
 import { z } from 'zod';
 import { GraphError } from './io.mjs';
 import { providerUsage } from './usage.mjs';
-import { externalProviderPrompt } from './codex.mjs';
 
-const Input = z.strictObject({ version: z.literal(1), provider: z.enum(['claude', 'cursor']), executable: z.string().min(1).max(1024), versionPin: z.string().min(1).max(160), prompt: z.string().min(1).max(128 * 1024), schema: z.record(z.string(), z.json()) });
+const Input = z.strictObject({ version: z.literal(2), provider: z.enum(['claude', 'cursor']), executable: z.string().min(1).max(1024), versionPin: z.string().min(1).max(160), prompt: z.string().min(1).max(128 * 1024), schema: z.record(z.string(), z.json()), projectRoot: z.string().min(1), deniedPaths: z.array(z.string().min(1).max(4096)).max(100000), review: z.object({path:z.string(),hash:z.string(),bytes:z.number().int().positive()}).nullable().optional() });
 const fail = (code, message) => { throw new GraphError(code, message); };
 function readInput(file) {
   const stat = lstatSync(file);
-  if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || stat.size > 1024 * 1024) fail('PROVIDER_INPUT_INVALID', 'Provider input недоступен.');
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || stat.size > 16 * 1024 * 1024) fail('PROVIDER_INPUT_INVALID', 'Provider input недоступен.');
   return Input.parse(JSON.parse(readFileSync(file, 'utf8')));
 }
 function writeResult(file, value) {
-  const fd = openSync(file, constants.O_WRONLY | constants.O_NOFOLLOW);
+  assertSafeText(JSON.stringify(value));
+  const fd = openSync(file, constants.O_WRONLY | (constants.O_NOFOLLOW ?? 0));
   try {
     const stat = fstatSync(fd);
-    if (!stat.isFile() || stat.nlink !== 1 || (stat.mode & 0o077) !== 0 || stat.size !== 0) fail('PROVIDER_RESULT_UNSAFE', 'Provider result file небезопасен.');
+    if (!stat.isFile() || stat.nlink !== 1 || (process.platform !== 'win32' && (stat.mode & 0o077) !== 0) || stat.size !== 0) fail('PROVIDER_RESULT_UNSAFE', 'Provider result file небезопасен.');
     writeFileSync(fd, JSON.stringify(value)); fsyncSync(fd);
   } finally { closeSync(fd); }
 }
@@ -36,18 +37,11 @@ function parseResult(provider, stdout) {
 function main() {
   const [inputFile, resultFile] = process.argv.slice(2);
   if (!inputFile || !resultFile) fail('PROVIDER_ARGS', 'Provider worker arguments missing.');
-  const input = readInput(inputFile), scratch = path.dirname(resultFile);
-  const environment = { PATH: '/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin', HOME: process.env.HOME ?? scratch, NO_COLOR: '1', LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8', CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' };
-  const version = spawnSync(input.executable, ['--version'], { cwd: scratch, env: environment, encoding: 'utf8', timeout: 10_000, maxBuffer: 16 * 1024, shell: false });
+  const input = readInput(inputFile);
+  const command = providerCliCommand(input);
+  const version = spawnSync(input.executable, ['--version'], { cwd: command.cwd, env: command.env, encoding: 'utf8', timeout: 10_000, maxBuffer: 16 * 1024, shell: false });
   if (version.error || version.status !== 0 || `${version.stdout ?? ''}`.trim() !== input.versionPin) fail('PROVIDER_VERSION_DRIFT', 'Версия provider изменилась до запуска.');
-  const schemaText = JSON.stringify(input.schema);
-  if (Buffer.byteLength(schemaText) > 64 * 1024) fail('PROVIDER_SCHEMA_LIMIT', 'Схема provider превышает лимит.');
-  const cursorPrompt = externalProviderPrompt('cursor', input.prompt, input.schema);
-  if (Buffer.byteLength(cursorPrompt) > 192 * 1024) fail('AI_CONTEXT_LIMIT', 'Контекст Cursor превышает лимит. Сузьте approved scope.');
-  const args = input.provider === 'claude'
-    ? ['--setting-sources', '', '--strict-mcp-config', '--no-session-persistence', '--permission-mode', 'dontAsk', '--tools', '', '-p', '--output-format', 'json', '--json-schema', JSON.stringify(input.schema), input.prompt]
-    : ['--print', '--output-format', 'json', '--sandbox', 'enabled', '--mode', 'ask', cursorPrompt];
-  const run = spawnSync(input.executable, args, { cwd: scratch, env: environment, encoding: 'utf8', timeout: 120_000, maxBuffer: 2 * 1024 * 1024, shell: false });
+  const run = spawnSync(command.executable, command.args, { cwd: command.cwd, env: command.env, input: command.input, encoding: 'utf8', timeout: 120_000, maxBuffer: 2 * 1024 * 1024, shell: false });
   let envelope;
   try { envelope = JSON.parse(run.stdout); } catch { /* Output validation below reports the error. */ }
   const usage = providerUsage(input.provider, envelope);

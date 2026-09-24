@@ -1,6 +1,8 @@
+import { lstatHostSync as lstatSync, fstatHostSync as fstatSync } from './host-filesystem.mjs';
 import { randomUUID } from 'node:crypto';
-import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { isPrivateMode, noFollowReadFlags, sameHostPath } from './host-filesystem.mjs';
 import { GraphError, canonicalJson } from './io.mjs';
 import { fingerprintDirectWorkspace } from './direct-workspace.mjs';
 import { GraphStore } from './store.mjs';
@@ -13,9 +15,11 @@ function readBinding(root) {
   if (!existsSync(file)) return null;
   let fd;
   try {
-    fd = openSync(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    const before = lstatSync(file);
+    if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1) fail('DIRECT_BINDING', 'Запись владельца проекта повреждена');
+    fd = openSync(file, noFollowReadFlags());
     const stat = fstatSync(fd);
-    if (!stat.isFile() || stat.nlink !== 1 || (stat.mode & 0o077) || stat.size > 4096)
+    if (!stat.isFile() || stat.ino !== before.ino || stat.dev !== before.dev || stat.nlink !== 1 || !isPrivateMode(stat) || stat.size > 4096)
       fail('DIRECT_BINDING', 'Запись владельца проекта повреждена');
     return JSON.parse(readFileSync(fd, 'utf8'));
   } catch (error) {
@@ -52,7 +56,7 @@ export function replaceDirectBinding({ root, binding, runId, newRunId, sourceHas
 }
 
 export function verifyDirectBinding(root, binding) {
-  if (!binding || binding.worktree !== realpathSync(root) || binding.mode !== 'direct')
+  if (!binding || !sameHostPath(binding.worktree, realpathSync(root)) || binding.mode !== 'direct')
     fail('DIRECT_BINDING', 'Работа относится к другому проекту');
   const live = readBinding(root);
   if (!live || canonicalJson(live) !== canonicalJson(binding)) fail('DIRECT_BINDING', 'Владелец текущего проекта изменился');
@@ -66,7 +70,7 @@ export function allocateDirectBinding({ root, task, runId, sourceHash, owner, ex
   const prior = readBinding(root);
   if (prior?.runId === runId) {
     if (prior.taskId !== task.id || prior.sourceHash !== sourceHash || prior.owner !== owner ||
-        prior.worktree !== realpathSync(root))
+        !sameHostPath(prior.worktree, realpathSync(root)))
       fail('DIRECT_BINDING', 'Владелец текущего запуска изменился');
     return prior;
   }

@@ -89,7 +89,7 @@ test('local checks execute only a profile-bound script in the allocated worktree
   assert.equal(result.uncertain, false);
   assert.equal(result.execution.kind, 'local-check');
   assert.equal(result.execution.script, 'test');
-  assert.equal(result.execution.isolation, 'worktree-only');
+  assert.equal(result.execution.isolation, 'trusted-project-process');
   assert.equal(existsSync(path.join(worktree, 'check-home.json')), false);
   assert.deepEqual(JSON.parse(readFileSync(path.join(outputDirectory, 'check-home.json'), 'utf8')),
     { cache: path.join(outputDirectory, 'npm-cache') });

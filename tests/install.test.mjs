@@ -365,7 +365,7 @@ test('TTY init selects a verified CLI; non-TTY, JSON and dry-run never write wit
     transcript += text;
     const replies = [
       ['Выбор [1]:', 'keep'], ['Режим проверок [1]:', 'none'],
-      ['Разрешить чтение проекта', 'да'], ['Подключить Graph', 'нет'],
+      ['Разрешить выбранному AI-клиенту', 'да'], ['Подключить Graph', 'нет'],
     ];
     for (const [marker, answer] of replies) if (text.includes(marker)) setImmediate(() => input.write(answer + '\n'));
   });

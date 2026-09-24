@@ -1,3 +1,4 @@
+import { gitExecutable } from './host-executables.mjs';
 import { spawnSync } from 'node:child_process';
 import { lstatSync } from 'node:fs';
 import path from 'node:path';
@@ -42,8 +43,8 @@ export function run(command, args, { cwd, timeout = 120_000, allowFailure = fals
       ? result.error.code
       : null;
     throw new CliError(
-      errorCode === 'ETIMEDOUT' && command === '/usr/bin/git' ? 'GIT_TIMEOUT' : 'COMMAND_FAILED',
-      errorCode === 'ETIMEDOUT' && command === '/usr/bin/git' ? 'Git не ответил за отведенное время.' : `${command} failed`,
+      errorCode === 'ETIMEDOUT' && command === gitExecutable() ? 'GIT_TIMEOUT' : 'COMMAND_FAILED',
+      errorCode === 'ETIMEDOUT' && command === gitExecutable() ? 'Git не ответил за отведенное время.' : `${command} failed`,
       output,
     );
   }
@@ -54,7 +55,7 @@ export function run(command, args, { cwd, timeout = 120_000, allowFailure = fals
 }
 
 export function git(root, args, options = {}) {
-  return run('/usr/bin/git', ['-C', root, '-c', 'core.fsmonitor=false', ...args], {
+  return run(gitExecutable(), ['-C', root, '-c', 'core.fsmonitor=false', ...args], {
     ...options,
     timeout: options.timeout ?? GIT_TIMEOUT_MS,
   });

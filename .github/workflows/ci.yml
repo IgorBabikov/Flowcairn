@@ -22,7 +22,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: '22'
+          node-version: '22.13.1'
           cache: npm
       - name: Зависимости без lifecycle scripts
         run: npm ci --ignore-scripts --no-audit --no-fund
@@ -46,3 +46,25 @@ jobs:
         run: npm run check:public
       - name: Состав устанавливаемого архива
         run: npm run check:package
+  native-windows:
+    name: Native Windows / Node 22.13.1
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      FLOWCAIRN_REQUIRE_NATIVE_WINDOWS: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.13.1'
+          cache: npm
+      - name: Зависимости без lifecycle scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Типы
+        run: npm run typecheck
+      - name: Lint
+        run: npm run lint
+      - name: Native Windows filesystem, processes, setup and runner
+        run: node --test scripts/ai-graph/native-windows-filesystem.test.mjs scripts/ai-graph/host-process.test.mjs scripts/ai-graph/windows-job.test.mjs tests/install-platform.test.mjs tests/native-windows.test.mjs
+      - name: Сборка интерфейса
+        run: npm run build

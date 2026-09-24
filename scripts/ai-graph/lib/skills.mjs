@@ -1,3 +1,4 @@
+import { assertSafeText } from './source-policy.mjs';
 import { parseDocument } from 'yaml';
 import { RUNTIME_ROOT } from './project.mjs';
 import { BUILTIN_SKILL_IDS, CORE_SKILL_ROUTES, DOMAIN_SKILLS, SKILL_POLICY_VERSION, SKILL_ROUTES } from './config.mjs';
@@ -62,6 +63,7 @@ export function loadSkill(root, name, { projectSkills = [] } = {}) {
   if (!entry) fail('SKILL_UNKNOWN', 'Skill отсутствует в trusted registry');
   const loaded = readContextFile(root, entry.path, { maxBytes: MAX_SKILL_BYTES });
   if (loaded.hash !== entry.hash) fail('SKILL_DRIFT', 'Обязательный project Skill изменился; обновите manifest и plan');
+  assertSafeText(loaded.text);
   validateSkillText(loaded.text, name.slice('project-'.length));
   const text = effectiveProjectSkillText(entry, loaded.text);
   if (Buffer.byteLength(text) > MAX_SKILL_BYTES) fail('SKILL_TOO_LARGE', 'Skill с обязательной областью применения превышает лимит');

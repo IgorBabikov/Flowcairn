@@ -1,3 +1,6 @@
+import { lstatHostSync as lstatSync, fstatHostSync as fstatSync } from './host-filesystem.mjs';
+import { gitExecutable, gitNullDevice, hostSystemEnvironment } from './host-executables.mjs';
+import { isPrivateMode, sameHostPath, isPathWithin, realpathHostSync } from './host-filesystem.mjs';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import {
@@ -5,8 +8,6 @@ import {
   closeSync,
   constants,
   existsSync,
-  fstatSync,
-  lstatSync,
   mkdirSync,
   openSync,
   readFileSync,
@@ -21,8 +22,10 @@ import {
 import path from 'node:path';
 import { TextDecoder } from 'node:util';
 import { GraphError, canonicalJson, sha256 } from './io.mjs';
+import { hasSecretContent, isSensitivePath } from './source-policy.mjs';
+import { fingerprintProjectSource } from './project-source-access.mjs';
 
-const GIT_EXECUTABLE = '/usr/bin/git';
+const GIT_EXECUTABLE = gitExecutable();
 const SOURCE_BUNDLE_VERSION = 2;
 const MAX_ENTRIES = 20_000;
 const MAX_PATH_BYTES = 4_096;
@@ -87,30 +90,14 @@ function assertSafePath(value) {
 }
 
 export function isSensitiveSourcePath(relativePath) {
-  const parts = relativePath.toLowerCase().split('/');
-  return parts.some((name, index) => {
-    const allowedTemplate =
-      index === parts.length - 1 && /^\.env(?:\.[^/]+)*\.(?:example|sample|template)$/.test(name);
-    return (
-      (!allowedTemplate && (name === '.env' || name.startsWith('.env.'))) ||
-      [
-        '.npmrc',
-        '.pypirc',
-        '.netrc',
-        'credentials',
-        'credentials.json',
-        'id_rsa',
-        'id_ed25519',
-      ].includes(name) ||
-      /(?:^|[._-])secrets?(?:[._-](?:json|ya?ml|toml|txt))?$/.test(name) ||
-      /\.(?:key|pem|p12|pfx)$/.test(name)
-    );
-  });
+  // Host-only control profile is required to reconstruct the executor workspace.
+  // AI snapshots independently reject it through the shared policy.
+  return relativePath !== '.flowcairn.json' && isSensitivePath(relativePath);
 }
 
 function assertNotSensitivePath(relativePath) {
   if (isSensitiveSourcePath(relativePath))
-    fail('SENSITIVE_SOURCE_PATH', `Source bundle отклоняет чувствительный path: ${relativePath}`);
+    fail('SENSITIVE_SOURCE_PATH', 'Source bundle отклоняет чувствительный path.');
 }
 
 function comparePath(left, right) {
@@ -153,7 +140,7 @@ function runGit(
   ]) {
     if (typeof process.env[key] === 'string') environment[key] = process.env[key];
   }
-  if (!['darwin', 'linux'].includes(process.platform)) {
+  if (!['darwin', 'linux', 'win32'].includes(process.platform)) {
     fail('UNSUPPORTED_PLATFORM', 'Source bundle поддерживает только macOS/Linux system Git');
   }
   let gitStat;
@@ -162,7 +149,7 @@ function runGit(
   } catch {
     fail('GIT_FAILED', 'System Git не найден');
   }
-  if (!gitStat.isFile() || gitStat.isSymbolicLink() || (gitStat.mode & 0o111) === 0) {
+  if (!gitStat.isFile() || gitStat.isSymbolicLink() || (process.platform !== 'win32' && (gitStat.mode & 0o111) === 0)) {
     fail('GIT_FAILED', 'System Git executable недопустим');
   }
   const result = spawnSync(
@@ -175,13 +162,13 @@ function runGit(
       shell: false,
       timeout: 120_000,
       maxBuffer,
-      env: {
+      env: { ...hostSystemEnvironment(),
         ...environment,
         GIT_OPTIONAL_LOCKS: '0',
         GIT_NO_LAZY_FETCH: '1',
         GIT_NO_REPLACE_OBJECTS: '1',
         GIT_CONFIG_NOSYSTEM: '1',
-        GIT_CONFIG_GLOBAL: '/dev/null',
+        GIT_CONFIG_GLOBAL: gitNullDevice,
         GIT_ATTR_NOSYSTEM: '1',
         LC_ALL: 'C',
       },
@@ -200,7 +187,7 @@ function runGit(
 function repositoryRoot(root) {
   const requested = realpathSync(root);
   const top = runGit(requested, ['rev-parse', '--show-toplevel']).stdout.toString('utf8').trim();
-  if (realpathSync(top) !== requested) {
+  if (!sameHostPath(realpathHostSync(top), realpathHostSync(requested))) {
     fail('NOT_REPOSITORY_ROOT', '--root должен быть корнем Git');
   }
   return requested;
@@ -369,7 +356,7 @@ function assertSafeSymlink(relativePath, buffer) {
   return target;
 }
 
-function readWorktreeEntry(root, relativePath) {
+function readWorktreeEntry(root, relativePath, indexMode = undefined) {
   const ancestorsBefore = ancestorState(root, relativePath);
   if (!ancestorsBefore.available) {
     return { data: null, mode: null, statIdentity: `${ancestorsBefore.identity}|absent` };
@@ -394,7 +381,7 @@ function readWorktreeEntry(root, relativePath) {
       fail('SOURCE_CHANGED', 'Source ancestor изменился во время capture');
     try {
       const resolved = realpathSync(absolute);
-      if (resolved !== root && !resolved.startsWith(`${root}${path.sep}`)) {
+      if (!isPathWithin(root, resolved)) {
         fail('UNSAFE_SYMLINK', 'Symlink выходит за source root');
       }
     } catch (error) {
@@ -429,7 +416,10 @@ function readWorktreeEntry(root, relativePath) {
       fail('SOURCE_CHANGED', 'Source ancestor изменился во время capture');
     return {
       data,
-      mode: (Number(after.mode) & 0o111) === 0 ? '100644' : '100755',
+      // Windows has no POSIX executable bit: Git's index is authoritative
+      // for tracked regular files; new files default to non-executable.
+      mode: process.platform === 'win32' ? (indexMode === '100755' ? '100755' : '100644')
+        : (Number(after.mode) & 0o111) === 0 ? '100644' : '100755',
       statIdentity: `${ancestorsBefore.identity}|${statIdentity(current)}`,
     };
   } finally {
@@ -492,15 +482,15 @@ function ensurePrivateDirectory(directory) {
   const stat = lstatSync(directory);
   if (!stat.isDirectory() || stat.isSymbolicLink())
     fail('INSECURE_STORAGE', 'Bundle storage должен быть обычной directory');
-  if ((stat.mode & 0o077) !== 0)
+  if (!isPrivateMode(stat))
     fail('INSECURE_STORAGE', 'Bundle storage должен быть private (0700)');
 }
 
 function assertOutputLocation(root, outputRoot) {
   const resolved = path.resolve(outputRoot);
-  if (resolved === root)
+  if (sameHostPath(resolved, root))
     fail('INSECURE_STORAGE', 'Source root нельзя использовать как bundle storage');
-  if (resolved.startsWith(`${root}${path.sep}`)) {
+  if (isPathWithin(root, resolved)) {
     const relative = path.relative(root, resolved).split(path.sep).join('/');
     if (relative === '.git' || relative.startsWith('.git/'))
       fail('INSECURE_STORAGE', 'Bundle storage запрещен внутри .git');
@@ -550,7 +540,31 @@ function writeBundle(outputRoot, manifest, objects, parentIdentity) {
   return bundlePath;
 }
 
-export function captureSourceBundle(root, outputRoot, { allowedUntracked = [] } = {}) {
+function supplementalIgnoredSource(root, profile, tracked) {
+  if (!profile) return null;
+  const fingerprint = fingerprintProjectSource(root, {
+    outputPaths: profile.outputPaths ?? [], denyGlobs: profile.aiDenyGlobs ?? [],
+  });
+  const candidates = fingerprint.files.filter((file) => !tracked.has(file.path)).map((file) => file.path);
+  if (candidates.length > MAX_ENTRIES) fail('SOURCE_LIMIT_EXCEEDED', 'Supplemental source превышает лимит.');
+  const ignored = new Set();
+  for (let start = 0; start < candidates.length; start += 256) {
+    const batch = candidates.slice(start, start + 256);
+    const result = runGit(root, ['check-ignore', '--stdin', '-z'], {
+      input: batch.join('\0') + '\0', allowFailure: true, maxBuffer: MAX_MANIFEST_BYTES,
+    });
+    if (result.status !== 0 && result.status !== 1) fail('SOURCE_CHANGED', 'Не удалось проверить supplemental source.');
+    const accepted = new Set(batch);
+    for (const record of parseNulRecords(result.stdout)) {
+      const file = decodePath(record);
+      if (!accepted.has(file)) fail('SOURCE_CHANGED', 'Не удалось проверить supplemental source.');
+      ignored.add(file);
+    }
+  }
+  return { hash: fingerprint.hash, files: fingerprint.files.filter((file) => ignored.has(file.path)) };
+}
+
+export function captureSourceBundle(root, outputRoot, { allowedUntracked = [], profile = null } = {}) {
   const repository = repositoryRoot(root);
   const storage = assertOutputLocation(repository, outputRoot);
   const storageParentIdentity = assertDirectoryChain(path.dirname(storage), 'INSECURE_STORAGE');
@@ -576,6 +590,10 @@ export function captureSourceBundle(root, outputRoot, { allowedUntracked = [] } 
     }
   }
 
+  const tracked = new Set([...headEntries.keys(), ...initialIndex.entries.keys()]);
+  const supplemental = supplementalIgnoredSource(repository, profile, tracked);
+  const supplementalFiles = new Map((supplemental?.files ?? []).map((file) => [file.path, file]));
+
   // Tracked credentials/configuration can be required locally, but must never be
   // copied into the isolated Graph worktree or included in the source bundle.
   const withheldPaths = [
@@ -587,6 +605,7 @@ export function captureSourceBundle(root, outputRoot, { allowedUntracked = [] } 
         (entry) => !isSensitiveSourcePath(entry),
       ),
       ...allowed,
+      ...supplementalFiles.keys(),
     ]),
   ].sort(comparePath);
   if (allPaths.length > MAX_ENTRIES)
@@ -598,6 +617,8 @@ export function captureSourceBundle(root, outputRoot, { allowedUntracked = [] } 
   let totalBytes = 0;
   let worktreeLogicalBytes = 0;
   const addObject = (data) => {
+    if (hasSecretContent(data.toString('utf8')))
+      fail('SENSITIVE_SOURCE_CONTENT', 'Source bundle отклоняет чувствительное содержимое.');
     if (data.length > MAX_OBJECT_BYTES)
       fail('SOURCE_LIMIT_EXCEEDED', 'Source object превышает лимит размера');
     const hash = sha256(data);
@@ -639,17 +660,20 @@ export function captureSourceBundle(root, outputRoot, { allowedUntracked = [] } 
       if (value.type === 'symlink') assertSafeSymlink(relativePath, data);
       addObject(data);
       index = value;
-      const current = readWorktreeEntry(repository, relativePath);
+      const current = readWorktreeEntry(repository, relativePath, indexEntry.mode);
       worktreeStats.set(relativePath, current.statIdentity);
       if (current.data !== null) {
         addWorktreeBytes(current.data);
         addObject(current.data);
         worktree = descriptor(current.data, current.mode);
       }
-    } else if (allowedSet.has(relativePath)) {
+    } else if (allowedSet.has(relativePath) || supplementalFiles.has(relativePath)) {
       const current = readWorktreeEntry(repository, relativePath);
       if (current.data === null)
         fail('SOURCE_CHANGED', `Разрешенный untracked path исчез: ${relativePath}`);
+      const supplementalFile = supplementalFiles.get(relativePath);
+      if (supplementalFile && (sha256(current.data) !== supplementalFile.hash || current.mode !== supplementalFile.mode))
+        fail('SOURCE_CHANGED', 'Supplemental source изменился во время capture.');
       addWorktreeBytes(current.data);
       addObject(current.data);
       worktree = descriptor(current.data, current.mode);
@@ -678,6 +702,12 @@ export function captureSourceBundle(root, outputRoot, { allowedUntracked = [] } 
       }
       throw error;
     }
+  }
+
+  if (supplemental) {
+    const finalSupplemental = supplementalIgnoredSource(repository, profile, tracked);
+    if (canonicalJson(supplemental) !== canonicalJson(finalSupplemental))
+      fail('SOURCE_CHANGED', 'Supplemental source изменился во время capture.');
   }
 
   for (const layer of ['head', 'index', 'worktree']) {
@@ -758,7 +788,7 @@ function readObject(objectPath, expected) {
   if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1n) {
     fail('INVALID_SOURCE_BUNDLE', 'Bundle object должен быть private regular file без hardlinks');
   }
-  if ((stat.mode & 0o077n) !== 0n)
+  if (!isPrivateMode(stat))
     fail('INSECURE_SOURCE_BUNDLE', 'Bundle object должен быть private');
   if (stat.size !== BigInt(expected.size))
     fail('SOURCE_BUNDLE_TAMPERED', 'Bundle object size не совпадает');
@@ -785,7 +815,7 @@ function loadVerifiedBundle(bundlePath) {
   const rootStat = lstatSync(root);
   if (!rootStat.isDirectory() || rootStat.isSymbolicLink())
     fail('INVALID_SOURCE_BUNDLE', 'Bundle path должен быть directory');
-  if ((rootStat.mode & 0o077) !== 0)
+  if (!isPrivateMode(rootStat))
     fail('INSECURE_SOURCE_BUNDLE', 'Bundle path должен быть private');
   const rootNames = readdirSync(root).sort();
   if (rootNames.length !== 2 || rootNames[0] !== 'manifest.json' || rootNames[1] !== 'objects') {
@@ -797,7 +827,7 @@ function loadVerifiedBundle(bundlePath) {
     !manifestStat.isFile() ||
     manifestStat.isSymbolicLink() ||
     manifestStat.nlink !== 1n ||
-    (manifestStat.mode & 0o077n) !== 0n ||
+    !isPrivateMode(manifestStat) ||
     manifestStat.size > BigInt(MAX_MANIFEST_BYTES)
   ) {
     fail('INVALID_SOURCE_BUNDLE', 'Manifest недопустим или превышает лимит');
@@ -852,7 +882,7 @@ function loadVerifiedBundle(bundlePath) {
   if (!objectDirectoryStat.isDirectory() || objectDirectoryStat.isSymbolicLink()) {
     fail('INVALID_SOURCE_BUNDLE', 'Bundle objects должен быть directory');
   }
-  if ((objectDirectoryStat.mode & 0o077) !== 0)
+  if (!isPrivateMode(objectDirectoryStat))
     fail('INSECURE_SOURCE_BUNDLE', 'Bundle objects должен быть private');
   const seenPaths = new Set();
   const canonicalPaths = new Set();
@@ -1024,7 +1054,7 @@ export function materializeSourceBundle(bundlePath, targetRoot) {
       if (value.type === 'file' && (!stat.isFile() || stat.nlink !== 1n))
         fail('UNSAFE_MATERIALIZATION', 'Materialized file недопустим');
       if (
-        value.type === 'file' &&
+        value.type === 'file' && process.platform !== 'win32' &&
         ((Number(stat.mode) & 0o111) !== 0) !== (value.mode === '100755')
       ) {
         fail('SOURCE_BUNDLE_TAMPERED', 'Materialized executable mode не совпадает');
@@ -1058,7 +1088,7 @@ export function materializeSourceBundle(bundlePath, targetRoot) {
       fail('SOURCE_BUNDLE_TAMPERED', 'Post-materialization hash не совпадает');
     const stat = lstatSync(destination, { bigint: true });
     if (
-      entry.worktree.type === 'file' &&
+      entry.worktree.type === 'file' && process.platform !== 'win32' &&
       ((Number(stat.mode) & 0o111) !== 0) !== (entry.worktree.mode === '100755')
     ) {
       fail('SOURCE_BUNDLE_TAMPERED', 'Post-materialization executable mode не совпадает');

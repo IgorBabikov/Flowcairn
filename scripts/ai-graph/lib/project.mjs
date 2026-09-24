@@ -1,3 +1,4 @@
+import { isPrivateMode } from './host-filesystem.mjs';
 import { lstatSync, readFileSync, realpathSync, existsSync, openSync, closeSync, fstatSync, constants } from 'node:fs';
 import { parseDocument } from 'yaml';
 import path from 'node:path';
@@ -73,6 +74,7 @@ const CHECK_SCRIPT_CANDIDATES = Object.freeze({
 export const ProjectProfileSchema = z.strictObject({
   version: z.literal(1),
   integrationBranch: branch,
+  aiDenyGlobs: z.array(z.string().min(1).max(512)).max(128).optional(),
   // Older installations retain their isolated worktree until explicitly migrated.
   workspaceMode: z.enum(['direct', 'worktree']).optional(),
   packageManager: z.enum(['npm', 'pnpm', 'yarn']),
@@ -229,7 +231,7 @@ export function packageManagerVersion(manager, pkg) {
 }
 
 function managerFile(root, relative) {
-  const fd = openSync(path.join(root, relative), constants.O_RDONLY | constants.O_NOFOLLOW);
+  const fd = openSync(path.join(root, relative), constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
   try {
     const stat = fstatSync(fd);
     if (!stat.isFile() || stat.nlink !== 1 || stat.size > 256 * 1024)
@@ -309,7 +311,7 @@ export function projectContextPaths(root, profile = loadProjectProfile(root)) {
 
 /** Разрешение хранится локально и связано с точным профилем и корнем проекта. */
 export function onboardingConsentHash(root, profile) {
-  return hashObject({ root: realpathSync(root), profile });
+  return hashObject({ sourceAccess: 'native-project-v2', root: realpathSync(root), profile });
 }
 
 /** A local script consent binds the exact registered names, not task prose. */
@@ -328,12 +330,12 @@ export function hasOnboardingConsent(root, profile = loadProjectProfile(root)) {
   try {
     const directory = path.join(realpathSync(root), '.ai-orchestrator');
     const stat = lstatSync(directory);
-    if (!stat.isDirectory() || stat.isSymbolicLink() || (stat.mode & 0o077)) return false;
+    if (!stat.isDirectory() || stat.isSymbolicLink() || !isPrivateMode(stat)) return false;
     const file = path.join(directory, 'flowcairn-install.json');
-    const fd = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const fd = openSync(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
     try {
       const entry = fstatSync(fd);
-      if (!entry.isFile() || entry.nlink !== 1 || entry.size > 1024 * 1024 || (entry.mode & 0o077)) return false;
+      if (!entry.isFile() || entry.nlink !== 1 || entry.size > 1024 * 1024 || !isPrivateMode(entry)) return false;
       const value = JSON.parse(readFileSync(fd, 'utf8'));
       return value.tool === 'flowcairn' && /^flowcairn-[a-f0-9-]+$/.test(value.owner ?? '') &&
         value.readConsentHash === onboardingConsentHash(root, profile);
@@ -342,17 +344,17 @@ export function hasOnboardingConsent(root, profile = loadProjectProfile(root)) {
 }
 
 export function hasTrustedLocalChecksBinding(root, profile = loadProjectProfile(root)) {
-  if (profile.checkMode !== 'trusted-local') return false;
+  if (!['trusted-local', 'hardened'].includes(profile.checkMode)) return false;
   if (!profile.checks.length) return true;
   try {
     const directory = path.join(realpathSync(root), '.ai-orchestrator');
     const stat = lstatSync(directory);
-    if (!stat.isDirectory() || stat.isSymbolicLink() || (stat.mode & 0o077)) return false;
+    if (!stat.isDirectory() || stat.isSymbolicLink() || !isPrivateMode(stat)) return false;
     const file = path.join(directory, 'flowcairn-install.json');
-    const fd = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const fd = openSync(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
     try {
       const entry = fstatSync(fd);
-      if (!entry.isFile() || entry.nlink !== 1 || entry.size > 1024 * 1024 || (entry.mode & 0o077)) return false;
+      if (!entry.isFile() || entry.nlink !== 1 || entry.size > 1024 * 1024 || !isPrivateMode(entry)) return false;
       const value = JSON.parse(readFileSync(fd, 'utf8'));
       return value.tool === 'flowcairn' && /^flowcairn-[a-f0-9-]+$/.test(value.owner ?? '') &&
         value.trustedLocalChecksHash === trustedLocalChecksHash(root, profile);

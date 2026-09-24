@@ -11,6 +11,8 @@ import {
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { prepareWindowsJob } from './windows-job.mjs';
+import { inspectHostProcess, stopHostGroup } from './host-process.mjs';
 import { createUsageCollector } from './usage.mjs';
 import { MAX_CONTROL_BYTES, MAX_CONTROL_INPUT_BYTES, validCommand } from './supervisor-control.mjs';
 
@@ -91,7 +93,7 @@ function errorCode(error) {
 
 function readTicket(ticketPath) {
   const stat = lstatSync(ticketPath);
-  if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || (stat.mode & 0o077) !== 0) {
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || (process.platform !== 'win32' && (stat.mode & 0o077) !== 0)) {
     throw new Error('Unsafe supervisor ticket');
   }
   if (stat.size < 2 || stat.size > MAX_TICKET_BYTES) throw new Error('Invalid ticket size');
@@ -133,9 +135,13 @@ export async function supervise(ticketPath) {
     throw new Error('Invalid supervisor ticket');
   }
 
+  const processIdentity = process.platform === 'win32' ? inspectHostProcess(process.pid) : null;
+  if (process.platform === 'win32' && !processIdentity) throw new Error('PROCESS_IDENTITY_UNKNOWN');
   const startedAt = new Date().toISOString();
+  if (processIdentity) writeTicket(ticketPath, { ...initial, processIdentity });
   sendControl({
     type: 'ready',
+    ...(processIdentity ? { processIdentity } : {}),
     pid: process.pid,
     pgid: process.pid,
     startedAt,
@@ -144,6 +150,9 @@ export async function supervise(ticketPath) {
   });
 
   let action = null;
+  let actionIdentity = null;
+  let windowsStopVerified = false;
+  let windowsJob = null;
   let terminal = false;
   let terminatingReason = null;
   let control = Buffer.alloc(0);
@@ -189,6 +198,15 @@ export async function supervise(ticketPath) {
     });
     if (!action) {
       finish(null, null, reason);
+      return;
+    }
+    if (process.platform === 'win32') {
+      windowsStopVerified = stopHostGroup(action.pid, { identity: actionIdentity });
+      if (!windowsStopVerified) {
+        process.exitCode = 1;
+        // Keep the terminating ticket: lack of proof must survive recovery.
+        process.stdin.destroy();
+      }
       return;
     }
     try {
@@ -244,19 +262,32 @@ export async function supervise(ticketPath) {
       return;
     }
 
+    let launchCommand = message.command;
+    if (process.platform === 'win32') {
+      try { windowsJob = prepareWindowsJob(message.command); windowsJob.verify(); launchCommand = windowsJob.command; }
+      catch { finish(null, null, 'WINDOWS_JOB_UNAVAILABLE'); return; }
+    }
     writeTicket(ticketPath, {
       ...readTicket(ticketPath),
+      ...(windowsJob ? { windowsJobBound: true, windowsJobHash: windowsJob.executableHash } : {}),
       state: 'running',
       actionStartedAt: new Date().toISOString(),
     });
-    action = spawn(message.command.executable, message.command.args, {
-      cwd: message.command.cwd,
-      env: message.command.env,
+    action = spawn(launchCommand.executable, launchCommand.args, {
+      cwd: launchCommand.cwd,
+      env: launchCommand.env,
       detached: false,
       shell: false,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
-    action.once('error', (error) => finish(null, null, `SPAWN_ERROR:${errorCode(error)}`));
+    if (process.platform === 'win32' && action.pid) {
+      try { actionIdentity = inspectHostProcess(action.pid); } catch { /* Stop remains uncertain without identity. */ }
+      writeTicket(ticketPath, { ...readTicket(ticketPath), actionIdentity });
+    }
+    action.once('error', (error) => {
+      if (windowsJob) { windowsJob.dispose(); windowsJob = null; }
+      finish(null, null, `SPAWN_ERROR:${errorCode(error)}`);
+    });
     const collect = (stream, digest, isStdout) => {
       stream.on('data', (data) => {
         digest.update(data);
@@ -269,22 +300,38 @@ export async function supervise(ticketPath) {
         if (isStdout) stdoutBytes += data.length;
         else stderrBytes += data.length;
         const total = stdoutBytes + stderrBytes;
-        if (total <= initial.maxOutputBytes) {
-          (isStdout ? process.stdout : process.stderr).write(data);
-        } else {
-          terminate('OUTPUT_LIMIT');
-        }
+        // Raw CLI/check output is never a public diagnostic or artifact.
+        if (total > initial.maxOutputBytes) terminate('OUTPUT_LIMIT');
       });
     };
     collect(action.stdout, stdoutHash, true);
     collect(action.stderr, stderrHash, false);
-    action.once('close', (code, signal) =>
+    action.once('close', (code, signal) => {
+      if (terminal) return;
+      if (windowsJob) {
+        const completed = windowsJob.readCompletion();
+        if (completed && completed.exitCode === (code >>> 0) && !signal) {
+          writeTicket(ticketPath, { ...readTicket(ticketPath), windowsJobReaped: true });
+          windowsJob.dispose();
+        } else if (windowsStopVerified) {
+          // Verified termination of the bound launcher closes its sole job handle.
+          // KILL_ON_JOB_CLOSE covers the contained tree even without a normal receipt.
+          writeTicket(ticketPath, { ...readTicket(ticketPath), windowsJobReaped: true, windowsJobStopMethod: 'verified-job-close' });
+          windowsJob.dispose();
+        } else {
+          writeTicket(ticketPath, { ...readTicket(ticketPath), state: 'terminating', failureReason: 'WINDOWS_JOB_STOP_UNCERTAIN' });
+          process.stdin.destroy();
+          process.exitCode = 1;
+          return;
+        }
+      }
+      if (process.platform === 'win32' && terminatingReason && !windowsStopVerified) return;
       finish(
         code,
         signal,
         terminatingReason ?? (code === 0 ? null : classifyAiFailure(diagnostic.toString('utf8'), stderrDiagnostic.toString('utf8'))),
-      ),
-    );
+      );
+    });
     action.stdin.end(message.input);
     setTimeout(() => terminate('TIMEOUT'), initial.timeoutMs).unref();
   });

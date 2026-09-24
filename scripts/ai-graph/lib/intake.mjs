@@ -1,24 +1,27 @@
+import { gitExecutable, gitNullDevice, hostSystemEnvironment } from './host-executables.mjs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readFileSync } from 'node:fs';
 import { GraphError, hashObject, sha256 } from './io.mjs';
 import { RelativePath } from './schemas.mjs';
 import { isSensitivePath, isInstructionPath, overlaps } from './registry.mjs';
-import { projectContextPaths } from './project.mjs';
+import { loadProjectProfile, projectContextPaths } from './project.mjs';
 import { ownedBootstrapFiles } from './bootstrap.mjs';
 import { isSensitiveSourcePath } from './source.mjs';
+import { fingerprintProjectSource } from './project-source-access.mjs';
 
 function git(root, args) {
-  const result = spawnSync('/usr/bin/git', ['-c', 'core.fsmonitor=false', ...args], {
+  const result = spawnSync(gitExecutable(), ['-c', 'core.fsmonitor=false', ...args], {
     cwd: root, encoding: 'utf8', timeout: 10000, maxBuffer: 1024 * 1024,
-    env: { PATH: '/usr/bin:/bin', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_OPTIONAL_LOCKS: '0' },
+    env: { ...hostSystemEnvironment(), PATH: '/usr/bin:/bin', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: gitNullDevice, GIT_OPTIONAL_LOCKS: '0' },
   });
   if (result.error || result.status !== 0) throw new GraphError('PROJECT_CONTEXT_UNAVAILABLE', 'Не удалось прочитать Git inventory проекта');
   return result.stdout;
 }
 const safe = (file) => RelativePath.safeParse(file).success && !isSensitivePath(file);
-export function taskContextInventory(root) {
-  return { files: git(root, ['ls-files', '-z']).split('\0').filter(Boolean).filter(safe) };
+export function taskContextInventory(root, profile = loadProjectProfile(root)) {
+  const snapshot = fingerprintProjectSource(root, { outputPaths: profile.outputPaths, denyGlobs: profile.aiDenyGlobs ?? [] });
+  return { files: snapshot.files.map((file) => file.path).filter(safe), sourceHash: snapshot.hash };
 }
 function sourceIdentity(root, file) {
   const target = path.join(root, file);
@@ -40,14 +43,16 @@ function sourceIdentity(root, file) {
 export function projectSummary(service) {
   const profile = service.adapters.project;
   if (!profile) throw new GraphError('PROJECT_PROFILE_MISSING', 'Нужен профиль проекта');
-  const files = git(service.root, ['ls-files', '-z']).split('\0').filter(Boolean).filter(safe);
+  const inventory = taskContextInventory(service.root, profile);
+  const files = inventory.files;
+  const available = new Set(files);
   const changed = git(service.root, ['diff', 'HEAD', '--name-only', '-z']).split('\0').filter(Boolean);
   const untracked = git(service.root, ['ls-files', '--others', '--exclude-standard', '-z']).split('\0').filter(Boolean);
   if (changed.length + untracked.length > 128) throw new GraphError('SNAPSHOT_LIMIT', 'Слишком много измененных файлов для первого snapshot');
   const firstTask = !existsSync(path.join(service.root, '.ai-orchestrator/state.json'));
   const requiredUntracked = firstTask ? ownedBootstrapFiles(service.root).filter((file) => untracked.includes(file.path)) : [];
   const requiredPaths = new Set(requiredUntracked.map((file) => file.path));
-  const changedPaths = changed.filter(safe).sort(), untrackedCandidates = untracked.filter(safe).filter((file) => !requiredPaths.has(file)).sort();
+  const changedPaths = changed.filter((file) => safe(file) && available.has(file)).sort(), untrackedCandidates = untracked.filter((file) => safe(file) && available.has(file)).filter((file) => !requiredPaths.has(file)).sort();
   const identities = [...new Set([...changedPaths, ...untrackedCandidates, ...requiredPaths])].map((file) => sourceIdentity(service.root, file));
   if (identities.reduce((sum, file) => sum + file.size, 0) > 32 * 1024 * 1024) throw new GraphError('SNAPSHOT_LIMIT', 'Snapshot preview превышает 32 MiB');
   const bootstrap = { firstTask, required: firstTask && identities.length > 0, changedPaths, untrackedCandidates, requiredUntracked,
@@ -56,8 +61,8 @@ export function projectSummary(service) {
   const scopeCandidates = [...new Set(files.filter((file) => !isInstructionPath(file) && !excluded.some((entry) => overlaps(file, entry)))
     .map((file) => file.includes('/') ? file.split('/')[0] : file))].sort();
   if (scopeCandidates.length > 256) throw new GraphError('INTAKE_SCOPE_LIMIT', 'Inventory превышает 256 корневых областей; требуется более узкий проект');
-  const contextPaths = [...new Set([...projectContextPaths(service.root, profile), ...(service.adapters.instructionPaths?.() ?? [])])].sort();
-  const contextHash = hashObject({ runtimeHash: service.adapters.identity(), files, contextPaths, scopeCandidates, profile, snapshotHash: bootstrap.snapshotHash });
+  const contextPaths = [...new Set([...projectContextPaths(service.root, profile), ...(service.adapters.instructionPaths?.() ?? [])])].filter((file) => available.has(file)).sort();
+  const contextHash = hashObject({ runtimeHash: service.adapters.identity(), files, contextPaths, scopeCandidates, profile, snapshotHash: bootstrap.snapshotHash, safeSourceHash: inventory.sourceHash });
   // The source snapshot withholds these files entirely; their local edits are not AI inputs.
   // Other unsafe names remain a blocker. Never read private configuration to build the preview.
   const unsafeChanges = changed.some((file) => !safe(file) &&

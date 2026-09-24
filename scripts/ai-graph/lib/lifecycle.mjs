@@ -1,3 +1,4 @@
+import { isPrivateMode } from './host-filesystem.mjs';
 import { randomUUID } from 'node:crypto';
 import { closeSync, constants, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -20,14 +21,14 @@ function directory(parent, name) {
   const file = path.join(parent, name);
   if (!exists(file)) mkdirSync(file, { mode: 0o700 });
   const stat = lstatSync(file);
-  if (!stat.isDirectory() || stat.isSymbolicLink() || (stat.mode & 0o077)) fail('LIFECYCLE_UNSAFE', 'Lifecycle storage должен быть private и без ссылок');
+  if (!stat.isDirectory() || stat.isSymbolicLink() || !isPrivateMode(stat)) fail('LIFECYCLE_UNSAFE', 'Lifecycle storage должен быть private и без ссылок');
   return file;
 }
 function read(file) {
-  const fd = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+  const fd = openSync(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
   try {
     const stat = fstatSync(fd);
-    if (!stat.isFile() || stat.nlink !== 1 || stat.mode & 0o077 || stat.size > 16384) fail('LIFECYCLE_UNSAFE', 'Некорректный lifecycle receipt');
+    if (!stat.isFile() || stat.nlink !== 1 || !isPrivateMode(stat) || stat.size > 16384) fail('LIFECYCLE_UNSAFE', 'Некорректный lifecycle receipt');
     return JSON.parse(readFileSync(fd, 'utf8'));
   } finally { closeSync(fd); }
 }

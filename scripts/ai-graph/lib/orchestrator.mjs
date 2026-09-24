@@ -1,3 +1,4 @@
+import { gitExecutable, gitNullDevice } from './host-executables.mjs';
 import { spawnSync } from 'node:child_process';
 import {
   chmodSync,
@@ -64,12 +65,12 @@ function trustedEnvironment() {
     LC_ALL: 'C',
     CI: 'true',
     GIT_CONFIG_NOSYSTEM: '1',
-    GIT_CONFIG_GLOBAL: '/dev/null',
+    GIT_CONFIG_GLOBAL: gitNullDevice,
     GIT_NO_LAZY_FETCH: '1',
     GIT_NO_REPLACE_OBJECTS: '1',
     GIT_CONFIG_COUNT: '2',
     GIT_CONFIG_KEY_0: 'core.hooksPath',
-    GIT_CONFIG_VALUE_0: '/dev/null',
+    GIT_CONFIG_VALUE_0: gitNullDevice,
     GIT_CONFIG_KEY_1: 'core.fsmonitor',
     GIT_CONFIG_VALUE_1: 'false',
   };
@@ -118,7 +119,7 @@ function invokeOrchestrator(root, command, options) {
 }
 
 function runGit(root, args, { input = undefined, allowFailure = false } = {}) {
-  const result = spawnSync('/usr/bin/git', ['-C', root, ...args], {
+  const result = spawnSync(gitExecutable(), ['-C', root, ...args], {
     encoding: 'utf8',
     input,
     timeout: 120_000,

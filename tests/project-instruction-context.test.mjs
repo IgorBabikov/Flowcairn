@@ -58,7 +58,7 @@ test('Codex shadows only sibling AGENTS; scoped and Claude chains remain separat
   assert.ok(!projectContextPaths(f.root, f.profile).includes('AGENTS.md'));
 });
 
-test('ignored instructions reach the exact prompt without copying files or granting original-root reads', (t) => {
+test('ignored instructions reach the exact prompt without copying instruction files and uses the current project root', (t) => {
   const f = fixture(t), worktree = path.join(f.root, '.ai-orchestrator/worktrees/task');
   mkdirSync(path.dirname(worktree), { recursive: true });
   f.git('worktree', 'add', '--detach', worktree, 'HEAD');
@@ -81,7 +81,8 @@ test('ignored instructions reach the exact prompt without copying files or grant
     assert.equal(JSON.stringify(prepared.execution).includes('ACTIVE OVERRIDE RULE'), false);
     const filesystem = prepared.command.args.find((item) => item.startsWith('permissions.') && item.includes('.filesystem='));
     assert.ok(!filesystem.includes(`${f.root}/AGENTS.override.md`));
-    assert.ok(filesystem.includes(`${worktree}/AGENTS.md`));
+    assert.ok(filesystem.includes(`${JSON.stringify(worktree)}="read"`));
+    assert.ok(prepared.sourceIndex.files.some((file) => file.path === 'AGENTS.md'));
     assert.equal(existsSync(path.join(worktree, 'AGENTS.override.md')), false);
   } finally { RUNNER_TESTING.cleanupPrepared(prepared); }
 });
@@ -150,7 +151,8 @@ test('an expressly scoped shadowed AGENTS file stays readable as data without ac
     assert.ok(prepared.command.args.includes('project_doc_max_bytes=0'));
     assert.match(prepared.input, /явно выбраны как объекты изменения/);
     assert.doesNotMatch(prepared.input, /SHADOWED BASE RULE/);
-    assert.match(prepared.command.args.find((item) => item.startsWith('permissions.') && item.includes('.filesystem=')), /AGENTS\.md.*read/);
+    assert.ok(prepared.sourceIndex.files.some((file) => file.path === 'AGENTS.md'));
+    assert.ok(prepared.command.args.includes('project_doc_max_bytes=0'));
   } finally { RUNNER_TESTING.cleanupPrepared(prepared); }
   assert.ok(!adapters.resolveReadPaths(f.node, f.task).includes('AGENTS.md'), 'broad scope cannot reactivate a shadowed instruction');
 });

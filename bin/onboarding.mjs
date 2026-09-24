@@ -65,7 +65,7 @@ export function inspectOnboarding(root) {
     ],
     values: {
       provider: profile?.ai.provider ?? defaultProvider(), model: profile?.ai.model ?? '',
-      workspaceMode: profile?.workspaceMode ?? 'worktree',
+      workspaceMode: profile?.workspaceMode ?? 'direct',
       modelMode: profile?.ai.modelMode ?? 'manual', reasoningEffort: inherited?.reasoningEffort ?? profile?.ai.reasoningEffort ?? 'medium',
       ...(inherited ? { model: inherited.model } : {}),
       ...(profile?.ai.reviewModel ? { reviewModel: profile.ai.reviewModel } : {}),
@@ -78,9 +78,8 @@ export function inspectOnboarding(root) {
     },
     limitations: [
       'Codex: модель и усиление считываются из конфигурации CLI. Настройки активного чата VS Code не считываются. Можно выбрать модель вручную в Flowcairn.',
-      'Для локального проекта trusted-local запускает только найденные и привязанные к профилю scripts с правами вашей учетной записи.',
-      'Docker остается дополнительным усиленным режимом проверок и не нужен для первого запуска.',
-      'Поддержка исполнения: Node.js 22, macOS и Linux; native Windows не поддерживается. WSL2 требует Linux-файловую систему.',
+      'Проверки запускают зарегистрированные scripts прямо в проекте с правами пользователя. Используйте доверенный код и зависимости.',
+      'Нужен Node.js 22 и официальный AI-клиент с собственной авторизацией. macOS, Linux и нативный Windows; Docker и WSL не требуются. На Windows используется системный .NET Framework compiler.',
       'Изменение настроек: закройте UI и выполните npx flowcairn setup. Старые планы сохранят прежний профиль и потребуют перепланирования.',
     ],
   };
@@ -158,7 +157,7 @@ export async function collectOnboarding(root, options = {}, terminal = {}) {
     const coverage = options.coverage ?? (advanced ? await yes('Нужно измерять покрытие тестами? [да / нет; Enter — нет]: ') : false);
     step(output, 4, 'Согласуйте границы работы');
     output.write(`${paint(output, '38;5;245', 'flowcairn прочитает только разрешенные файлы проекта. Изменения начнутся только после вашего согласования плана.')}\n`);
-    const readConsent = options['read-consent'] ?? await yes('Разрешить чтение проекта для подготовки плана? [да / нет; Enter — нет]: ');
+    const readConsent = options['read-consent'] ?? await yes('Разрешить выбранному AI-клиенту чтение файлов прямо в проекте по мере необходимости? Действуют права клиента; Flowcairn не гарантирует недоступность всех секретов. [да / нет; Enter — нет]: ');
     output.write(`${paint(output, '38;5;245', 'Ваши правила проекта сохранятся. flowcairn добавит только слой управления Graph.')}\n`);
     const instructionApi = await import('../scripts/ai-graph/lib/instructions.mjs');
     const assess = Reflect.get(instructionApi, 'assessProjectInstructions');
@@ -335,7 +334,7 @@ export async function saveOnboarding(root, input, { dryRun = false } = {}) {
         ...ownerBase,
         profileHash: sha256(bytes),
         readConsentHash: value.readConsent ? onboardingConsentHash(root,profile) : null,
-        ...(profile.checkMode === 'trusted-local' && profile.checks.length
+        ...(profile.checkMode !== 'none' && profile.checks.length
           ? { trustedLocalChecksHash: trustedLocalChecksHash(root, profile) }
           : {}),
       };

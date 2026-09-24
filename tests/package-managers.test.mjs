@@ -5,9 +5,9 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, realpathSync, rmSy
 import os from 'node:os';
 import path from 'node:path';
 import { initializeProject } from '../bin/flowcairn.mjs';
-import { packageManagerVersion, packageManagerLock, ProjectProfileSchema, resolveProjectCheckScript } from '../scripts/ai-graph/lib/project.mjs';
-import { DOCKER_CHECKS_TESTING } from '../scripts/ai-graph/lib/docker-checks.mjs';
-import { registeredContainerCheck } from '../scripts/ai-graph/container-check.mjs';
+import { packageManagerVersion, packageManagerLock, ProjectProfileSchema, resolveProjectCheckScript, validatePackageManagerProject } from '../scripts/ai-graph/lib/project.mjs';
+import { classifySource } from '../scripts/ai-graph/lib/source-policy.mjs';
+import { RUNNER_TESTING } from '../scripts/ai-graph/lib/runner.mjs';
 import { prepareToolchain, verifyToolchain } from '../scripts/ai-graph/lib/toolchain.mjs';
 
 const testClaude = path.resolve(import.meta.dirname, 'fixtures/verified-claude/node_modules/@anthropic-ai/claude-code/bin/claude.exe');
@@ -24,20 +24,24 @@ function fixture(t, manager = 'yarn', version = '4.9.2') {
   return root;
 }
 
-test('Yarn4 init discovers lock and workspaces, keeps config out of Docker, pins identity and repeats', (t) => {
+test('Yarn4 init discovers lock and workspaces and prepares local registered scripts', (t) => {
   const root = fixture(t);
   const initialized = initializeProject(root, options);
   assert.equal(initialized.profile.packageManager, 'yarn');
   assert.deepEqual(initialized.profile.manifests, ['package.json', 'yarn.lock', 'packages/app/package.json']);
   assert.equal(initializeProject(root, options).created, false);
-  const context = DOCKER_CHECKS_TESTING.contextDescription(root, 'sha256:' + 'a'.repeat(64));
-  assert.equal(context.packageManagerVersion, '4.9.2');
-  assert.equal(context.sources.some((item) => /yarnrc|npmrc/.test(item.source)), false);
+  assert.equal(validatePackageManagerProject(root, 'yarn'), '4.9.2');
   const pkg = JSON.parse(readFileSync(path.join(root, 'package.json')));
   pkg.packageManager = 'yarn@4.9.1';
   writeFileSync(path.join(root, 'package.json'), JSON.stringify(pkg));
-  assert.notEqual(DOCKER_CHECKS_TESTING.contextDescription(root, 'sha256:' + 'a'.repeat(64)).hash, context.hash);
-  assert.deepEqual(registeredContainerCheck('check-tests', { packageManager: 'yarn', checkScript: 'test' }).args, ['/opt/flowcairn/package-manager.cjs', 'run', 'test']);
+  assert.equal(validatePackageManagerProject(root, 'yarn'), '4.9.1');
+  const prepared = RUNNER_TESTING.makeLocalCheckCommand({ root, worktree: root,
+    node: { action: { id: 'check-tests' } }, profile: initialized.profile,
+    toolchain: { node: process.execPath, entry: '/trusted/yarn.cjs', digest: 'a'.repeat(64) },
+    dependencyToolchain: { hash: 'b'.repeat(64) }, outputPath: root });
+  assert.equal(prepared.command.cwd, root);
+  assert.deepEqual(prepared.command.args, ['/trusted/yarn.cjs', 'run', 'test']);
+
 });
 
 test('hardened init maps a project compile script to the trusted typecheck action', (t) => {
@@ -87,9 +91,9 @@ test('Yarn lock drives toolchain fingerprint and unsafe changes still refuse pro
   assert.throws(() => verifyToolchain({ root, worktree, manifest }), { code: 'TOOLCHAIN_DRIFT' });
 });
 
-test('Docker source refuses credentials before any container copy', () => {
+test('Flowcairn context classification excludes credential paths', () => {
   for (const name of ['.npmrc', '.env.local', 'nested/credentials.json', 'nested/key.pem']) {
-    assert.throws(() => DOCKER_CHECKS_TESTING.validateFingerprint({ hash: 'b'.repeat(64), files: [{ path: name, mode: '100644', size: 1, hash: 'a'.repeat(64) }] }), { code: 'INVALID_CHECK_FINGERPRINT' });
+    assert.equal(classifySource(name, Buffer.from('fixture')).reason, 'sensitive-path');
   }
 });
 

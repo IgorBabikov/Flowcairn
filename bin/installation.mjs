@@ -1,3 +1,4 @@
+import { gitExecutable } from '../scripts/ai-graph/lib/host-executables.mjs';
 import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { closeSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, renameSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs';
@@ -93,11 +94,7 @@ function packageManager(root, pkg, explicit) {
 export function assertProviderPlatform(options) {
   if (options.provider && !['codex', 'claude', 'cursor'].includes(options.provider))
     fail('PROVIDER_UNSUPPORTED', 'Выберите Codex, Claude Code или Cursor. OpenAI API больше не поддерживается.');
-  if (process.platform !== 'darwin' && (options.provider ?? defaultProvider()) === 'codex')
-    fail(
-      'PROVIDER_PLATFORM',
-      'Исполнение через Codex сейчас поддерживается только на macOS. На Linux выберите установленный Claude Code или Cursor CLI.',
-    );
+
 }
 
 /** Explicit, repeatable setup. It never replaces AGENTS, hooks or an existing profile. */
@@ -205,12 +202,12 @@ export function initializeProject(input, options = {}) {
   const discoveredChecks = discoverProjectChecks(pkg);
   const checkMode = options['check-mode'] ?? 'trusted-local';
   if (!['none', 'trusted-local', 'hardened'].includes(checkMode))
-    fail('CHECK_MODE', 'Доступны check-mode: none, hardened или trusted-local.');
+    fail('CHECK_MODE', 'Доступны check-mode: none, trusted-local или hardened.');
   const checks = options.checks === undefined
-    ? (checkMode === 'trusted-local' ? discoveredChecks.checks : [])
+    ? (checkMode !== 'none' ? discoveredChecks.checks : [])
     : csv(options.checks);
   if (checkMode === 'none' && checks.length)
-    fail('CHECK_MODE', 'Для project checks выберите hardened или trusted-local.');
+    fail('CHECK_MODE', 'Для проверок проекта выберите trusted-local или hardened.');
   for (const check of checks) {
     if (!PROJECT_CHECK_IDS.includes(check) || !discoveredChecks.checkScripts[check])
       fail('CHECK_SCRIPT_MISSING', `Для проверки ${check} нужен существующий script package.json.`);
@@ -256,7 +253,7 @@ export function initializeProject(input, options = {}) {
   const excludeFile = gitCheckout ? localExcludeFile(root) : null;
   const oldExclude = excludeFile && existsNoFollow(excludeFile) ? readRegular(excludeFile).toString('utf8') : '';
   const alreadyIgnored = !gitCheckout || spawnSync(
-    '/usr/bin/git',
+    gitExecutable(),
     ['-C', root, 'check-ignore', '-q', '--', '.ai-orchestrator/flowcairn-install.json'],
     { stdio: 'ignore' },
   ).status === 0;
@@ -300,7 +297,7 @@ export function initializeProject(input, options = {}) {
           owner: `flowcairn-${randomUUID()}`,
           profileHash: sha256(profileText),
           ...(!existingProfile && options['read-consent'] === true ? { readConsentHash: onboardingConsentHash(root, profile) } : {}),
-          ...(profile.checkMode === 'trusted-local' && profile.checks.length
+          ...(profile.checkMode !== 'none' && profile.checks.length
             ? { trustedLocalChecksHash: trustedLocalChecksHash(root, profile) }
             : {}),
           profileOwned: !existingProfile,

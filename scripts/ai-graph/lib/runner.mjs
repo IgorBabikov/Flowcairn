@@ -1,3 +1,6 @@
+import { inspectHostProcess, stopHostGroup } from './host-process.mjs';
+import { isPrivateMode, isTrustedMode, isPathWithin } from './host-filesystem.mjs';
+import { assertSafeText } from './source-policy.mjs';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import {
@@ -48,7 +51,8 @@ const MAX_TOOLCHAIN_FILE_BYTES = 512 * 1024 * 1024;
 // Запуск AI может занимать заметное время; пять секунд превращали медленный
 // старт supervisor в ложный неопределенный результат.
 const SUPERVISOR_READY_TIMEOUT_MS = 30_000;
-const STOP_GRACE_MS = 3_000;
+const STOP_GRACE_MS = process.platform === 'win32' ? 20_000 : 3_000;
+const windowsSupervisors = new Map();
 
 function fail(code, message, details) {
   throw new GraphError(code, message, details);
@@ -146,7 +150,7 @@ function realDirectory(candidate, code) {
 }
 
 function isWithin(candidate, root) {
-  return candidate === root || candidate.startsWith(`${root}${path.sep}`);
+  return isPathWithin(root, candidate);
 }
 
 function isSystemTemporary(candidate) {
@@ -158,13 +162,13 @@ function isSystemTemporary(candidate) {
 function assertPrivateDirectory(candidate, code) {
   const resolved = realDirectory(candidate, code);
   const stat = statSync(resolved);
-  if ((stat.mode & 0o077) !== 0) fail(code, `Каталог должен быть private (0700): ${candidate}`);
+  if (!isPrivateMode(stat)) fail(code, `Каталог должен быть private (0700): ${candidate}`);
   return resolved;
 }
 
 function validateAllocation(root, worktree, outputDirectory, provider, direct = false) {
   const rootPath = realDirectory(root, 'RUNNER_ROOT_INVALID');
-  if (provider === 'codex' && isSystemTemporary(rootPath)) {
+  if (provider === 'codex' && process.platform === 'darwin' && isSystemTemporary(rootPath)) {
     fail('RUNNER_TEMP_UNSAFE', 'Runtime root внутри системного temp не поддерживается на macOS');
   }
   const graphRoot = assertPrivateDirectory(
@@ -179,7 +183,7 @@ function validateAllocation(root, worktree, outputDirectory, provider, direct = 
   const worktreePath = realDirectory(worktree, 'RUNNER_WORKTREE_INVALID');
   if (
     (direct ? worktreePath !== rootPath : !isWithin(worktreePath, workspaces)) ||
-    (provider === 'codex' && isSystemTemporary(worktreePath))
+    (provider === 'codex' && process.platform === 'darwin' && isSystemTemporary(worktreePath))
   ) {
     fail('RUNNER_WORKTREE_INVALID', 'Рабочий каталог не принадлежит текущему проекту');
   }
@@ -203,8 +207,8 @@ function regularExecutable(candidate, expectedOwner = process.getuid?.()) {
     return Boolean(
       stat.isFile() &&
       stat.nlink === 1 &&
-      (stat.mode & 0o111) !== 0 &&
-      (stat.mode & 0o022) === 0 &&
+      (process.platform === 'win32' || (stat.mode & 0o111) !== 0) &&
+      isTrustedMode(stat) &&
       (expectedOwner === undefined || stat.uid === 0 || stat.uid === expectedOwner),
     );
   } catch {
@@ -219,7 +223,7 @@ function regularReadable(candidate) {
     return (
       stat.isFile() &&
       stat.nlink === 1 &&
-      (stat.mode & 0o022) === 0 &&
+      isTrustedMode(stat) &&
       (expectedOwner === undefined || stat.uid === 0 || stat.uid === expectedOwner)
     );
   } catch {
@@ -236,7 +240,7 @@ function trustedRuntimeReadable(candidate) {
     return (
       resolved.startsWith(`${RUNTIME_ROOT}${path.sep}`) &&
       stat.isFile() &&
-      (stat.mode & 0o022) === 0 &&
+      isTrustedMode(stat) &&
       (expectedOwner === undefined || stat.uid === 0 || stat.uid === expectedOwner)
     );
   } catch {
@@ -309,9 +313,9 @@ function codexCandidates(ai) {
   const pathEntries = (process.env.PATH ?? '')
     .split(path.delimiter)
     .filter((entry) => path.isAbsolute(entry) && entry.length > 1)
-    .map((entry) => path.join(entry, 'codex'));
+    .map((entry) => path.join(entry, process.platform === 'win32' ? 'codex.cmd' : 'codex'));
   return [...new Set([
-    path.join(NODE_BIN, 'codex'),
+    path.join(NODE_BIN, process.platform === 'win32' ? 'codex.cmd' : 'codex'),
     ...pathEntries,
     '/usr/local/bin/codex',
     '/opt/homebrew/bin/codex',
@@ -323,7 +327,9 @@ function discoverCodex(ai) {
   for (const candidate of codexCandidates(ai)) {
     try {
       if (!regularReadable(candidate)) continue;
-      const entry = realpathSync(candidate);
+      const entry = process.platform === 'win32' && /\.(cmd|ps1)$/i.test(candidate)
+        ? realpathSync(path.join(path.dirname(candidate), 'node_modules', '@openai', 'codex', 'bin', 'codex.js'))
+        : realpathSync(candidate);
       if (path.basename(entry) !== 'codex.js') continue;
       const root = path.resolve(path.dirname(entry), '..');
       return { root, entry, manifest: packageIdentity(root, '@openai/codex') };
@@ -347,7 +353,6 @@ function codexHelp(entry, args, requiredFlags) {
 
 function verifyCodexCapabilities(entry) {
   const execFlags = [
-    '--ignore-user-config',
     '--ignore-rules',
     '--strict-config',
     '--ephemeral',
@@ -370,22 +375,23 @@ function runnerToolchain(profile) {
   if (profile.ai.provider === 'openai')
     fail('PROVIDER_RETIRED', 'OpenAI API больше не поддерживается. Выполните flowcairn setup и выберите Codex, Claude Code или Cursor.');
   if (['claude', 'cursor'].includes(profile.ai.provider)) {
-    if (!['darwin', 'linux'].includes(process.platform) || !trustedRuntimeReadable(EXTERNAL_WORKER_FILE))
+    if (!['darwin', 'linux', 'win32'].includes(process.platform) || !trustedRuntimeReadable(EXTERNAL_WORKER_FILE))
       fail('RUNNER_PLATFORM_UNSUPPORTED', 'External CLI adapter требует macOS/Linux и trusted worker.');
     const provider = providerToolchain(profile.ai);
     const identity = { nodeVersion: process.version, nodeDigest: fileDigest(NODE_BINARY), provider: provider.provider, providerPath: provider.executable, providerVersion: provider.version, providerDigest: provider.digest, workerDigest: fileDigest(EXTERNAL_WORKER_FILE) };
     return Object.freeze({ node: NODE_BINARY, codexEntry: null, provider, digest: sha256(canonicalJson(identity)), identity: Object.freeze(identity) });
   }
-  if (process.platform !== 'darwin' || !['arm64', 'x64'].includes(process.arch))
-    fail('RUNNER_PLATFORM_UNSUPPORTED', 'Codex sandbox квалифицирован только для macOS');
+  if (!['darwin', 'linux', 'win32'].includes(process.platform) || !['arm64', 'x64'].includes(process.arch))
+    fail('RUNNER_PLATFORM_UNSUPPORTED', 'Нужен официальный Codex CLI для текущей ОС и архитектуры.');
   const codex = discoverCodex(profile.ai);
-  const platformName = process.arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64';
-  const triple = process.arch === 'arm64' ? 'aarch64-apple-darwin' : 'x86_64-apple-darwin';
+  const platformName = `${process.platform}-${process.arch}`;
+  const cpu = process.arch === 'arm64' ? 'aarch64' : 'x86_64';
+  const triple = `${cpu}-${process.platform === 'darwin' ? 'apple-darwin' : process.platform === 'win32' ? 'pc-windows-msvc' : 'unknown-linux-musl'}`;
   const nativeRoot = path.join(codex.root, 'node_modules', '@openai', `codex-${platformName}`);
   const nativeManifest = packageIdentity(nativeRoot, '@openai/codex');
   if (nativeManifest.version !== `${codex.manifest.version}-${platformName}`)
     fail('RUNNER_TOOLCHAIN_INVALID', 'Нативный пакет Codex не соответствует версии CLI');
-  const native = path.join(nativeRoot, 'vendor', triple, 'bin', 'codex');
+  const native = path.join(nativeRoot, 'vendor', triple, 'bin', process.platform === 'win32' ? 'codex.exe' : 'codex');
   if (!regularExecutable(native))
     fail('RUNNER_TOOLCHAIN_INVALID', 'Codex native binary небезопасен');
   verifyCodexCapabilities(codex.entry);
@@ -424,17 +430,19 @@ function localCheckToolchain(profile) {
     fail('LOCAL_CHECK_NODE_VERSION', 'Локальные проверки требуют Node 22');
   if (!runningNode?.isFile())
     fail('LOCAL_CHECK_NODE_FILE', 'Node для локальных проверок не является обычным файлом');
-  if ((runningNode.mode & 0o111) === 0 || (runningNode.mode & 0o002) !== 0)
+  if (process.platform !== 'win32' && ((runningNode.mode & 0o111) === 0 || (runningNode.mode & 0o002) !== 0))
     fail('LOCAL_CHECK_NODE_MODE', 'Node для локальных проверок имеет небезопасные права');
   if (process.getuid?.() !== undefined && runningNode.uid !== 0 && runningNode.uid !== process.getuid?.())
     fail('LOCAL_CHECK_NODE_OWNER', 'Node для локальных проверок принадлежит неизвестному владельцу');
-  const candidate = path.join(NODE_BIN, profile.packageManager);
+  const candidate = process.platform === 'win32'
+    ? path.join(NODE_BIN, 'node_modules', profile.packageManager, 'bin', `${profile.packageManager === 'npm' ? 'npm-cli.js' : profile.packageManager + '.cjs'}`)
+    : path.join(NODE_BIN, profile.packageManager);
   let entry;
   try { entry = realpathSync(candidate); } catch { fail('LOCAL_CHECK_TOOLCHAIN', `Не найден ${profile.packageManager} из Node 22`); }
   const nodeRoot = path.resolve(NODE_BIN, '..');
   let stat;
   try { stat = statSync(entry); } catch { fail('LOCAL_CHECK_TOOLCHAIN', `Недоступен безопасный ${profile.packageManager} из Node 22`); }
-  if (!isWithin(entry, nodeRoot) || !stat.isFile() || (stat.mode & 0o002) !== 0)
+  if (!isWithin(entry, nodeRoot) || !stat.isFile() || (process.platform !== 'win32' && (stat.mode & 0o002) !== 0))
     fail('LOCAL_CHECK_MANAGER_UNSAFE', `Недоступен безопасный ${profile.packageManager} из Node 22`);
   const identity = {
     kind: 'local-worktree',
@@ -456,7 +464,7 @@ function makeLocalCheckCommand({ root, worktree, node, profile, toolchain, depen
       env: safeEnvironment({
         HOME: outputPath,
         NPM_CONFIG_CACHE: path.join(outputPath, 'npm-cache'),
-        NPM_CONFIG_USERCONFIG: '/dev/null',
+        NPM_CONFIG_USERCONFIG: os.devNull,
         NPM_CONFIG_UPDATE_NOTIFIER: 'false',
         NPM_CONFIG_FUND: 'false',
         NPM_CONFIG_AUDIT: 'false',
@@ -466,7 +474,7 @@ function makeLocalCheckCommand({ root, worktree, node, profile, toolchain, depen
     maxOutputBytes: MAX_AI_PROCESS_OUTPUT,
     execution: Object.freeze({
       kind: 'local-check',
-      isolation: 'worktree-only',
+      isolation: 'trusted-project-process',
       actionId: node.action.id,
       packageManager: profile.packageManager,
       script,
@@ -480,7 +488,7 @@ function makeLocalCheckCommand({ root, worktree, node, profile, toolchain, depen
 export function probeLocalChecks({ root }) {
   try {
     const profile = loadProjectProfile(root);
-    if (profile.checkMode !== 'trusted-local')
+    if (!['trusted-local', 'hardened'].includes(profile.checkMode))
       return { available: false, reason: profile.checkMode === 'local' ? 'LOCAL_CHECK_RECONFIGURATION_REQUIRED' : 'CHECKS_NOT_ENABLED', mode: 'trusted-local' };
     if (!hasTrustedLocalChecksBinding(root, profile))
       return { available: false, reason: 'CHECK_LOCAL_BINDING_REQUIRED', mode: 'trusted-local' };
@@ -524,7 +532,7 @@ function readTicket(file) {
   } catch {
     fail('RUNNER_TICKET_INVALID', 'Supervisor ticket отсутствует');
   }
-  if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || (stat.mode & 0o077) !== 0) {
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || !isPrivateMode(stat)) {
     fail('RUNNER_TICKET_UNSAFE', 'Supervisor ticket небезопасен');
   }
   if (stat.size < 2 || stat.size > MAX_TICKET_BYTES)
@@ -601,7 +609,9 @@ function waitForControl(stream, expectedType, timeoutMs, {
           return;
         }
         if (value.type === 'supervisor-error') {
-          finish(reject, new GraphError('RUNNER_SUPERVISOR_ERROR', value.reason));
+          const inspectionFailures = new Set(['WINDOWS_SYSTEM_ROOT', 'WINDOWS_SYSTEM_TOOL', 'PROCESS_IDENTITY_UNKNOWN', 'PROCESS_INSPECTION_FAILED', 'PROCESS_INSPECTION_TIMEOUT', 'PROCESS_INSPECTION_SPAWN_FAILED', 'PROCESS_INSPECTION_EXIT_FAILED', 'PROCESS_INSPECTION_OUTPUT_INVALID']);
+          const reason = inspectionFailures.has(value.reason) ? value.reason : 'RUNNER_SUPERVISOR_ERROR';
+          finish(reject, new GraphError(reason, 'Supervisor не прошел проверку запуска.'));
           return;
         }
       }
@@ -626,6 +636,24 @@ function groupAlive(pgid) {
 }
 
 async function stopGroup(pgid) {
+  if (process.platform === 'win32') {
+    const registered = windowsSupervisors.get(pgid);
+    if (!registered) {
+      try {
+        const identity = inspectHostProcess(pgid);
+        if (!identity) return true; // Before GO there is no action or child job.
+        return identity.parentPid === process.pid && stopHostGroup(pgid, { identity });
+      } catch { return false; }
+    }
+    try {
+      const ticket = readTicket(registered.ticketFile);
+      if (ticket.nonceHash !== registered.nonceHash || ticket.commandHash !== registered.commandHash) return false;
+      if (ticket.state === 'finished' && ticket.windowsJobBound === true && ticket.windowsJobReaped === true) {
+        if (!inspectHostProcess(pgid)) return true;
+      }
+      return stopHostGroup(pgid, { identity: registered.identity });
+    } catch { return false; }
+  }
   if (!groupAlive(pgid)) return true;
   try {
     process.kill(-pgid, 'SIGTERM');
@@ -686,12 +714,14 @@ function parseAiOutput(file) {
     !stat.isFile() ||
     stat.isSymbolicLink() ||
     stat.nlink !== 1 ||
-    (stat.mode & 0o077) !== 0 ||
+    !isPrivateMode(stat) ||
     stat.size > MAX_AI_RESULT_BYTES
   ) {
     fail('AI_OUTPUT_INVALID', 'AI output отсутствует или превышает лимит');
   }
-  const output = JSON.parse(readFileSync(file, 'utf8'));
+  const text = readFileSync(file, 'utf8');
+  assertSafeText(text);
+  const output = JSON.parse(text);
   assertJsonBounds(output, 5_000);
   return output;
 }
@@ -738,9 +768,6 @@ export async function runRegisteredAction({
     ...input,
     root: allocation.rootPath,
     profile,
-    instructionDenials: profile.ai.provider === 'codex'
-      ? instructionDenials(allocation.worktreePath, input.node, profile, dependencyToolchain)
-      : [],
     worktree: allocation.worktreePath,
     outputPath: allocation.outputPath,
     toolchain,
@@ -807,13 +834,19 @@ export async function runRegisteredAction({
         error: new GraphError('RUNNER_SUPERVISOR_IDENTITY', 'Supervisor identity не совпала'),
       });
     }
-    const ticketRelative = path.relative(allocation.rootPath, ticketFile);
+    if (process.platform === 'win32') {
+      if (!ready.processIdentity || ready.processIdentity.pid !== supervisor.pid)
+        fail('RUNNER_SUPERVISOR_IDENTITY', 'Windows process identity отсутствует.');
+      windowsSupervisors.set(supervisor.pid, { identity: ready.processIdentity, ticketFile, nonceHash: ticket.nonceHash, commandHash });
+    }
+    const ticketRelative = path.relative(allocation.rootPath, ticketFile).split(path.sep).join('/');
     const processMetadata = Object.freeze({
       version: 1,
       ticket: ticketRelative,
       supervisorPid: supervisor.pid,
       pgid: supervisor.pid,
       startedAt: ready.startedAt,
+      ...(ready.processIdentity ? { processIdentity: ready.processIdentity } : {}),
       nonceHash: ticket.nonceHash,
       commandHash,
       ticketHash,
@@ -949,6 +982,7 @@ export async function runRegisteredAction({
       if (!stopped) stopped = await stopGroup(supervisor.pid);
     } finally {
       cleanupPrepared(prepared, stopped);
+      if (stopped && supervisor?.pid) windowsSupervisors.delete(supervisor.pid);
     }
   }
 }
@@ -971,7 +1005,7 @@ export function inspectProcess({ root, process: processMetadata }) {
     fail('RUNNER_PROCESS_INVALID', 'Некорректная process identity');
   }
   const rootPath = realDirectory(root, 'RUNNER_ROOT_INVALID');
-  if (loadProjectProfile(rootPath).ai.provider === 'codex' && isSystemTemporary(rootPath))
+  if (process.platform === 'darwin' && loadProjectProfile(rootPath).ai.provider === 'codex' && isSystemTemporary(rootPath))
     fail('RUNNER_TEMP_UNSAFE', 'Recovery root внутри системного temp запрещен');
   const ticketFile = path.resolve(rootPath, processMetadata.ticket);
   const graphRoot = assertPrivateDirectory(
@@ -999,7 +1033,13 @@ export function inspectProcess({ root, process: processMetadata }) {
   ) {
     fail('RUNNER_PROCESS_MISMATCH', 'Process identity не совпала с ticket');
   }
-  const stopped = !groupAlive(processMetadata.pgid);
+  let stopped;
+  if (process.platform === 'win32') {
+    if (canonicalJson(ticket.processIdentity) !== canonicalJson(processMetadata.processIdentity))
+      fail('RUNNER_PROCESS_MISMATCH', 'Windows identity не совпала с ticket.');
+    try { stopped = ticket.state === 'finished' && ticket.windowsJobBound === true && ticket.windowsJobReaped === true && !inspectHostProcess(processMetadata.pgid); }
+    catch { stopped = false; }
+  } else stopped = !groupAlive(processMetadata.pgid);
   return {
     stopped,
     reason: stopped
@@ -1040,7 +1080,7 @@ export async function probeRunner({ root }) {
       'System temp paths are not accepted as runtime allocations on macOS.',
       'Stopped means the supervised process group was observed absent; it is not proof about detached descendants.',
       'AI actions have read-only source access and return structured edits for a trusted parent to apply.',
-      'Check descendant containment has not been verified and check capability is disabled.',
+      'Project checks run as trusted local processes; this is not an isolation boundary.',
       'Authentication status is not inspected by this probe.',
       'Real AI inference is not part of this local capability probe.',
     ],
@@ -1051,14 +1091,14 @@ export async function probeRunner({ root }) {
   } catch (error) {
     return {
       ai: { available: false, reason: errorReason(error, 'PROJECT_PROFILE_INVALID') },
-      checks: { available: false, reason: 'USE_DOCKER_PROBE' },
+      checks: { available: false, reason: 'USE_NATIVE_CHECK_PROBE' },
       details,
     };
   }
   if (profile.ai.provider === 'openai')
     return {
       ai: { available: false, reason: 'PROVIDER_RETIRED' },
-      checks: { available: false, reason: 'USE_DOCKER_PROBE' },
+      checks: { available: false, reason: 'USE_NATIVE_CHECK_PROBE' },
       details,
     };
   if (['claude', 'cursor'].includes(profile.ai.provider)) {
@@ -1071,7 +1111,7 @@ export async function probeRunner({ root }) {
           available: true,
           reason: 'LOCAL_EXTERNAL_CLI_READY_AUTH_AND_REAL_AI_UNVERIFIED',
         },
-        checks: { available: false, reason: 'USE_DOCKER_PROBE' },
+        checks: { available: false, reason: 'USE_NATIVE_CHECK_PROBE' },
         details: {
           provider: external.provider,
           platform: details.platform,
@@ -1079,19 +1119,19 @@ export async function probeRunner({ root }) {
           limitations: [
             'Точная версия и безопасные non-interactive параметры CLI проверены локально.',
             'Аутентификация и реальный AI-вызов проверяются только при явном запуске после consent.',
-            'Docker checks are probed separately.',
+            'Локальные проверки диагностируются отдельно; Docker не используется.',
           ],
         },
       };
     } catch (error) {
       return {
         ai: { available: false, reason: errorReason(error, 'RUNNER_TOOLCHAIN_INVALID') },
-        checks: { available: false, reason: 'USE_DOCKER_PROBE' },
+        checks: { available: false, reason: 'USE_NATIVE_CHECK_PROBE' },
         details,
       };
     }
   }
-  if (process.platform !== 'darwin') {
+  if (!['darwin', 'linux', 'win32'].includes(process.platform)) {
     return {
       ai: { available: false, reason: 'UNSUPPORTED_PLATFORM' },
       checks: { available: false, reason: 'UNSUPPORTED_PLATFORM' },
@@ -1100,7 +1140,7 @@ export async function probeRunner({ root }) {
   }
   try {
     const rootPath = realDirectory(root, 'RUNNER_ROOT_INVALID');
-    if (isSystemTemporary(rootPath)) throw new Error('SYSTEM_TEMP_UNSAFE');
+    if (process.platform === 'darwin' && isSystemTemporary(rootPath)) throw new Error('SYSTEM_TEMP_UNSAFE');
   } catch (error) {
     const reason = errorReason(error, 'RUNNER_ROOT_INVALID');
     return {
@@ -1142,7 +1182,7 @@ export async function probeRunner({ root }) {
   const binariesReady =
     nodeVersion.error === undefined &&
     codexVersion.error === undefined &&
-    regularExecutable(SANDBOX_EXEC) &&
+    (process.platform !== 'darwin' || regularExecutable(SANDBOX_EXEC)) &&
     details.node.actual === process.version &&
     details.codex.actual === `codex-cli ${Reflect.get(toolchain.identity, 'codexVersion')}`;
   details.sandbox.permissionProfiles = binariesReady;
@@ -1165,6 +1205,7 @@ export async function probeRunner({ root }) {
 export const RUNNER_TESTING = Object.freeze({
   aiResponseSchema,
   makeAiCommand,
+  makeLocalCheckCommand,
   makeExternalCommand,
   selectedSourceContext,
   instructionDenials,

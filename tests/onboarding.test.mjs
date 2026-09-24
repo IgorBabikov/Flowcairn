@@ -363,3 +363,23 @@ test('handoff открывает проверенный результат дл�
   assert.equal(canHandoff({ ...snapshot, status: 'failed' }, { completion: 'ready-for-review' }), false);
   assert.equal(canHandoff(snapshot, { completion: null }), false);
 });
+
+test('legacy hardened setup never offers or prepares a container image', async () => {
+  const { maybePrepareChecks } = await import('../bin/flowcairn.mjs');
+  const forbidden = () => { throw new Error('Preparation must not run'); };
+  const result = await maybePrepareChecks('/unused', { checkMode: 'hardened', checks: ['tests'] }, {}, {
+    input: { isTTY: true }, output: { isTTY: true, write: forbidden }, prompt: { question: forbidden },
+  }, { probe: forbidden, prepare: forbidden });
+  assert.deepEqual(result, { prepared: false, reason: 'LOCAL_DEFAULT' });
+});
+
+test('obsolete check preparation commands fail without preparing images', () => {
+  const cli = new URL('../bin/flowcairn.mjs', import.meta.url);
+  for (const args of [['checks', 'prepare'], ['bootstrap-checks']]) {
+    assert.throws(() => execFileSync(process.execPath, [cli.pathname, ...args, '--json'], { encoding: 'utf8', stdio: 'pipe' }), (error) => {
+      assert.match(error.stderr, /CHECK_PREPARATION_OBSOLETE/);
+      assert.match(error.stderr, /doctor/);
+      return true;
+    });
+  }
+});

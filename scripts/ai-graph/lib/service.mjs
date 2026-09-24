@@ -1,3 +1,4 @@
+import { inspectHostProcess } from './host-process.mjs';
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import path from 'node:path';
@@ -61,6 +62,9 @@ const processDead = (pid) => {
   }
 };
 function processStartIdentity(pid) {
+  if (process.platform === 'win32') {
+    try { const value = inspectHostProcess(pid); return value ? sha256(JSON.stringify(value)) : null; } catch { return null; }
+  }
   const result = spawnSync('/bin/ps', ['-p', String(pid), '-o', 'lstart='], {
     encoding: 'utf8',
     timeout: 2000,

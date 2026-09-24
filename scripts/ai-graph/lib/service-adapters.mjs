@@ -1,3 +1,5 @@
+import { gitExecutable, gitNullDevice, hostSystemEnvironment } from './host-executables.mjs';
+import { isPrivateMode } from './host-filesystem.mjs';
 import { lstatSync, mkdirSync, readFileSync, readdirSync, existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
@@ -57,14 +59,12 @@ export function runtimeIdentity(root) {
     'scripts/ai-graph/serve.mjs',
     'tools/ai-graph-viewer/controller.mjs',
     'tools/ai-graph-viewer/server.mjs',
-    'scripts/ai-graph/container-check.mjs',
-    'scripts/ai-graph/Dockerfile.checks',
   ];
   const visit = (relative) => {
     for (const entry of readdirSync(path.join(RUNTIME_ROOT, relative), { withFileTypes: true })) {
       const file = `${relative}/${entry.name}`;
       if (entry.isDirectory()) visit(file);
-      else if (/\.(mjs|json|md)$/.test(entry.name)) files.push(file);
+      else if (/\.(mjs|json|md|cs)$/.test(entry.name)) files.push(file);
     }
   };
   visit('scripts/ai-graph/lib');
@@ -116,7 +116,7 @@ export function privateDirectory(parent, name) {
     if (error.code !== 'EEXIST') throw error;
   }
   const stat = lstatSync(directory);
-  if (!stat.isDirectory() || stat.isSymbolicLink() || (stat.mode & 0o077) !== 0)
+  if (!stat.isDirectory() || stat.isSymbolicLink() || !isPrivateMode(stat))
     fail('INSECURE_STORE', 'Control directory должна быть private и без ссылок');
   return directory;
 }
@@ -142,9 +142,7 @@ export async function defaultAdapters(root) {
   ]);
   pinnedRuntimeIdentity(root);
   const profile = loadProjectProfile(root);
-  const checks = profile.checkMode === 'hardened'
-    ? dockerChecks.probeChecks({ root })
-    : profile.checkMode === 'trusted-local'
+  const checks = ['trusted-local', 'hardened'].includes(profile.checkMode)
       ? runner.probeLocalChecks({ root })
       : { available: false, reason: profile.checkMode === 'local' ? 'LOCAL_CHECK_RECONFIGURATION_REQUIRED' : 'CHECKS_NOT_ENABLED' };
   // These modules are bundled trusted runtime code, never a user-supplied import path.
@@ -213,17 +211,17 @@ export async function defaultAdapters(root) {
       let allowedUntracked = task.includeUntracked;
       if (context.worktree) {
         const result = spawnSync(
-          '/usr/bin/git',
+          gitExecutable(),
           ['-c', 'core.fsmonitor=false', 'ls-files', '--others', '--exclude-standard', '-z'],
           {
             cwd: sourceRoot,
             encoding: 'utf8',
             maxBuffer: 1024 * 1024,
             timeout: 10000,
-            env: {
+            env: { ...hostSystemEnvironment(),
               PATH: '/usr/bin:/bin',
               GIT_CONFIG_NOSYSTEM: '1',
-              GIT_CONFIG_GLOBAL: '/dev/null',
+              GIT_CONFIG_GLOBAL: gitNullDevice,
               GIT_OPTIONAL_LOCKS: '0',
             },
           },
@@ -240,7 +238,7 @@ export async function defaultAdapters(root) {
       }
       const result = await boundedProcess(process.execPath, [path.join(RUNTIME_ROOT, 'scripts/ai-graph/lib/source-worker.mjs')], {
         cwd: sourceRoot, timeoutMs: 120_000, maxBytes: 9 * 1024 * 1024, timeoutCode: 'SOURCE_CAPTURE_TIMEOUT',
-        input: JSON.stringify({ root: sourceRoot, storage: sources, allowedUntracked }),
+        input: JSON.stringify({ root: sourceRoot, storage: sources, allowedUntracked, profile }),
       });
       const output = JSON.parse(result.stdout);
       if (result.status !== 0 || output.error) fail(output.error?.code ?? 'SOURCE_CAPTURE', 'Не удалось сохранить snapshot проекта.');
@@ -270,13 +268,13 @@ export async function defaultAdapters(root) {
       }),
     inspectChanges: workspace.inspectWorkspaceChanges,
     captureBefore: captureBeforeContents,
-    applyEdits: applyProposedEdits,
+    applyEdits: (worktree, before, node, task, edits, moves, transfers) =>
+      applyProposedEdits(worktree, before, node, task, edits, moves, transfers, { denyGlobs: profile.aiDenyGlobs ?? [] }),
     diff: buildAttemptDiff,
     runner: { ...(await runner.probeRunner({ root })), checks },
     execute: (options) =>
       options.node.action.id.startsWith('check-')
-        ? profile.checkMode === 'hardened' ? dockerChecks.runCheck(options)
-          : profile.checkMode === 'trusted-local' ? runner.runRegisteredAction(options)
+        ? ['trusted-local', 'hardened'].includes(profile.checkMode) ? runner.runRegisteredAction(options)
             : fail('CHECKS_NOT_ENABLED', 'Проверки не включены. Выберите hardened или trusted-local в настройке проекта.')
         : runner.runRegisteredAction(options),
     inspectProcess: (process) =>

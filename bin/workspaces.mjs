@@ -1,3 +1,4 @@
+import { gitExecutable, gitNullDevice, hostSystemEnvironment } from '../scripts/ai-graph/lib/host-executables.mjs';
 import { spawnSync } from 'node:child_process';
 import {
   closeSync,
@@ -173,7 +174,7 @@ function gitPaths(root, ignored) {
       ]
     : ['ls-files', '--cached', '--others', '--exclude-standard', '-z', '--', '.', ...PATHSPECS];
   const result = spawnSync(
-    '/usr/bin/git',
+    gitExecutable(),
     ['-c', 'core.fsmonitor=false', '-c', 'core.untrackedCache=false', ...args],
     {
       cwd: root,
@@ -181,12 +182,12 @@ function gitPaths(root, ignored) {
       maxBuffer: MAX_GIT_BYTES,
       timeout: 10000,
       shell: false,
-      env: {
+      env: { ...hostSystemEnvironment(),
         PATH: '/usr/bin:/bin',
         LC_ALL: 'C',
         GIT_OPTIONAL_LOCKS: '0',
         GIT_CONFIG_NOSYSTEM: '1',
-        GIT_CONFIG_GLOBAL: '/dev/null',
+        GIT_CONFIG_GLOBAL: gitNullDevice,
       },
     },
   );

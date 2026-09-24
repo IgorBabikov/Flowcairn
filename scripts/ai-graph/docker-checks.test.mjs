@@ -14,7 +14,7 @@ import {
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { DOCKER_CHECKS_TESTING, probeChecks } from './lib/docker-checks.mjs';
+import { DOCKER_CHECKS_TESTING, probeChecks, prepareCheckImage, runCheck } from './lib/docker-checks.mjs';
 import {
   copyFingerprintSource,
   seedPreparedWorkspace,
@@ -23,7 +23,7 @@ import {
   runBoundedCommand,
   summarizeCheckFailure,
 } from './container-check.mjs';
-import { GraphError, hashObject, sha256 } from './lib/io.mjs';
+import { hashObject, sha256 } from './lib/io.mjs';
 
 function temporary(t, prefix) {
   const directory = mkdtempSync(path.join(tmpdir(), prefix));
@@ -76,103 +76,6 @@ function contextFixture(t) {
   );
   return root;
 }
-
-test('build context hash contains only fixed manifests, lock, Dockerfile, and entry script', (t) => {
-  const root = contextFixture(t);
-  const baseId = `sha256:${'a'.repeat(64)}`;
-  const first = DOCKER_CHECKS_TESTING.contextDescription(root, baseId);
-  const second = DOCKER_CHECKS_TESTING.contextDescription(root, baseId);
-  assert.equal(first.hash, second.hash);
-  assert.match(first.hash, /^[a-f0-9]{64}$/);
-  assert.deepEqual(
-    first.sources.filter((entry) => entry.projectInput).map((entry) => entry.target),
-    JSON.parse(readFileSync(path.join(root, '.flowcairn.json'))).manifests.map(
-      (value) => `manifests/${value}`,
-    ),
-  );
-  writeFileSync(path.join(root, 'apps/api/src-secret.txt'), 'not part of context');
-  assert.equal(DOCKER_CHECKS_TESTING.contextDescription(root, baseId).hash, first.hash);
-  writeFileSync(path.join(root, 'pnpm-lock.yaml'), 'changed\n');
-  assert.notEqual(DOCKER_CHECKS_TESTING.contextDescription(root, baseId).hash, first.hash);
-});
-
-test('build context rejects symlinked manifest inputs', (t) => {
-  const root = contextFixture(t);
-  const target = path.join(root, 'outside-package.json');
-  writeFileSync(target, '{}\n');
-  rmSync(path.join(root, 'apps/api/package.json'));
-  symlinkSync(target, path.join(root, 'apps/api/package.json'));
-  assert.throws(
-    () => DOCKER_CHECKS_TESTING.contextDescription(root, `sha256:${'a'.repeat(64)}`),
-    (error) => error instanceof GraphError && error.code === 'CHECK_CONTEXT_UNSAFE',
-  );
-});
-
-test('build context rejects a symlinked manifest ancestor', (t) => {
-  const root = contextFixture(t);
-  const outside = temporary(t, 'flowcairn-docker-outside-');
-  mkdirSync(path.join(outside, 'api'));
-  writeFileSync(path.join(outside, 'api/package.json'), '{}\n');
-  rmSync(path.join(root, 'apps'), { recursive: true });
-  symlinkSync(outside, path.join(root, 'apps'));
-  assert.throws(
-    () => DOCKER_CHECKS_TESTING.contextDescription(root, `sha256:${'a'.repeat(64)}`),
-    (error) => error instanceof GraphError && error.code === 'CHECK_CONTEXT_UNSAFE',
-  );
-});
-
-test('container create argv has fixed containment and no host write mount', () => {
-  const input = {
-    worktree: '/repo/.ai-orchestrator/worktrees/TASK/attempt-1',
-    action: { id: 'check-tests' },
-  };
-  const image = { imageId: `sha256:${'b'.repeat(64)}` };
-  const labels = {
-    'com.flowcairn.check-container': 'true',
-    'com.flowcairn.contract-hash': 'c'.repeat(64),
-  };
-  const args = DOCKER_CHECKS_TESTING.createArguments({
-    input,
-    image,
-    contractFile: '/repo/.ai-orchestrator/graph/output-attempt/contract.json',
-    labels,
-    name: 'flowcairn-graph-task-check-tests-abc',
-  });
-  assert.equal(args[0], 'create');
-  assert.ok(args.includes('none'));
-  assert.ok(args.includes('ALL'));
-  assert.ok(args.includes('no-new-privileges=true'));
-  assert.equal(args.includes('--pid'), false);
-  assert.ok(args.includes('compress=false'));
-  assert.ok(args.includes('COREPACK_HOME=/opt/corepack'));
-  assert.equal(DOCKER_CHECKS_TESTING.intendedSecurity(input, '/contract.json').pidMode, '');
-  assert.equal(args.includes('type=volume,dst=/workspace'), false);
-  assert.ok(
-    args.includes(
-      '/workspace:rw,exec,nosuid,nodev,size=1073741824,nr_inodes=131072,uid=1000,gid=1000,mode=0700',
-    ),
-  );
-  assert.match(
-    DOCKER_CHECKS_TESTING.intendedSecurity(input, '/contract.json').tmpfs['/workspace'],
-    /size=1073741824,nr_inodes=131072/,
-  );
-  const security = DOCKER_CHECKS_TESTING.intendedSecurity(input, '/contract.json');
-  assert.ok(security.tmpfs['/workspace'].split(',').includes('exec'));
-  assert.ok(security.tmpfs['/tmp'].split(',').includes('noexec'));
-  for (const [mount, options] of Object.entries(security.tmpfs))
-    assert.ok(args.includes(`${mount}:${options}`), 'Expected security and create argv must match');
-  const mounts = args.filter((value) => value.startsWith('type='));
-  assert.deepEqual(mounts, [
-    'type=bind,src=/repo/.ai-orchestrator/worktrees/TASK/attempt-1,dst=/input,readonly',
-    'type=bind,src=/repo/.ai-orchestrator/graph/output-attempt/contract.json,dst=/contract.json,readonly',
-  ]);
-  assert.equal(args.at(-2), image.imageId);
-  assert.equal(args.at(-1), 'check-tests');
-  assert.equal(
-    args.some((value) => value.includes('docker.sock')),
-    false,
-  );
-});
 
 test('delayed Docker create reconciles within the fixed preparation budget', async () => {
   let now = 0;
@@ -387,8 +290,7 @@ test('failed check evidence is bounded, targeted, and redacted', () => {
     'progress\n/workspace/apps/api/src/main.ts(4,2): error TS1234: bad type\n',
     'TOKEN=very-secret-value-that-must-not-leak\nBearer=abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJK\n',
   );
-  assert.match(summary, /apps\/api\/src\/main\.ts/);
-  assert.match(summary, /TS1234/);
+  assert.equal(summary, 'Check failed; raw diagnostic omitted');
   assert.doesNotMatch(summary, /\/workspace|very-secret|abcdefghijklmnopqrstuvwxyz/);
   assert.ok(summary.length <= 1_600);
   assert.equal(
@@ -420,8 +322,7 @@ test('Docker daemon failures are bounded and redact host paths and credentials',
     'START_FAILED',
     ['/private/tmp/repo'],
   );
-  assert.match(diagnostic, /^START_FAILED:/);
-  assert.match(diagnostic, /<host-path>/);
+  assert.equal(diagnostic, 'START_FAILED');
   assert.doesNotMatch(diagnostic, /\/private\/tmp\/repo|must-not-leak/);
   assert.ok(diagnostic.length <= 1_014);
 });
@@ -845,20 +746,6 @@ test('container registry dispatches only explicit npm and pnpm script IDs', () =
   );
 });
 
-test('rejects changed dependency manifests instead of installing during a check', (t) => {
-  const root = contextFixture(t);
-  const description = DOCKER_CHECKS_TESTING.contextDescription(root, `sha256:${'a'.repeat(64)}`);
-  assert.doesNotThrow(() => DOCKER_CHECKS_TESTING.verifyDependencyInputs(root, description));
-  writeFileSync(
-    path.join(root, 'tools/ai-graph-viewer/package.json'),
-    '{"dependencies":{"new":"1"}}',
-  );
-  assert.throws(
-    () => DOCKER_CHECKS_TESTING.verifyDependencyInputs(root, description),
-    (error) => error instanceof GraphError && error.code === 'CHECK_DEPENDENCIES_DRIFT',
-  );
-});
-
 test('prepared workspace seed preserves relative workspace links and refuses overwrites', (t) => {
   const root = temporary(t, 'flowcairn-seed-');
   const seed = path.join(root, 'seed'),
@@ -876,4 +763,18 @@ test('prepared workspace seed preserves relative workspace links and refuses ove
   );
   assert.equal(exists(path.join(seed, 'packages/lib/index.js')), false);
   assert.throws(() => seedPreparedWorkspace({ seed, workspace }));
+});
+
+
+test('host result envelope rejects credential-bearing summary', () => {
+  const summary = 'api_key=sk-proj-' + 'x'.repeat(60);
+  assert.equal(DOCKER_CHECKS_TESTING.parseCheckResult('FLOWCAIRN_CHECK_RESULT ' + JSON.stringify({ version: 1, exitCode: 1, summary }), 1), null);
+});
+
+
+test('retired Docker entry points do not inspect input or touch Docker', async () => {
+  const input = new Proxy({}, { get() { throw new Error('Retired backend touched input'); } });
+  assert.deepEqual(probeChecks(input), { available: false, reason: 'CHECK_BACKEND_RETIRED' });
+  assert.throws(() => prepareCheckImage(input), { code: 'CHECK_BACKEND_RETIRED' });
+  await assert.rejects(runCheck(input), { code: 'CHECK_BACKEND_RETIRED' });
 });

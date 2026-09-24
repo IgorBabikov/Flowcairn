@@ -1,9 +1,10 @@
+import { realpathHostSync, sameHostPath } from './host-filesystem.mjs';
+import { lstatHostSync as lstatSync, fstatHostSync as fstatSync } from './host-filesystem.mjs';
+import { gitExecutable, gitNullDevice } from './host-executables.mjs';
 import { spawnSync } from 'node:child_process';
 import {
   closeSync,
   constants,
-  fstatSync,
-  lstatSync,
   openSync,
   readFileSync,
   readdirSync,
@@ -12,8 +13,9 @@ import {
 import path from 'node:path';
 import { TextDecoder } from 'node:util';
 import { GraphError, canonicalJson, sha256 } from './io.mjs';
+import { isSensitivePath } from './source-policy.mjs';
 
-const GIT_EXECUTABLE = '/usr/bin/git';
+const GIT_EXECUTABLE = gitExecutable();
 const MAX_FILES = 20_000;
 const MAX_CHANGED_FILES = 200;
 const MAX_INPUT_PATHS = 512;
@@ -87,26 +89,10 @@ function normalizePrefix(value, options) {
 }
 
 function assertNotSensitivePath(relativePath) {
-  const name = relativePath.toLowerCase().split('/').at(-1);
-  const allowedTemplate = /^\.env(?:\.[^/]+)*\.(?:example|sample|template)$/.test(name);
-  const sensitive =
-    (!allowedTemplate && (name === '.env' || name.startsWith('.env.'))) ||
-    [
-      '.npmrc',
-      '.pypirc',
-      '.netrc',
-      'credentials',
-      'credentials.json',
-      'id_rsa',
-      'id_ed25519',
-    ].includes(name) ||
-    /(?:^|[._-])secrets?(?:[._-](?:json|ya?ml|toml|txt))?$/.test(name) ||
-    /\.(?:key|pem|p12|pfx)$/.test(name);
-  if (sensitive) {
-    fail(
-      'SENSITIVE_WORKSPACE_PATH',
-      `Workspace fingerprint отклоняет чувствительный path: ${relativePath}`,
-    );
+  // Host-only control profile participates in executor freshness/scope checks;
+  // it remains forbidden in AI snapshots by the shared source policy.
+  if (relativePath !== '.flowcairn.json' && isSensitivePath(relativePath)) {
+    fail('SENSITIVE_WORKSPACE_PATH', 'Workspace fingerprint отклоняет чувствительный path.');
   }
 }
 
@@ -115,7 +101,11 @@ function boundedPaths(value, label, options) {
     fail('INVALID_WORKSPACE_OPTIONS', `${label} должен быть bounded массивом paths`);
   }
   const paths = value.map((entry) => normalizePrefix(entry, options));
-  for (const entry of paths) assertNotSensitivePath(entry);
+  for (const entry of paths) {
+    // Control storage is allowed only as an excluded output-policy declaration.
+    if (options?.allowControl && (entry === '.ai-orchestrator' || entry.startsWith('.ai-orchestrator/'))) continue;
+    assertNotSensitivePath(entry);
+  }
   return [...new Set(paths)].sort(comparePath);
 }
 
@@ -148,14 +138,14 @@ function gitEnvironment() {
     GIT_NO_LAZY_FETCH: '1',
     GIT_NO_REPLACE_OBJECTS: '1',
     GIT_CONFIG_NOSYSTEM: '1',
-    GIT_CONFIG_GLOBAL: '/dev/null',
+    GIT_CONFIG_GLOBAL: gitNullDevice,
     GIT_ATTR_NOSYSTEM: '1',
     LC_ALL: 'C',
   };
 }
 
 function assertSystemGit() {
-  if (!['darwin', 'linux'].includes(process.platform)) {
+  if (!['darwin', 'linux', 'win32'].includes(process.platform)) {
     fail('UNSUPPORTED_PLATFORM', 'Workspace fingerprint поддерживает macOS/Linux system Git');
   }
   let stat;
@@ -164,7 +154,7 @@ function assertSystemGit() {
   } catch {
     fail('GIT_FAILED', 'System Git не найден');
   }
-  if (!stat.isFile() || stat.isSymbolicLink() || (stat.mode & 0o111) === 0) {
+  if (!stat.isFile() || stat.isSymbolicLink() || (process.platform !== 'win32' && (stat.mode & 0o111) === 0)) {
     fail('GIT_FAILED', 'System Git executable недопустим');
   }
 }
@@ -211,7 +201,7 @@ function repositoryRoot(worktree) {
   const requested = realpathSync(requestedPath);
   const result = runGit(requested, ['rev-parse', '--show-toplevel']);
   const top = result.stdout.toString('utf8').trim();
-  if (!top || realpathSync(top) !== requested) {
+  if (!top || !sameHostPath(realpathHostSync(top), realpathHostSync(requested))) {
     fail('NOT_REPOSITORY_ROOT', 'Worktree должен быть корнем Git repository');
   }
   return { root: requested, identity: statIdentity(requestedStat) };
@@ -354,7 +344,7 @@ function scanWorkspace(root, outputPaths) {
       }
       const outputAncestor = outputPaths.some((prefix) => containsPath(relativePath, prefix));
       assertSafePath(relativePath, { allowControl: outputAncestor });
-      assertNotSensitivePath(relativePath);
+      if (!(outputAncestor && (relativePath === '.ai-orchestrator' || relativePath.startsWith('.ai-orchestrator/')))) assertNotSensitivePath(relativePath);
       const absolutePath = path.join(absoluteDirectory, name);
       if (isExcluded(relativePath, outputPaths)) {
         validateExcludedRoot(absolutePath, relativePath);

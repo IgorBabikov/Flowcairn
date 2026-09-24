@@ -4,14 +4,12 @@ import { spawnSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createInterface } from 'node:readline/promises';
 import { explainError, GraphError } from '../scripts/ai-graph/lib/io.mjs';
 import { loadProjectProfile, RUNTIME_ROOT, packageManagerLock, validatePackageManagerProject } from '../scripts/ai-graph/lib/project.mjs';
 import { TaskInputSchema } from '../scripts/ai-graph/lib/schemas.mjs';
 import { WorkflowService, sanitizeText } from '../scripts/ai-graph/lib/service.mjs';
 import { runCli } from '../scripts/ai-graph/cli.mjs';
 import { probeRunner, probeLocalChecks } from '../scripts/ai-graph/lib/runner.mjs';
-import { probeChecks, prepareCheckImage } from '../scripts/ai-graph/lib/docker-checks.mjs';
 import { startViewer } from '../tools/ai-graph-viewer/server.mjs';
 import { assertRuntimePlatform } from '../scripts/ai-graph/lib/platform.mjs';
 import { openBrowser } from './browser.mjs';
@@ -109,7 +107,7 @@ export async function initializeCommand(input, options = {}, terminal = {}) {
   assertProviderPlatform(options);
   const selected = await collectOnboarding(root, options, terminal);
   const result = initializeProject(root, { ...selected, _skillManifest: await selectProjectSkills(root, selected, terminal) });
-  const checkPreparation = await maybePrepareChecks(root, result.profile, selected, terminal);
+  const checkPreparation = await maybePrepareChecks(root, result.profile, selected);
   if (selected.consent === true && !selected['dry-run']) {
     const inspected = await instructionsCommand(root, 'inspect');
     await instructionsCommand(root, 'activate', {consent:true, fingerprint:inspected.instructions.fingerprint});
@@ -117,33 +115,9 @@ export async function initializeCommand(input, options = {}, terminal = {}) {
   return { ...result, checkPreparation };
 }
 
-/** Hardened Docker checks are opt-in; normal onboarding uses local worktree checks. */
-export async function maybePrepareChecks(root, profile, options = {}, terminal = {}, checks = {
-  probe: probeChecks,
-  prepare: prepareCheckImage,
-}) {
-  if (options['dry-run'] || options.json || !profile.checks.length)
-    return { prepared: false, reason: 'NOT_NEEDED' };
-  if (profile.checkMode !== 'hardened') return { prepared: false, reason: 'LOCAL_DEFAULT' };
-  const status = checks.probe({ root });
-  if (status.available || status.reason !== 'CHECK_IMAGE_MISSING')
-    return { prepared: false, reason: status.available ? 'READY' : status.reason };
-  const input = terminal.input ?? process.stdin;
-  const output = terminal.output ?? process.stderr;
-  if (!input.isTTY || !output.isTTY)
-    return { prepared: false, reason: 'NON_INTERACTIVE' };
-  const prompt = terminal.prompt ?? createInterface({ input, output });
-  try {
-    output.write('Проверки проекта найдены. Docker доступен, но образ проверок еще не подготовлен.\n');
-    const answer = (await prompt.question('Подготовить проверки в Docker? Это скачает образ и зависимости проекта. [да / нет; Enter — нет]: ')).trim().toLowerCase();
-    if (!['да', 'yes'].includes(answer)) {
-      output.write('Проверки не подготовлены. Перед выполнением проверок: npx flowcairn checks prepare.\n');
-      return { prepared: false, reason: 'DECLINED' };
-    }
-    return { prepared: true, result: checks.prepare({ root }) };
-  } finally {
-    if (!terminal.prompt) prompt.close();
-  }
+/** Local checks need no image preparation or installation-time command execution. */
+export async function maybePrepareChecks(_root, profile, options = {}) {
+  return { prepared: false, reason: options['dry-run'] || options.json || !profile.checks.length ? 'NOT_NEEDED' : 'LOCAL_DEFAULT' };
 }
 
 export async function setupCommand(input, options = {}, terminal = {}) {
@@ -188,9 +162,7 @@ export async function doctorProject(input) {
     };
   }
   const ai = await probeRunner({ root });
-  const checks = profile.checkMode === 'hardened'
-    ? probeChecks({ root })
-    : probeLocalChecks({ root });
+  const checks = probeLocalChecks({ root });
   let manager;
   try {
     manager = {
@@ -200,8 +172,8 @@ export async function doctorProject(input) {
       boundary: profile.packageManager === 'yarn'
         ? 'Yarn 4, node_modules, только nodeLinker в .yarnrc.yml. PnP, plugins, custom/private registry пока не поддерживаются.'
         : profile.packageManager === 'pnpm'
-          ? 'pnpm 9–11 с exact packageManager; без pin используется 11.8.0. Подготовка зависимостей с frozen lockfile, lifecycle scripts выключены.'
-          : 'npm из Node22 check image. Если packageManager задает exact npm version, она должна совпасть с bundled версией image.',
+          ? 'pnpm 9–11 с exact packageManager; доступность локального менеджера и зависимостей проверяется runtime.'
+          : 'npm из локального Node.js 22; доступность exact версии проверяется локальным runtime.',
     };
   } catch (error) {
     manager = { valid: false, code: error.code ?? 'PACKAGE_MANAGER', message: sanitizeText(error.message) };
@@ -218,11 +190,9 @@ export async function doctorProject(input) {
     assistants: inspectHarnesses(),
     ai: ai.ai,
     checks,
-    note: profile.checkMode === 'trusted-local'
-      ? 'Проверки выполняются локально точными scripts профиля с правами пользователя. Это не изолированная песочница.'
-      : profile.checkMode === 'hardened'
-        ? 'Проверки используют подготовленный изолированный Docker-образ.'
-        : 'Scripts проекта выключены; требования без другого verifier останутся неподтвержденными.',
+    note: profile.checkMode !== 'none'
+      ? 'Проверки выполняют зарегистрированные команды прямо в проекте с правами пользователя. Дополнительной изоляции Flowcairn нет.'
+      : 'Scripts проекта выключены; требования без другого verifier останутся неподтвержденными.',
   };
 }
 
@@ -251,7 +221,7 @@ export async function handoff(input, runId) {
   };
 }
 
-const HELP = `Flowcairn — от задачи до проверенного результата\n\nБыстрый старт\n  npx flowcairn          начать настройку и открыть интерфейс\n  npx flowcairn setup    изменить модель и правила после закрытия интерфейса\n  npx flowcairn doctor   проверить подготовку проекта\n\nДополнительно\n  npx flowcairn checks prepare   подготовить изолированные проверки\n  npx flowcairn uninstall        снять интеграцию, не удаляя исходники\n\nДля интеграции\n  init | ui | status | plan | events | receipt | artifact | handoff | orchestrator\n\nКод проекта не изменится, пока вы не согласуете план.\nДокументация: https://github.com/IgorBabikov/flowcairn\n`;
+const HELP = `Flowcairn — от задачи до проверенного результата\n\nБыстрый старт\n  npx flowcairn          начать настройку и открыть интерфейс\n  npx flowcairn setup    изменить модель и правила после закрытия интерфейса\n  npx flowcairn doctor   проверить подготовку проекта\n\nДополнительно\n  npx flowcairn uninstall        снять интеграцию, не удаляя исходники\n\nДля интеграции\n  init | ui | status | plan | events | receipt | artifact | handoff | orchestrator\n\nКод проекта не изменится, пока вы не согласуете план.\nДокументация: https://github.com/IgorBabikov/flowcairn\n`;
 
 export function printInitialization(result, { launching = false, output = process.stdout } = {}) {
   if (launching && !result.dryRun) {
@@ -266,9 +236,6 @@ export function printInitialization(result, { launching = false, output = proces
     'Код проекта не изменится, пока вы не согласуете этот план.',
   ];
   if (result.dryRun) summary.push(`Будут созданы: ${result.changes.join(', ')}.`);
-  if (result.checkPreparation && !result.checkPreparation.prepared &&
-      ['DECLINED', 'NON_INTERACTIVE'].includes(result.checkPreparation.reason))
-    summary.push('Проверки можно подготовить позже из интерфейса или командой npx flowcairn checks prepare.');
   if (!result.dryRun) summary.push('Открыть интерфейс: npx flowcairn');
   printCard('Flowcairn', summary.map((line) => sanitizeText(line)), {
     output, author: result.created === true && !result.dryRun && !launching,
@@ -338,7 +305,8 @@ export async function main(tokens = process.argv.slice(2)) {
       };
     }
     result = await createTask(root, input, options);
-  } else if (command === 'checks') result = await prepareCheckImage({ root: projectRoot(root) });
+  } else if (command === 'checks' || command === 'bootstrap-checks')
+    fail('CHECK_PREPARATION_OBSOLETE', 'Подготовка образов больше не используется. Выполните npx flowcairn setup, затем npx flowcairn doctor для проверки локального runtime.');
   else if (command === 'handoff') result = await handoff(root, options.run);
   else if (command === 'ui') {
     const port = Number(options.port ?? 4329);

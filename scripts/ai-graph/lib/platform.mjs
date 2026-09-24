@@ -1,13 +1,14 @@
 import { readFileSync, realpathSync, statfsSync } from 'node:fs';
+import path from 'node:path';
 import { release } from 'node:os';
 import { GraphError } from './io.mjs';
 
-/** POSIX is a security boundary: private modes and process guards remain mandatory. */
+/** Supported hosts still require their own filesystem and process guards. */
 export function assertRuntimePlatform({ platform = process.platform, node = process.versions.node } = {}) {
   if (Number(node.split('.')[0]) !== 22)
     throw new GraphError('NODE_VERSION', 'Нужен Node.js 22. Переключите версию в текущем терминале.');
-  if (!['darwin', 'linux'].includes(platform))
-    throw new GraphError('PLATFORM', 'Native Windows не поддерживается. Запустите Linux Node.js 22 в WSL2 и храните проект в Linux home, вне /mnt/c.');
+  if (!['darwin', 'linux', 'win32'].includes(platform))
+    throw new GraphError('PLATFORM', 'Поддерживаются macOS, Linux и Windows с Node.js 22.');
 }
 
 export function isWsl(kernel = release()) {
@@ -15,13 +16,18 @@ export function isWsl(kernel = release()) {
 }
 
 export function defaultProvider(platform = process.platform) {
-  if (platform === 'darwin') return 'codex';
+  if (platform === 'darwin' || platform === 'win32') return 'codex';
   if (platform === 'linux') return 'claude';
-  throw new GraphError('PLATFORM', 'Native Windows не поддерживается; используйте Linux в WSL2.');
+  throw new GraphError('PLATFORM', 'Операционная система не поддерживается.');
 }
 
 /** Refuse shared Windows filesystems even when DrvFs metadata imitates Unix modes. */
 export function assertProjectPlatform(root, { platform = process.platform, kernel = release(), filesystem = statfsSync, mountInfo = () => readFileSync('/proc/self/mountinfo', 'utf8') } = {}) {
+  if (platform === 'win32') {
+    if (!/^[a-z]:[\\/]/i.test(root) || root.startsWith('\\\\') || !path.win32.isAbsolute(root))
+      throw new GraphError('WINDOWS_FILESYSTEM', 'Нужен проект на локальном диске Windows; UNC и сетевые пути не поддерживаются.');
+    return;
+  }
   if (platform !== 'linux' || !isWsl(kernel)) return;
   if (!/wsl2/i.test(kernel))
     throw new GraphError('WSL_VERSION', 'Требуется WSL2. WSL1 не входит в поддерживаемую границу.');

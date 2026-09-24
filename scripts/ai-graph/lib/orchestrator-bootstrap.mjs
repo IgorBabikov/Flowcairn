@@ -1,3 +1,4 @@
+import { gitExecutable, gitNullDevice, hostSystemEnvironment } from './host-executables.mjs';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, lstatSync, mkdtempSync, readdirSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -18,7 +19,7 @@ function trustedBootstrapGit(root, args) {
     if (typeof process.env[key] === 'string') environment[key] = process.env[key];
   }
   const result = spawnSync(
-    '/usr/bin/git',
+    gitExecutable(),
     ['-c', 'core.fsmonitor=false', '-c', 'core.untrackedCache=false', ...args],
     {
       cwd: root,
@@ -26,13 +27,13 @@ function trustedBootstrapGit(root, args) {
       timeout: 120_000,
       maxBuffer: 20 * 1024 * 1024,
       shell: false,
-      env: {
+      env: { ...hostSystemEnvironment(),
         ...environment,
         GIT_OPTIONAL_LOCKS: '0',
         GIT_NO_LAZY_FETCH: '1',
         GIT_NO_REPLACE_OBJECTS: '1',
         GIT_CONFIG_NOSYSTEM: '1',
-        GIT_CONFIG_GLOBAL: '/dev/null',
+        GIT_CONFIG_GLOBAL: gitNullDevice,
         GIT_ATTR_NOSYSTEM: '1',
         LC_ALL: 'C',
       },

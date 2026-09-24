@@ -1,4 +1,5 @@
-import { constants, closeSync, fstatSync, lstatSync, openSync, opendirSync, readSync, realpathSync } from 'node:fs';
+import { lstatHostSync as lstatSync, fstatHostSync as fstatSync } from './host-filesystem.mjs';
+import { constants, closeSync, openSync, opendirSync, readSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { TextDecoder } from 'node:util';
 import { GraphError, hashObject, sha256 } from './io.mjs';
@@ -39,7 +40,7 @@ export function readInstructionFile(root, relative, maxBytes = 65536) {
   const target = instructionPath(root, relative);
   const before = lstatSync(target);
   if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1 || before.size > maxBytes) instructionError('INSTRUCTION_UNSAFE_FILE', 'Instruction file must be bounded, regular, and have one link.');
-  const fd = openSync(target, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  const fd = openSync(target, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
   try {
     const stat = fstatSync(fd);
     if (!stat.isFile() || stat.nlink !== 1 || stat.dev !== before.dev || stat.ino !== before.ino || stat.size > maxBytes) instructionError('INSTRUCTION_CHANGED', 'Instruction file changed before reading.');
