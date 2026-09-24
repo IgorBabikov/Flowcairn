@@ -36,6 +36,69 @@ internal static class WindowsJob {
   [DllImport("kernel32.dll", SetLastError=true)] static extern bool SetHandleInformation(IntPtr handle, uint mask, uint flags);
   [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
 
+  [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)] struct ProcessEntry {
+    public uint Size, Usage, Pid; public UIntPtr DefaultHeap; public uint Module, Threads, ParentPid;
+    public int BasePriority; public uint Flags;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst=260)] public string Name;
+  }
+  [DllImport("kernel32.dll")] static extern uint GetCurrentProcessId();
+  [DllImport("kernel32.dll", SetLastError=true)] static extern IntPtr CreateToolhelp32Snapshot(uint flags, uint pid);
+  [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern bool Process32FirstW(IntPtr snapshot, ref ProcessEntry entry);
+  [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern bool Process32NextW(IntPtr snapshot, ref ProcessEntry entry);
+  [DllImport("kernel32.dll", SetLastError=true)] static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
+  [DllImport("kernel32.dll", SetLastError=true)] static extern bool GetProcessTimes(IntPtr process, out long created, out long exited, out long kernel, out long user);
+  [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern bool QueryFullProcessImageNameW(IntPtr process, uint flags, StringBuilder name, ref uint length);
+
+  static string JsonString(string value) {
+    StringBuilder output = new StringBuilder("\"");
+    foreach (char c in value) {
+      if (c == '\\' || c == '"') { output.Append('\\'); output.Append(c); }
+      else if (c < 32) output.Append("\\u" + ((int)c).ToString("x4"));
+      else output.Append(c);
+    }
+    return output.Append('"').ToString();
+  }
+
+  static int InspectProcesses() {
+    IntPtr snapshot = IntPtr.Zero;
+    try {
+      snapshot = CreateToolhelp32Snapshot(2, 0);
+      if (snapshot == IntPtr.Zero || snapshot == new IntPtr(-1)) throw new Exception();
+      ProcessEntry entry = new ProcessEntry(); entry.Size = (uint)Marshal.SizeOf(typeof(ProcessEntry));
+      if (!Process32FirstW(snapshot, ref entry)) throw new Exception();
+      StringBuilder output = new StringBuilder("["); int count = 0;
+      do {
+        // The observer is transient, not a managed action descendant. Including it
+        // would create false drift between two consecutive snapshots.
+        if (entry.Pid == GetCurrentProcessId()) continue;
+        if (++count > 50000 || output.Length > 2 * 1024 * 1024) throw new Exception();
+        string started = "", executable = "";
+        IntPtr process = OpenProcess(0x1000, false, entry.Pid); // QUERY_LIMITED_INFORMATION only.
+        if (process != IntPtr.Zero) {
+          try {
+            long created, exited, kernel, user; uint length = 32768;
+            StringBuilder name = new StringBuilder((int)length);
+            if (GetProcessTimes(process, out created, out exited, out kernel, out user)
+                && QueryFullProcessImageNameW(process, 0, name, ref length)) {
+              started = DateTime.FromFileTimeUtc(created).ToString("o", System.Globalization.CultureInfo.InvariantCulture);
+              executable = name.ToString();
+            }
+          } finally { CloseHandle(process); }
+        }
+        // Inaccessible processes stay in the tree with unknown identity; never treat
+        // an access failure as absence or emit command lines / environment values.
+        if (count > 1) output.Append(',');
+        output.Append("{\"pid\":").Append(entry.Pid).Append(",\"parentPid\":").Append(entry.ParentPid)
+          .Append(",\"startedAt\":").Append(JsonString(started)).Append(",\"executable\":").Append(JsonString(executable)).Append('}');
+      } while (Process32NextW(snapshot, ref entry));
+      if (Marshal.GetLastWin32Error() != 18) throw new Exception(); // ERROR_NO_MORE_FILES
+      output.Append(']');
+      Console.OutputEncoding = new UTF8Encoding(false);
+      Console.Out.Write(output.ToString()); return 0;
+    } catch { Console.Error.WriteLine("PROCESS_INSPECTION_FAILED"); return 125; }
+    finally { if (snapshot != IntPtr.Zero && snapshot != new IntPtr(-1)) CloseHandle(snapshot); }
+  }
+
   // Microsoft CRT argv encoding, including empty arguments and trailing backslashes.
   static string Quote(string value) {
     StringBuilder result = new StringBuilder("\""); int slash = 0;
@@ -48,6 +111,7 @@ internal static class WindowsJob {
     result.Append('\\', slash * 2); result.Append('"'); return result.ToString();
   }
   static int Main(string[] args) {
+    if (args.Length == 1 && args[0] == "--inspect-processes") return InspectProcesses();
     IntPtr job = IntPtr.Zero; ProcessInfo child = new ProcessInfo(); bool resumed = false;
     try {
       if (args.Length < 2 || !Path.IsPathRooted(args[0]) || !Path.IsPathRooted(args[1])) throw new Exception();

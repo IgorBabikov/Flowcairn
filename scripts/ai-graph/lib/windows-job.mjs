@@ -87,3 +87,15 @@ export function prepareWindowsJob(command, { platform = process.platform, run = 
     fail(stage);
   }
 }
+
+
+let processInspector;
+/** Reuse only this process's freshly compiled helper; revalidate its bytes on every query. */
+export function windowsProcessInspector() {
+  if (!processInspector) {
+    processInspector = prepareWindowsJob({ executable: process.execPath, args: [] });
+    process.once('exit', () => { try { processInspector.dispose(); } catch { /* Process already exited; no output or source data. */ } });
+  }
+  processInspector.verify();
+  return processInspector.command.executable;
+}

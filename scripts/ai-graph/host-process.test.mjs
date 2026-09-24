@@ -17,16 +17,13 @@ test('native Windows Node22 and local drive platform gate', () => {
     assert.throws(() => assertProjectPlatform(value, { platform: 'win32' }), { code: 'WINDOWS_FILESYSTEM' });
 });
 
-test('Windows process query uses constant encoded script without command lines', () => {
-  const rows = listHostProcesses({ tool: (name) => name, run: (file, args, config) => {
-    assert.equal(file, 'WindowsPowerShell/v1.0/powershell.exe');
-    assert.ok(args.includes('-NoProfile'));
+test('Windows process query uses only the native inspector mode without shell or command lines', () => {
+  const rows = listHostProcesses({ tool: () => 'verified-inspector.exe', run: (file, args, config) => {
+    assert.equal(file, 'verified-inspector.exe');
+    assert.deepEqual(args, ['--inspect-processes']);
     assert.equal(config.shell, false);
-    assert.equal(config.env.PSModulePath, 'WindowsPowerShell\\v1.0\\Modules');
+    assert.equal('PSModulePath' in config.env, false);
     assert.equal('NODE_OPTIONS' in config.env, false);
-    const script = Buffer.from(args.at(-1), 'base64').toString('utf16le');
-    assert.match(script, /Get-CimInstance Win32_Process/);
-    assert.doesNotMatch(script, /CommandLine/);
     return { status: 0, stdout: JSON.stringify([root, child]) };
   } });
   assert.deepEqual(rows, [root, child]);
@@ -53,7 +50,7 @@ test('verified Windows stop targets positive PID tree and checks all observed de
 });
 
 test('inspection failure, identity drift and newly observed descendants do not prove stop', () => {
-  assert.equal(hostGroupAlive(100, { ...options([]), list: () => { throw Error('CIM unavailable'); } }), null);
+  assert.equal(hostGroupAlive(100, { ...options([]), list: () => { throw Error('Native inspection unavailable'); } }), null);
   let reads = 0, kills = 0;
   assert.equal(stopHostGroup(100, { ...options([]), list: () => ++reads === 1 ? [root] : [{ ...root, startedAt: child.startedAt }], run: () => { kills++; return { status: 0 }; } }), false);
   assert.equal(kills, 0);
@@ -79,7 +76,7 @@ test('Windows system environment keeps standard install paths without user modul
 
 test('native Windows process inspection works inside the exact clean supervisor environment', { skip: process.platform !== 'win32', timeout: 30000 }, () => {
   const moduleUrl = new URL('./lib/host-process.mjs', import.meta.url).href;
-  const source = `import { inspectHostProcess } from ${JSON.stringify(moduleUrl)}; try { const value = inspectHostProcess(process.pid); if (!value || value.pid !== process.pid) throw Error('PROCESS_IDENTITY_UNKNOWN'); process.stdout.write('identity-verified'); } catch (error) { process.stderr.write(error.message); process.exitCode = 1; }`;
+  const source = `import { inspectHostProcess } from ${JSON.stringify(moduleUrl)}; try { const value = inspectHostProcess(process.pid); if (!value || value.pid !== process.pid || value.parentPid !== process.ppid) throw Error('PROCESS_IDENTITY_UNKNOWN'); process.stdout.write('identity-verified'); } catch (error) { process.stderr.write(error.message); process.exitCode = 1; }`;
   const result = spawnSync(process.execPath, ['--input-type=module', '-e', source], { env: safeEnvironment(), encoding: 'utf8', timeout: 20000 });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stdout, 'identity-verified');
@@ -91,4 +88,15 @@ test('process inspection failures expose fixed stage codes and never raw output'
     [{ status: 0, stdout: 'private non-JSON data' }, 'PROCESS_INSPECTION_OUTPUT_INVALID'],
     [{ error: { code: 'ETIMEDOUT', message: 'private path' } }, 'PROCESS_INSPECTION_TIMEOUT'],
   ]) assert.throws(() => listHostProcesses({ tool: (name) => name, run: () => result }), { message });
+});
+
+
+test('inaccessible identity remains represented but cannot authorize process termination', () => {
+  const unknown = { ...child, startedAt: '', executable: '' };
+  const rows = listHostProcesses({ tool: () => 'test-inspector', run: () => ({ status: 0, stdout: JSON.stringify([root, unknown]) }) });
+  assert.equal(rows.length, 2);
+  assert.throws(() => inspectHostProcess(child.pid, options(rows)), { message: 'PROCESS_IDENTITY_UNKNOWN' });
+  let killed = false;
+  assert.equal(stopHostGroup(root.pid, { ...options(rows), run: () => { killed = true; return { status: 0 }; } }), false);
+  assert.equal(killed, false);
 });

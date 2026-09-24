@@ -1,9 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, realpathSync, rmSync, linkSync, renameSync, symlinkSync, lstatSync, fstatSync, openSync, closeSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, realpathSync, rmSync, linkSync, renameSync, symlinkSync, lstatSync, fstatSync, openSync, closeSync, chmodSync, readdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { isPrivateMode, isTrustedMode, assertPrivateMode, sameHostPath, isPathWithin, noFollowReadFlags, fsyncParentDirectory, canonicalStatDevice, crossStatIdentity, lstatHostSync, fstatHostSync, HOST_FILESYSTEM_TESTING } from './lib/host-filesystem.mjs';
+import { gitExecutable, hostNullDevice, hostSystemEnvironment } from './lib/host-executables.mjs';
+import { captureSourceBundle, materializeSourceBundle } from './lib/source.mjs';
 import { inspectProjectSource, readProjectSourcePage } from './lib/project-source-access.mjs';
 import { fingerprintDirectWorkspace } from './lib/direct-workspace.mjs';
 import { captureDirectSource, verifyDirectSource } from './lib/direct-source.mjs';
@@ -138,4 +141,49 @@ test('Windows missing path dev is recovered from a stable descriptor, never trea
   }), { code: 'ESTALE' });
   const link = { ...base, isFile: () => false };
   assert.equal(completeWindowsFileStat('synthetic-fixture', link, () => { throw Error('Must not follow'); }), link);
+});
+
+
+test('native Git worktree capture/materialization and live pages retain source freshness', { timeout: 20000 }, (t) => {
+  const base = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'native-git-fixture-')));
+  t.after(() => {
+    const writable = (file) => {
+      const stat = lstatSync(file);
+      if (stat.isSymbolicLink()) return;
+      chmodSync(file, stat.isDirectory() ? 0o700 : 0o600);
+      if (stat.isDirectory()) for (const name of readdirSync(file)) writable(path.join(file, name));
+    };
+    writable(base);
+    rmSync(base, { recursive: true, force: true });
+  });
+  const root = path.join(base, 'repo'), worktree = path.join(base, 'worktree');
+  mkdirSync(root, { mode: 0o700 });
+  const git = (cwd, ...args) => execFileSync(gitExecutable(), ['-c', `core.hooksPath=${hostNullDevice}`, ...args], {
+    cwd, encoding: 'utf8', timeout: 10000, stdio: ['ignore', 'pipe', 'pipe'], shell: false,
+    env: { ...hostSystemEnvironment(), PATH: process.env.PATH, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: hostNullDevice },
+  });
+  git(root, 'init', '--initial-branch=main');
+  git(root, 'config', '--local', 'user.name', 'Native fixture');
+  git(root, 'config', '--local', 'user.email', 'fixture@example.invalid');
+  git(root, 'config', '--local', 'core.autocrlf', 'false');
+  git(root, 'config', '--local', 'commit.gpgsign', 'false');
+  mkdirSync(path.join(root, 'src'));
+  writeFileSync(path.join(root, 'src', 'value.txt'), 'original source\n');
+  writeFileSync(path.join(root, '.gitignore'), '.ai-orchestrator/\n');
+  git(root, 'add', '.');
+  git(root, 'commit', '-m', 'Native fixture baseline');
+  git(root, 'worktree', 'add', '--detach', worktree, 'HEAD');
+  const index = inspectProjectSource(worktree);
+  assert.equal(readProjectSourcePage(index, { path: 'src/value.txt' }).text, 'original source\n');
+  const captured = captureSourceBundle(worktree, path.join(base, 'sources'));
+  const materialized = path.join(base, 'materialized');
+  assert.equal(materializeSourceBundle(captured.bundlePath, materialized).sourceHash, captured.manifest.sourceHash);
+  const restored = inspectProjectSource(materialized);
+  assert.equal(readProjectSourcePage(restored, { path: 'src/value.txt' }).text, 'original source\n');
+  writeFileSync(path.join(worktree, 'src', 'value.txt'), 'changed worktree\n');
+  assert.notEqual(inspectProjectSource(worktree).hash, index.hash);
+  assert.throws(() => readProjectSourcePage(index, { path: 'src/value.txt' }), { code: 'UNSAFE_PROJECT_SOURCE' });
+  assert.notEqual(captureSourceBundle(worktree, path.join(base, 'sources')).manifest.sourceHash, captured.manifest.sourceHash);
+  assert.equal(readFileSync(path.join(root, 'src', 'value.txt'), 'utf8'), 'original source\n');
+  assert.equal(readProjectSourcePage(restored, { path: 'src/value.txt' }).text, 'original source\n');
 });
