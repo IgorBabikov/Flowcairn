@@ -1,3 +1,4 @@
+import { hostSystemEnvironment } from './host-executables.mjs';
 import { spawnSync } from 'node:child_process';
 import { lstatSync, realpathSync } from 'node:fs';
 import path from 'node:path';
@@ -5,7 +6,7 @@ import path from 'node:path';
 const validPid = (pid) => Number.isSafeInteger(pid) && pid > 0 && pid <= 0xffffffff;
 const same = (a, b) => a && b && a.pid === b.pid && a.parentPid === b.parentPid && Number.isFinite(Date.parse(a.startedAt)) && path.win32.isAbsolute(a.executable) && a.startedAt === b.startedAt && a.executable.toLowerCase() === b.executable.toLowerCase();
 // No command line or credentials are collected. Keep this script constant.
-const PROCESS_SCRIPT = "$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false); $rows=@(Get-CimInstance Win32_Process | ForEach-Object { [pscustomobject]@{pid=[long]$_.ProcessId;parentPid=[long]$_.ParentProcessId;startedAt=if ($_.CreationDate) {$_.CreationDate.ToUniversalTime().ToString('o')} else {''};executable=[string]$_.ExecutablePath} }); ConvertTo-Json -InputObject $rows -Compress";
+const PROCESS_SCRIPT = "$ErrorActionPreference='Stop'; Import-Module ($PSHOME + '\\Modules\\CimCmdlets\\CimCmdlets.psd1') -ErrorAction Stop; Import-Module ($PSHOME + '\\Modules\\Microsoft.PowerShell.Utility\\Microsoft.PowerShell.Utility.psd1') -ErrorAction Stop; [Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false); $rows=@(Get-CimInstance Win32_Process | ForEach-Object { [pscustomobject]@{pid=[long]$_.ProcessId;parentPid=[long]$_.ParentProcessId;startedAt=if ($_.CreationDate) {$_.CreationDate.ToUniversalTime().ToString('o')} else {''};executable=[string]$_.ExecutablePath} }); ConvertTo-Json -InputObject $rows -Compress";
 
 function systemTool(name) {
   const root = process.env.SystemRoot;
@@ -17,11 +18,17 @@ function systemTool(name) {
 }
 
 export function listHostProcesses({ run = spawnSync, tool = systemTool } = {}) {
-  const result = run(tool('WindowsPowerShell/v1.0/powershell.exe'), ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(PROCESS_SCRIPT, 'utf16le').toString('base64')], {
+  const executable = tool('WindowsPowerShell/v1.0/powershell.exe');
+  const result = run(executable, ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(PROCESS_SCRIPT, 'utf16le').toString('base64')], {
     shell: false, windowsHide: true, encoding: 'utf8', timeout: 10000, maxBuffer: 4 * 1024 * 1024,
+    env: { ...hostSystemEnvironment(), PSModulePath: path.win32.join(path.win32.dirname(executable), 'Modules') },
   });
-  if (result.error || result.signal || result.status !== 0 || typeof result.stdout !== 'string') throw new Error('PROCESS_INSPECTION_FAILED');
-  const rows = JSON.parse(result.stdout.replace(/^\uFEFF/, ''));
+  if (result.error) throw new Error(/** @type {NodeJS.ErrnoException} */ (result.error).code === 'ETIMEDOUT' ? 'PROCESS_INSPECTION_TIMEOUT' : 'PROCESS_INSPECTION_SPAWN_FAILED');
+  if (result.signal || result.status !== 0) throw new Error('PROCESS_INSPECTION_EXIT_FAILED');
+  if (typeof result.stdout !== 'string') throw new Error('PROCESS_INSPECTION_OUTPUT_INVALID');
+  let rows;
+  try { rows = JSON.parse(result.stdout.replace(/^\uFEFF/, '')); }
+  catch { throw new Error('PROCESS_INSPECTION_OUTPUT_INVALID'); }
   if (!Array.isArray(rows) || rows.length > 50000) throw new Error('PROCESS_INSPECTION_FAILED');
   const seen = new Set();
   for (const row of rows) {

@@ -65,7 +65,7 @@ export function inspectOnboarding(root) {
     ],
     values: {
       provider: profile?.ai.provider ?? defaultProvider(), model: profile?.ai.model ?? '',
-      workspaceMode: profile?.workspaceMode ?? 'worktree',
+      workspaceMode: profile?.workspaceMode ?? 'direct',
       modelMode: profile?.ai.modelMode ?? 'manual', reasoningEffort: inherited?.reasoningEffort ?? profile?.ai.reasoningEffort ?? 'medium',
       ...(inherited ? { model: inherited.model } : {}),
       ...(profile?.ai.reviewModel ? { reviewModel: profile.ai.reviewModel } : {}),
@@ -79,7 +79,7 @@ export function inspectOnboarding(root) {
     limitations: [
       'Codex: модель и усиление считываются из конфигурации CLI. Настройки активного чата VS Code не считываются. Можно выбрать модель вручную в Flowcairn.',
       'Проверки запускают зарегистрированные scripts прямо в проекте с правами пользователя. Используйте доверенный код и зависимости.',
-      'Нужен Node.js 22 и официальный AI-клиент с собственной авторизацией. macOS/Linux; на Windows — WSL2. Native Windows пока не подтвержден.',
+      'Нужен Node.js 22 и официальный AI-клиент с собственной авторизацией. macOS, Linux и нативный Windows; Docker и WSL не требуются. На Windows используется системный .NET Framework compiler.',
       'Изменение настроек: закройте UI и выполните npx flowcairn setup. Старые планы сохранят прежний профиль и потребуют перепланирования.',
     ],
   };

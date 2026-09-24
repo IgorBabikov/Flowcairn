@@ -16,9 +16,11 @@ export function gitExecutable({ platform = process.platform, env = process.env }
   return 'git.exe';
 }
 
-export function hostSystemEnvironment() {
-  if (process.platform !== 'win32') return {};
-  return Object.fromEntries(['SystemRoot', 'WINDIR', 'ComSpec', 'PATHEXT', 'TEMP', 'TMP', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'PATH'].flatMap((name) => process.env[name] ? [[name, process.env[name]]] : []));
+export function hostSystemEnvironment({ platform = process.platform, env = process.env } = {}) {
+  if (platform !== 'win32') return {};
+  const names = ['SystemRoot', 'WINDIR', 'ComSpec', 'PATHEXT', 'TEMP', 'TMP', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'PATH', 'ProgramFiles', 'ProgramW6432', 'ProgramData', 'HOMEDRIVE', 'HOMEPATH', 'PUBLIC', 'ALLUSERSPROFILE'];
+  const normalized = new Map(Object.entries(env).map(([key, value]) => [key.toUpperCase(), value]));
+  return Object.fromEntries(names.flatMap((name) => normalized.get(name.toUpperCase()) ? [[name, normalized.get(name.toUpperCase())]] : []));
 }
 
 export const hostNullDevice = os.devNull;

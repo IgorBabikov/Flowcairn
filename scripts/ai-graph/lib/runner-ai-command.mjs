@@ -1,3 +1,4 @@
+import { hostSystemEnvironment } from './host-executables.mjs';
 import { inspectProjectSource, readProjectSourcePage } from './project-source-access.mjs';
 import { assertSafeText } from './source-policy.mjs';
 import { randomUUID } from 'node:crypto';
@@ -89,7 +90,7 @@ export function safeEnvironment(extra = {}) {
     LC_ALL: process.env.LC_ALL ?? 'C.UTF-8',
     NO_COLOR: '1',
     OPENSSL_CONF: os.devNull,
-    ...(process.platform === 'win32' ? Object.fromEntries(['SystemRoot','WINDIR','ComSpec','PATHEXT','TEMP','TMP','USERPROFILE','APPDATA','LOCALAPPDATA'].flatMap((name) => process.env[name] ? [[name.toUpperCase(), process.env[name]]] : [])) : {}),
+    ...(process.platform === 'win32' ? Object.fromEntries(Object.entries(hostSystemEnvironment()).filter(([name]) => name !== 'PATH').map(([name, value]) => [name.toUpperCase(), value])) : {}),
     ...extra,
   };
 }

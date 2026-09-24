@@ -609,7 +609,9 @@ function waitForControl(stream, expectedType, timeoutMs, {
           return;
         }
         if (value.type === 'supervisor-error') {
-          finish(reject, new GraphError('RUNNER_SUPERVISOR_ERROR', value.reason));
+          const inspectionFailures = new Set(['WINDOWS_SYSTEM_ROOT', 'WINDOWS_SYSTEM_TOOL', 'PROCESS_IDENTITY_UNKNOWN', 'PROCESS_INSPECTION_FAILED', 'PROCESS_INSPECTION_TIMEOUT', 'PROCESS_INSPECTION_SPAWN_FAILED', 'PROCESS_INSPECTION_EXIT_FAILED', 'PROCESS_INSPECTION_OUTPUT_INVALID']);
+          const reason = inspectionFailures.has(value.reason) ? value.reason : 'RUNNER_SUPERVISOR_ERROR';
+          finish(reject, new GraphError(reason, 'Supervisor не прошел проверку запуска.'));
           return;
         }
       }
