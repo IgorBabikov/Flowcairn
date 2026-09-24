@@ -1,3 +1,4 @@
+import { realpathHostSync, sameHostPath } from './host-filesystem.mjs';
 import { lstatHostSync as lstatSync, fstatHostSync as fstatSync } from './host-filesystem.mjs';
 import { gitExecutable, gitNullDevice } from './host-executables.mjs';
 import { spawnSync } from 'node:child_process';
@@ -200,7 +201,7 @@ function repositoryRoot(worktree) {
   const requested = realpathSync(requestedPath);
   const result = runGit(requested, ['rev-parse', '--show-toplevel']);
   const top = result.stdout.toString('utf8').trim();
-  if (!top || realpathSync(top) !== requested) {
+  if (!top || !sameHostPath(realpathHostSync(top), realpathHostSync(requested))) {
     fail('NOT_REPOSITORY_ROOT', 'Worktree должен быть корнем Git repository');
   }
   return { root: requested, identity: statIdentity(requestedStat) };

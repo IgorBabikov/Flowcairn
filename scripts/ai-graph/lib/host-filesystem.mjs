@@ -1,4 +1,4 @@
-import { constants, openSync, fsyncSync, closeSync, Stats, lstatSync as nativeLstatSync, statSync as nativeStatSync, fstatSync as nativeFstatSync } from 'node:fs';
+import { constants, openSync, fsyncSync, closeSync, Stats, lstatSync as nativeLstatSync, statSync as nativeStatSync, fstatSync as nativeFstatSync, realpathSync as nativeRealpathSync } from 'node:fs';
 import path from 'node:path';
 
 /** Windows stat mode bits do not describe NTFS ACLs. On Windows callers rely on
@@ -38,6 +38,13 @@ function comparable(value, platform) {
     normalized = normalized.toLowerCase();
   }
   return normalized;
+}
+
+/** Existing-path canonicalization via the native Windows handle API expands
+ * 8.3 aliases as well as junctions. Keep it explicit: lexical alias guards must
+ * not accidentally begin treating a symlink as its destination. */
+export function realpathHostSync(value) {
+  return process.platform === 'win32' ? nativeRealpathSync.native(value) : nativeRealpathSync(value);
 }
 
 export function sameHostPath(left, right, platform = process.platform) {

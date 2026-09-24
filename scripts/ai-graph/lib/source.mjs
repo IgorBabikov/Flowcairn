@@ -1,6 +1,6 @@
 import { lstatHostSync as lstatSync, fstatHostSync as fstatSync } from './host-filesystem.mjs';
 import { gitExecutable, gitNullDevice, hostSystemEnvironment } from './host-executables.mjs';
-import { isPrivateMode, sameHostPath, isPathWithin } from './host-filesystem.mjs';
+import { isPrivateMode, sameHostPath, isPathWithin, realpathHostSync } from './host-filesystem.mjs';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import {
@@ -187,7 +187,7 @@ function runGit(
 function repositoryRoot(root) {
   const requested = realpathSync(root);
   const top = runGit(requested, ['rev-parse', '--show-toplevel']).stdout.toString('utf8').trim();
-  if (!sameHostPath(realpathSync(top), requested)) {
+  if (!sameHostPath(realpathHostSync(top), realpathHostSync(requested))) {
     fail('NOT_REPOSITORY_ROOT', '--root должен быть корнем Git');
   }
   return requested;

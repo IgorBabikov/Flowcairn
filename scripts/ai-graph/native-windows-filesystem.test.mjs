@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, realpathSync, rmSync, linkSync, renameSync, symlinkSync, lstatSync, fstatSync, openSync, closeSync, chmodSync, readdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { isPrivateMode, isTrustedMode, assertPrivateMode, sameHostPath, isPathWithin, noFollowReadFlags, fsyncParentDirectory, canonicalStatDevice, crossStatIdentity, lstatHostSync, fstatHostSync, HOST_FILESYSTEM_TESTING } from './lib/host-filesystem.mjs';
+import { isPrivateMode, isTrustedMode, assertPrivateMode, sameHostPath, isPathWithin, noFollowReadFlags, fsyncParentDirectory, canonicalStatDevice, crossStatIdentity, lstatHostSync, fstatHostSync, HOST_FILESYSTEM_TESTING, realpathHostSync } from './lib/host-filesystem.mjs';
 import { gitExecutable, gitNullDevice, hostSystemEnvironment } from './lib/host-executables.mjs';
 import { captureSourceBundle, materializeSourceBundle } from './lib/source.mjs';
 import { inspectProjectSource, readProjectSourcePage } from './lib/project-source-access.mjs';
@@ -175,6 +175,12 @@ test('native Git worktree capture/materialization and live pages retain source f
   git(root, 'update-index', '--chmod=+x', 'src/run.sh');
   git(root, 'commit', '-m', 'Native fixture baseline');
   git(root, 'worktree', 'add', '--detach', worktree, 'HEAD');
+  const reportedRoot = git(worktree, 'rev-parse', '--show-toplevel').trim();
+  if (process.platform === 'win32') t.diagnostic(JSON.stringify({
+    fixtureRequested: worktree, fixtureGitReported: reportedRoot,
+    fixtureNativeRequested: realpathHostSync(worktree), fixtureNativeReported: realpathHostSync(reportedRoot),
+  }));
+  assert.equal(sameHostPath(realpathHostSync(worktree), realpathHostSync(reportedRoot)), true);
   const index = inspectProjectSource(worktree);
   assert.equal(readProjectSourcePage(index, { path: 'src/value.txt' }).text, 'original source\n');
   const captured = captureSourceBundle(worktree, path.join(base, 'sources'));
@@ -192,4 +198,30 @@ test('native Git worktree capture/materialization and live pages retain source f
   assert.notEqual(captureSourceBundle(worktree, path.join(base, 'sources')).manifest.sourceHash, captured.manifest.sourceHash);
   assert.equal(readFileSync(path.join(root, 'src', 'value.txt'), 'utf8'), 'original source\n');
   assert.equal(readProjectSourcePage(restored, { path: 'src/value.txt' }).text, 'original source\n');
+});
+
+
+test('explicit existing-path canonicalization preserves lexical alias rejection', (t) => {
+  const root = fixture(t), target = path.join(root, 'target'), alias = path.join(root, 'alias');
+  mkdirSync(target);
+  symlinkSync(target, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  assert.equal(sameHostPath(target, alias), false);
+  assert.equal(sameHostPath(realpathHostSync(target), realpathHostSync(alias)), true);
+  assert.throws(() => realpathHostSync(path.join(root, 'missing')));
+  assert.equal(isPathWithin(root, path.join(root, 'missing')), true);
+});
+
+test('native Windows existing 8.3 alias resolves to the same exact directory', { skip: process.platform !== 'win32' }, (t) => {
+  const root = fixture(t);
+  const command = path.join(process.env.SystemRoot, 'System32', 'cmd.exe');
+  const short = execFileSync(command, ['/d', '/s', '/c', 'for %I in ("%FLOWCAIRN_SHORT_PATH_FIXTURE%") do @echo %~sI'], {
+    encoding: 'utf8', timeout: 10000, shell: false,
+    env: { ...hostSystemEnvironment(), FLOWCAIRN_SHORT_PATH_FIXTURE: root },
+  }).trim();
+  if (!short.includes('~')) { t.skip('This fixture volume does not expose an 8.3 alias'); return; }
+  assert.equal(sameHostPath(realpathHostSync(short), realpathHostSync(root)), true);
+  const sibling = `${root}-sibling`;
+  mkdirSync(sibling);
+  try { assert.equal(sameHostPath(realpathHostSync(short), realpathHostSync(sibling)), false); }
+  finally { rmSync(sibling, { recursive: true, force: true }); }
 });
