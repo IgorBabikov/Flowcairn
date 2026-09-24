@@ -213,15 +213,15 @@ test('explicit existing-path canonicalization preserves lexical alias rejection'
 
 test('native Windows existing 8.3 alias resolves to the same exact directory', { skip: process.platform !== 'win32' }, (t) => {
   const root = fixture(t);
-  const command = path.join(process.env.SystemRoot, 'System32', 'cmd.exe');
-  const short = execFileSync(command, ['/d', '/s', '/c', 'for %I in ("%FLOWCAIRN_SHORT_PATH_FIXTURE%") do @echo %~sI'], {
-    encoding: 'utf8', timeout: 10000, shell: false,
-    env: { ...hostSystemEnvironment(), FLOWCAIRN_SHORT_PATH_FIXTURE: root },
-  }).trim();
-  if (!short.includes('~')) { t.skip('This fixture volume does not expose an 8.3 alias'); return; }
-  assert.equal(sameHostPath(realpathHostSync(short), realpathHostSync(root)), true);
+  // Windows TEMP can use an existing 8.3 ancestor (e.g. RUNNER~1 in CI).
+  // Use that actual alias directly, without shell quoting or creating aliases.
+  const canonical = realpathHostSync(root);
+  if (!root.includes('~') || sameHostPath(root, canonical)) {
+    t.skip('This temporary directory does not expose an 8.3 alias'); return;
+  }
+  assert.equal(sameHostPath(realpathHostSync(root), realpathHostSync(canonical)), true);
   const sibling = `${root}-sibling`;
   mkdirSync(sibling);
-  try { assert.equal(sameHostPath(realpathHostSync(short), realpathHostSync(sibling)), false); }
+  try { assert.equal(sameHostPath(realpathHostSync(root), realpathHostSync(sibling)), false); }
   finally { rmSync(sibling, { recursive: true, force: true }); }
 });
