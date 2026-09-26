@@ -220,17 +220,18 @@ export function makeAiCommand({
     let effectiveEffort;
     {
       const firstConfig = args.indexOf('--config');
-      args.splice(firstConfig, 0, '--model', effectiveModel);
+      if (effectiveModel !== 'provider-default') args.splice(firstConfig, 0, '--model', effectiveModel);
       const adaptiveEffort = Reflect.get(profile.ai, 'modelMode') === 'auto' && plan.taskContract
         ? plan.taskContract.rigor.level === 'high' ? 'high' : plan.taskContract.rigor.level === 'light' && node.action.id !== 'ai-review' ? 'low' : 'medium'
         : null;
-      const effort = inherited?.reasoningEffort ?? adaptiveEffort ?? (Reflect.get(profile.ai, 'modelMode') === 'manual'
-        ? (Reflect.get(profile.ai, 'reasoningEffort') ?? 'medium')
-        : node.action.id === 'ai-review'
-          ? (Reflect.get(profile.ai, 'reviewReasoningEffort') ?? Reflect.get(profile.ai, 'reasoningEffort') ?? 'high')
-          : (Reflect.get(profile.ai, 'reasoningEffort') ?? 'medium'));
-      effectiveEffort = effort;
-      args.splice(firstConfig + 4, 0, '--config', `model_reasoning_effort="${effort}"`);
+      const effort = providerManaged ? inherited.reasoningEffort : adaptiveEffort ?? (
+        Reflect.get(profile.ai, 'modelMode') === 'manual'
+            ? (Reflect.get(profile.ai, 'reasoningEffort') ?? 'medium')
+            : node.action.id === 'ai-review'
+              ? (Reflect.get(profile.ai, 'reviewReasoningEffort') ?? Reflect.get(profile.ai, 'reasoningEffort') ?? 'high')
+              : (Reflect.get(profile.ai, 'reasoningEffort') ?? 'medium'));
+      effectiveEffort = effort ?? 'provider-default';
+      if (effort) args.splice(args.indexOf('--config'), 0, '--config', `model_reasoning_effort="${effort}"`);
     }
     const skillInstructions = renderSkillInstructions(skills);
     const preparedPrompt = fitPromptBudget({ task, node, priorEvidence, render: (selectedEvidence) => buildPrompt({

@@ -15,7 +15,7 @@ test('native Windows supports Node22 while WSL requires its own Linux filesystem
   assert.throws(() => assertProjectPlatform('\\\\server\\share', { platform: 'win32' }), { code: 'WINDOWS_FILESYSTEM' });
   assert.throws(() => assertRuntimePlatform({ platform: 'linux', node: '24.0.0' }), { code: 'NODE_VERSION' });
   for (const platform of ['linux', 'darwin']) assertRuntimePlatform({ platform, node: '22.13.1' });
-  assert.equal(defaultProvider('linux'), 'claude');
+  assert.equal(defaultProvider('linux'), 'codex');
   assert.equal(defaultProvider('darwin'), 'codex');
   assert.equal(defaultProvider('win32'), 'codex');
   const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'flowcairn-platform-')));

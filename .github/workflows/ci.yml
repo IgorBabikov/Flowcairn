@@ -26,6 +26,8 @@ jobs:
           cache: npm
       - name: Зависимости без lifecycle scripts
         run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Подготовка закрепленного нативного Claude CLI
+        run: node node_modules/@anthropic-ai/claude-code/install.cjs
       - name: Типы
         run: npm run typecheck
       - name: Lint
@@ -60,6 +62,8 @@ jobs:
           cache: npm
       - name: Зависимости без lifecycle scripts
         run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Подготовка закрепленного нативного Claude CLI
+        run: node node_modules/@anthropic-ai/claude-code/install.cjs
       - name: Типы
         run: npm run typecheck
       - name: Lint
