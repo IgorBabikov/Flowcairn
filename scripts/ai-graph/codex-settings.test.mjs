@@ -11,8 +11,21 @@ test('CLI settings reader returns only safe model defaults', t => {
   const file = path.join(root, 'config.toml');
   writeFileSync(file, 'model="gpt-5.6-sol"\nmodel_reasoning_effort="high"\nnotify=["do-not-run"]\ntoken="do-not-return"\n[hooks]\ncommand="do-not-load"\n');
   assert.deepEqual(codexModelSettings(file), { model: 'gpt-5.6-sol', reasoningEffort: 'high', source: 'codex-cli-user-config' });
-  for (const contents of ['model="x"', 'model="sk-private"\nmodel_reasoning_effort="high"', 'model="x"\nmodel_reasoning_effort="invented"', 'bad="do-not-return']) {
+  for (const contents of ['model="sk-private"\nmodel_reasoning_effort="high"', 'model="x"\nmodel_reasoning_effort="invented"', 'bad="do-not-return']) {
     writeFileSync(file, contents);
     assert.throws(() => codexModelSettings(file), error => error.code === 'CODEX_MODEL_SETTINGS_REQUIRED' && !error.message.includes('do-not-return'));
   }
+});
+
+test('missing and partial model preferences use defaults without dropping explicit choices', t => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'flowcairn-model-defaults-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const file = path.join(root, 'config.toml');
+  assert.deepEqual(codexModelSettings(file), { model: 'provider-default', reasoningEffort: null, source: 'codex-cli-default' });
+  writeFileSync(file, 'model="chosen-model"\n');
+  assert.equal(codexModelSettings(file).model, 'chosen-model');
+  assert.equal(codexModelSettings(file).reasoningEffort, null);
+  writeFileSync(file, 'model_reasoning_effort="max"\n');
+  assert.equal(codexModelSettings(file).model, 'provider-default');
+  assert.equal(codexModelSettings(file).reasoningEffort, 'max');
 });

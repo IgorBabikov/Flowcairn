@@ -11,7 +11,7 @@ import { WorkflowService, sanitizeText } from '../scripts/ai-graph/lib/service.m
 import { runCli } from '../scripts/ai-graph/cli.mjs';
 import { probeRunner, probeLocalChecks } from '../scripts/ai-graph/lib/runner.mjs';
 import { startViewer } from '../tools/ai-graph-viewer/server.mjs';
-import { assertRuntimePlatform } from '../scripts/ai-graph/lib/platform.mjs';
+import { assertRuntimePlatform, defaultProvider } from '../scripts/ai-graph/lib/platform.mjs';
 import { openBrowser } from './browser.mjs';
 import { checkUpdate } from './update.mjs';
 import { printCard, printReady } from './terminal.mjs';
@@ -19,6 +19,7 @@ import { instructionsCommand } from './instructions.mjs';
 import { uninstallCommand } from './uninstall.mjs';
 import { selectProjectSkills } from './skills-selection.mjs';
 import { createTask } from '../scripts/ai-graph/lib/task-registration.mjs';
+import { ensureManagedRuntime } from '../scripts/ai-graph/lib/managed-runtime.mjs';
 import { inspectHarnesses } from '../scripts/ai-graph/lib/harnesses.mjs';
 import { collectOnboarding, inspectOnboarding, migrateLegacyCheckMode, onboardingInput, saveOnboarding } from './onboarding.mjs';
 import { initializeProject, assertProviderPlatform } from './installation.mjs';
@@ -132,6 +133,8 @@ export async function setupCommand(input, options = {}, terminal = {}) {
     'workspace-mode':current.values.workspaceMode,
     ...(current.values.providerPath ? {'provider-path':current.values.providerPath} : {}),
     ...(current.values.providerVersion ? {'provider-version':current.values.providerVersion} : {}),
+    ...(current.values.providerManaged ? {'provider-managed':true} : {}),
+    ...(current.values.codexPath ? {'codex-path':current.values.codexPath} : {}),
     'test-policy':current.values.testPolicy, coverage:current.values.coverage,
     ...selected,
   };
@@ -271,6 +274,12 @@ export async function main(tokens = process.argv.slice(2)) {
   const instructionsAction = command === 'instructions' ? tokens.shift() : undefined;
   const options = parseOptions(tokens),
     root = options.root ?? process.cwd();
+  if (command === 'ui' && !options.help && !options['dry-run']) {
+    let provider = options.provider ?? defaultProvider();
+    let configured = false;
+    try { const ai = loadProjectProfile(projectRoot(root)).ai; provider = ai.provider; configured = provider === 'codex' ? !ai.codexPath : ai.providerManaged === true; } catch { /* New project uses the platform default. */ }
+    if (provider === 'codex' || provider === 'claude') await ensureManagedRuntime(provider, { autoUpdate: configured });
+  }
   if (options.help) {
     process.stdout.write(HELP);
     return;

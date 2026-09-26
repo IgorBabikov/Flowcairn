@@ -11,6 +11,7 @@ import {
 } from '../scripts/ai-graph/lib/project.mjs';
 import { inspectCodexInstallation } from '../scripts/ai-graph/lib/runner.mjs';
 import { codexModelSettings } from '../scripts/ai-graph/lib/codex-settings.mjs';
+import { requireCodexReady } from './codex-setup.mjs';
 import { defaultProvider } from '../scripts/ai-graph/lib/platform.mjs';
 import { probeExternalProvider } from '../scripts/ai-graph/lib/providers.mjs';
 import { discoverWorkspaceManifests } from './workspaces.mjs';
@@ -113,8 +114,10 @@ export function initializeProject(input, options = {}) {
   const selectedProvider = options.provider ?? defaultProvider();
   if (!existingProfile && ['claude', 'cursor'].includes(selectedProvider)) {
     const probe = probeExternalProvider(selectedProvider, { executable: options['provider-path'] });
-    if (!probe.available) fail('PROVIDER_TOOLCHAIN_INVALID', 'Claude Code/Cursor не найден или не прошел безопасную проверку версии.');
-    options = { ...options, model: 'provider-default', 'model-mode': 'provider', 'provider-path': probe.executable, 'provider-version': probe.version };
+    if (!probe.available) fail(probe.reason === 'PROVIDER_AUTH_REQUIRED' ? 'PROVIDER_AUTH_REQUIRED' : 'PROVIDER_TOOLCHAIN_INVALID', probe.reason === 'PROVIDER_AUTH_REQUIRED'
+      ? `${selectedProvider === 'claude' ? 'Claude Code' : 'Cursor'} не авторизован. Запустите интерактивный npx flowcairn для входа.`
+      : 'Claude Code/Cursor не найден или не прошел безопасную проверку версии.');
+    options = { ...options, model: 'provider-default', 'model-mode': 'provider', 'provider-path': probe.executable, 'provider-version': probe.version, ...(probe.managed ? { 'provider-managed': true } : {}) };
   }
   if (existingProfile && options.skills !== undefined &&
       JSON.stringify([...new Set(csv(options.skills))].sort()) !== JSON.stringify((existingProfile.skillManifest ?? []).map((entry) => entry.id.slice('project-'.length)).sort()))
@@ -147,14 +150,9 @@ export function initializeProject(input, options = {}) {
   if (!existingProfile && selectedProvider === 'codex') {
     if (!options.model)
       options = { ...options, model: 'provider-default', 'model-mode': 'provider' };
-    if (options['model-mode'] === 'provider' || options.model === 'provider-default') codexModelSettings();
     const cli = inspectCodexInstallation({ codexPath: options['codex-path'] });
-    if (!cli.available) {
-      const message = cli.reason === 'RUNNER_TOOLCHAIN_CAPABILITY'
-        ? 'Codex CLI не поддерживает обязательные параметры безопасного запуска. Обновите Codex CLI или Flowcairn. Настройка не сохранена.'
-        : 'Codex CLI не прошел проверку или не авторизован. Укажите безопасную npm-установку @openai/codex или выполните codex login. Настройка не сохранена.';
-      fail('RUNNER_TOOLCHAIN_INVALID', message);
-    }
+    requireCodexReady(cli);
+    if (options['model-mode'] === 'provider' || options.model === 'provider-default') codexModelSettings();
   }
   if (!existingProfile && !options.model)
     fail(
@@ -243,6 +241,7 @@ export function initializeProject(input, options = {}) {
         model: options.model,
         ...(options['provider-path'] ? { providerPath: path.resolve(options['provider-path']) } : {}),
         ...(options['provider-version'] ? { providerVersion: options['provider-version'] } : {}),
+        ...(options['provider-managed'] === true ? { providerManaged: true } : {}),
         ...(options['review-model'] ? { reviewModel: options['review-model'] } : {}),
         ...(options['codex-path'] ? { codexPath: path.resolve(options['codex-path']) } : {}),
       },

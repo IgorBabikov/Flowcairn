@@ -2,7 +2,7 @@ import path from 'node:path';
 import { GraphError } from './io.mjs';
 
 export function providerEnvironment(env = process.env, platform = process.platform) {
-  const result = { PATH: platform === 'win32' ? (env.PATH ?? env.Path ?? '') : '/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin', NO_COLOR: '1', LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' };
+  const result = { PATH: platform === 'win32' ? (env.PATH ?? env.Path ?? '') : '/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin', DISABLE_AUTOUPDATER: '1', NO_COLOR: '1', LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' };
   const names = ['HOME', 'CLAUDE_CONFIG_DIR', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_STATE_HOME'];
   if (platform === 'win32') names.push('SystemRoot', 'WINDIR', 'ComSpec', 'PATHEXT', 'TEMP', 'TMP', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA');
   for (const name of names) {

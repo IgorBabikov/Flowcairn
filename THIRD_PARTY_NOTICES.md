@@ -1,15 +1,17 @@
 # Компоненты и лицензии
 
-Flowcairn распространяется по [MIT](LICENSE). Ниже сохранены полные тексты лицензий зависимостей с их исходными copyright notices. Тексты оставлены на языке оригинала.
+Flowcairn распространяется по [MIT](LICENSE). Ниже указаны лицензии и notices зависимостей; для компонентов с отдельными условиями приведена ссылка на upstream terms. Тексты оставлены на языке оригинала.
 
 ## Состав
 
 Состав соответствует текущим `package.json`, `package-lock.json` и production entrypoints интерфейса. Runtime-зависимости проверяются через `npm ls --omit=dev --all`, браузерные компоненты — через `inputs` esbuild metafile.
 
-Включены **4 runtime-зависимости, 17 компонентов браузерного bundle и шрифт Manrope**. Runtime-пакеты устанавливает менеджер пакетов; браузерные компоненты и шрифт входят в собранный интерфейс. Инструменты разработки вне распространяемого bundle здесь не перечисляются. Каталог `node_modules` в пакет Flowcairn не копируется.
+Включены **6 runtime-зависимостей, 17 компонентов браузерного bundle и шрифт Manrope**. Runtime-пакеты устанавливает менеджер пакетов; браузерные компоненты и шрифт входят в собранный интерфейс. Инструменты разработки вне распространяемого bundle здесь не перечисляются. Каталог `node_modules` в пакет Flowcairn не копируется.
 
 | Компонент | Версия | Использование | Лицензия |
 | --- | --- | --- | --- |
+| `@openai/codex` | 0.156.1 | Поставляемый AI CLI | Apache-2.0 |
+| `@anthropic-ai/claude-code` | 2.1.198 | Поставляемый AI CLI | SEE LICENSE IN README.md |
 | `@xyflow/react` | 12.11.6 | Браузерный bundle | MIT |
 | `@xyflow/system` | 0.0.82 | Браузерный bundle | MIT |
 | `classcat` | 5.0.5 | Браузерный bundle | MIT |
@@ -549,4 +551,22 @@ SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
 CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+## @openai/codex 0.156.1
+
+Лицензия: Apache-2.0. Источник: [репозиторий Codex CLI](https://github.com/openai/codex/tree/main/codex-cli).
+
+```text
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
 ```

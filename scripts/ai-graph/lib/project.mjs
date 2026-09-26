@@ -140,6 +140,7 @@ export const ProjectProfileSchema = z.strictObject({
       .refine((value) => path.isAbsolute(value) && !/[\0\r\n]/.test(value))
       .optional(),
     providerVersion: z.string().min(1).max(160).regex(/^[a-zA-Z0-9][a-zA-Z0-9._ ()-]*$/).optional(),
+    providerManaged: z.boolean().optional(),
     baseUrl: z
       .url()
       .refine((value) => {

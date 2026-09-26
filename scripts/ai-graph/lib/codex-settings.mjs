@@ -18,10 +18,11 @@ export function codexModelSettings(configPath = path.join(process.env.CODEX_HOME
     const config = parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
     const model = config.model;
     const reasoningEffort = config.model_reasoning_effort;
-    if (typeof model !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,159}$/.test(model) || /^(sk-|sess-)/i.test(model) ||
-        typeof reasoningEffort !== 'string' || !['low', 'medium', 'high', 'xhigh'].includes(reasoningEffort)) throw new Error('missing defaults');
-    return { model, reasoningEffort, source: 'codex-cli-user-config' };
-  } catch {
+    if (model !== undefined && (typeof model !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,159}$/.test(model) || /^(sk-|sess-)/i.test(model))) throw new Error('invalid model');
+    if (reasoningEffort !== undefined && (typeof reasoningEffort !== 'string' || !['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'].includes(reasoningEffort))) throw new Error('invalid effort');
+    return { model: model ?? 'provider-default', reasoningEffort: reasoningEffort ?? null, source: 'codex-cli-user-config' };
+  } catch (error) {
+    if (error.code === 'ENOENT') return { model: 'provider-default', reasoningEffort: null, source: 'codex-cli-default' };
     throw new GraphError('CODEX_MODEL_SETTINGS_REQUIRED', 'Укажите модель и усиление в настройках flowcairn либо задайте model и model_reasoning_effort в конфигурации Codex CLI. Выбор активного чата VS Code автоматически не считывается.');
   } finally { if (fd !== undefined) closeSync(fd); }
 }

@@ -1,10 +1,12 @@
 import { spawnSync } from 'node:child_process';
 import { lstatSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import { z } from 'zod';
 import { GraphError, hashObject } from './io.mjs';
 import { providerEnvironment, providerCandidates, assertProviderExecutablePlatform } from './provider-process-platform.mjs';
 import { EXTERNAL_PROVIDER_CONSENT } from './harnesses.mjs';
+import { managedProviderExecutable } from './managed-runtime.mjs';
 
 const Provider = z.enum(['claude', 'cursor']);
 const Version = z.string().min(1).max(160).regex(/^[a-zA-Z0-9][a-zA-Z0-9._ ()-]*$/);
@@ -17,6 +19,13 @@ export const ExternalConsentSchema = z.strictObject({
   cliPath: z.string().min(1).max(1024), cliVersion: Version, createdAt: z.iso.datetime(),
 });
 const safeEnv = providerEnvironment();
+const require = createRequire(import.meta.url);
+
+function bundledProviderExecutable(provider) {
+  if (provider !== 'claude') return null;
+  try { return require.resolve('@anthropic-ai/claude-code/bin/claude.exe'); }
+  catch { return null; }
+}
 function verifiedClaudePackage(executable) {
   const marker = `${path.sep}node_modules${path.sep}@anthropic-ai${path.sep}claude-code${path.sep}bin${path.sep}claude.exe`;
   if (!executable.endsWith(marker)) return null;
@@ -73,7 +82,9 @@ function hasExternalAuthentication(provider, executable, env) {
 export function probeExternalProvider(provider, { executable, env = process.env } = {}) {
   const parsed = Provider.parse(provider);
   if (executable && process.platform === 'win32' && !/\.exe$/i.test(executable)) return { available: false, reason: 'PROVIDER_NATIVE_EXECUTABLE_REQUIRED' };
-  const candidates = executable ? [executable] : providerCandidates(parsed, env);
+  const bundled = executable ? null : bundledProviderExecutable(parsed);
+  const managed = executable ? null : managedProviderExecutable(parsed);
+  const candidates = executable ? [executable] : [...(managed ? [managed] : []), ...(bundled ? [bundled] : []), ...providerCandidates(parsed, env)];
   let reason = 'PROVIDER_CLI_UNAVAILABLE_OR_UNSAFE';
   for (const candidate of candidates) {
     const resolved = safeProviderExecutable(candidate, parsed);
@@ -83,7 +94,7 @@ export function probeExternalProvider(provider, { executable, env = process.env 
       if (parsed === 'claude' && (!packageVersion || !version.startsWith(packageVersion) || !supportsClaudeSafeVersion(packageVersion))) continue;
       if (parsed === 'cursor') supportsCursorSafeExecution(resolved);
       if (!hasExternalAuthentication(parsed, resolved, env)) { reason = 'PROVIDER_AUTH_REQUIRED'; continue; }
-      return { available: true, executable: resolved, version };
+      return { available: true, executable: resolved, version, managed: managed === candidate || bundled === candidate };
     } catch { /* try next candidate */ }
   }
   return { available: false, reason };
@@ -92,9 +103,10 @@ export function providerToolchain(ai) {
   const provider = Provider.safeParse(ai.provider);
   if (!provider.success) return null;
   if (!ai.providerPath || !ai.providerVersion) throw new GraphError('PROVIDER_PIN_REQUIRED', 'Для Claude Code/Cursor нужны сохраненные путь и точная версия CLI. Повторите setup.');
-  const probe = probeExternalProvider(provider.data, { executable: ai.providerPath });
+  const managed = provider.data === 'claude' && ai.providerManaged === true;
+  const probe = probeExternalProvider(provider.data, { executable: managed ? managedProviderExecutable('claude') : ai.providerPath });
   if (!probe.available) throw new GraphError('PROVIDER_TOOLCHAIN_INVALID', 'Выбранный CLI недоступен или небезопасен.');
-  if (probe.version !== ai.providerVersion) throw new GraphError('PROVIDER_VERSION_DRIFT', 'Версия CLI изменилась. Подтвердите новую версию через flowcairn setup до передачи кода.');
+  if (!managed && probe.version !== ai.providerVersion) throw new GraphError('PROVIDER_VERSION_DRIFT', 'Версия CLI изменилась. Подтвердите новую версию через flowcairn setup до передачи кода.');
   return Object.freeze({ provider: provider.data, executable: probe.executable, version: probe.version, digest: hashObject({ provider: provider.data, executable: probe.executable, version: probe.version }) });
 }
 export function makeExternalConsent({ provider, planHash, scopeHash, instructionsHash, skillsHash, artifactsHash, toolchain }) {

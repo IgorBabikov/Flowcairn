@@ -120,7 +120,7 @@ test('Codex init без ID модели сохраняет выбор из са�
   assert.equal(result.profile.ai.modelMode, 'provider');
 });
 
-test('неинтерактивный Codex init проверяет модель и отдельную авторизацию до записи профиля', async t => {
+test('неинтерактивный Codex init проверяет отдельную авторизацию до записи профиля', async t => {
   if (!requireVerifiedCodex(t)) return;
   const configHome = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'flowcairn-codex-config-')));
   const previousConfigHome = process.env.CODEX_HOME;
@@ -132,12 +132,12 @@ test('неинтерактивный Codex init проверяет модель 
   process.env.CODEX_HOME = configHome;
   writeFileSync(path.join(configHome, 'config.toml'), 'model = "gpt-5.6-sol"\nmodel_reasoning_effort = "high"\n');
   const unauthenticatedHome = fixture(t);
-  assert.throws(() => initializeProject(unauthenticatedHome, {provider:'codex'}), {code:'RUNNER_TOOLCHAIN_INVALID'});
+  assert.throws(() => initializeProject(unauthenticatedHome, {provider:'codex'}), {code:'CODEX_AUTH_REQUIRED'});
   assert.equal(existsSync(path.join(unauthenticatedHome,'.flowcairn.json')), false);
 
   writeFileSync(path.join(configHome, 'config.toml'), 'model = "gpt-5.6-sol"\n');
   const blocked = fixture(t);
-  assert.throws(() => initializeProject(blocked, {provider:'codex'}), {code:'CODEX_MODEL_SETTINGS_REQUIRED'});
+  assert.throws(() => initializeProject(blocked, {provider:'codex'}), {code:'CODEX_AUTH_REQUIRED'});
   assert.equal(existsSync(path.join(blocked,'.flowcairn.json')), false);
   assert.equal(existsSync(path.join(blocked,'.ai-orchestrator')), false);
 
@@ -145,6 +145,22 @@ test('неинтерактивный Codex init проверяет модель 
   const unavailable = fixture(t);
   assert.throws(() => initializeProject(unavailable, {provider:'codex','codex-path':path.join(unavailable,'missing-codex')}), {code:'RUNNER_TOOLCHAIN_INVALID'});
   assert.equal(existsSync(path.join(unavailable,'.flowcairn.json')), false);
+});
+
+test('интерактивный onboarding предлагает вход в Codex и не запускает его молча', async () => {
+  const { prepareCodex } = await import('../bin/codex-setup.mjs');
+  let probes = 0;
+  let logins = 0;
+  const output = { write: (value) => { assert.match(value, /Codex установлен/); } };
+  const ready = await prepareCodex({}, {
+    output,
+    ask: async () => 'да',
+    probe: () => (++probes === 1 ? { available: false, reason: 'CODEX_AUTH_REQUIRED' } : { available: true, reason: null, version: 'fixture' }),
+    login: async () => { logins += 1; },
+  });
+  assert.equal(ready.available, true);
+  assert.equal(probes, 2);
+  assert.equal(logins, 1);
 });
 
 test('итог первого запуска говорит о следующем шаге без технической сводки', () => {
@@ -201,7 +217,7 @@ test('Claude и Cursor доступны только после local capability
     const provider = status.providers.find((item) => item.id === id);
     assert.equal(provider.supported, false);
     assert.notEqual(provider.state, 'available');
-    assert.match(provider.reason, /не найден|безопасную проверку/i);
+    assert.match(provider.reason, /не найден|безопасную проверку|войдите/i);
   }
 });
 

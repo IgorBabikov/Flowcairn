@@ -15,6 +15,7 @@ import {
 } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { GraphError, canonicalJson, sha256 } from './io.mjs';
 import { MAX_CONTROL_BYTES, MAX_CONTROL_INPUT_BYTES, validCommand } from './supervisor-control.mjs';
@@ -37,6 +38,7 @@ import { verifyToolchain } from './toolchain.mjs';
 import { hasTrustedLocalChecksBinding, loadProjectProfile, resolveProjectCheckScript, RUNTIME_ROOT } from './project.mjs';
 import { providerToolchain } from './providers.mjs';
 import { codexModelSettings } from './codex-settings.mjs';
+import { managedProviderExecutable } from './managed-runtime.mjs';
 import { buildProjectInstructionContext } from './project-instruction-context.mjs';
 import { EXTERNAL_WORKER_FILE, MAX_AI_PROCESS_OUTPUT, assertNoSymlinkAncestors, safeEnvironment, aiEnvironment, createExclusiveFile, makeAiCommand, makeExternalCommand, instructionDenials, selectedSourceContext, cleanupPrepared, aiResponseSchema } from './runner-ai-command.mjs';
 
@@ -53,6 +55,7 @@ const MAX_TOOLCHAIN_FILE_BYTES = 512 * 1024 * 1024;
 const SUPERVISOR_READY_TIMEOUT_MS = 30_000;
 const STOP_GRACE_MS = process.platform === 'win32' ? 20_000 : 3_000;
 const windowsSupervisors = new Map();
+const require = createRequire(import.meta.url);
 
 function fail(code, message, details) {
   throw new GraphError(code, message, details);
@@ -310,11 +313,23 @@ function packageIdentity(packageRoot, expectedName) {
 
 function codexCandidates(ai) {
   if (ai.codexPath) return [ai.codexPath];
+  const managed = managedProviderExecutable('codex');
+  let bundled;
+  try {
+    // Flowcairn ships the official CLI as a dependency. Resolve it through
+    // Node's package graph so npm, pnpm and nested installs use the same
+    // verified launcher without relying on PATH or a desktop app binary.
+    bundled = require.resolve('@openai/codex/bin/codex.js');
+  } catch {
+    bundled = null;
+  }
   const pathEntries = (process.env.PATH ?? '')
     .split(path.delimiter)
     .filter((entry) => path.isAbsolute(entry) && entry.length > 1)
     .map((entry) => path.join(entry, process.platform === 'win32' ? 'codex.cmd' : 'codex'));
   return [...new Set([
+    ...(managed ? [managed] : []),
+    ...(bundled ? [bundled] : []),
     path.join(NODE_BIN, process.platform === 'win32' ? 'codex.cmd' : 'codex'),
     ...pathEntries,
     '/usr/local/bin/codex',
@@ -387,7 +402,12 @@ function runnerToolchain(profile) {
   const platformName = `${process.platform}-${process.arch}`;
   const cpu = process.arch === 'arm64' ? 'aarch64' : 'x86_64';
   const triple = `${cpu}-${process.platform === 'darwin' ? 'apple-darwin' : process.platform === 'win32' ? 'pc-windows-msvc' : 'unknown-linux-musl'}`;
-  const nativeRoot = path.join(codex.root, 'node_modules', '@openai', `codex-${platformName}`);
+  let nativeRoot;
+  try {
+    nativeRoot = path.dirname(createRequire(codex.entry).resolve(`@openai/codex-${platformName}/package.json`));
+  } catch {
+    fail('RUNNER_TOOLCHAIN_INVALID', 'Нативный пакет Codex не установлен. Повторите установку Flowcairn с optional dependencies.');
+  }
   const nativeManifest = packageIdentity(nativeRoot, '@openai/codex');
   if (nativeManifest.version !== `${codex.manifest.version}-${platformName}`)
     fail('RUNNER_TOOLCHAIN_INVALID', 'Нативный пакет Codex не соответствует версии CLI');
@@ -418,6 +438,27 @@ function codexLoginAvailable(entry) {
   });
   if (run.error || run.status !== 0)
     fail('CODEX_AUTH_REQUIRED', 'Codex не авторизован. Выполните codex login и повторите.');
+}
+
+/** Explicit interactive login only; credentials remain owned by the official CLI. */
+export async function loginCodex(ai = {}) {
+  const toolchain = runnerToolchain({ ai: { ...ai, provider: 'codex' } });
+  await new Promise((resolve, reject) => {
+    const child = spawn(toolchain.node, [toolchain.codexEntry, 'login'], {
+      stdio: 'inherit', env: aiEnvironment(), shell: false,
+    });
+    const timeout = setTimeout(() => child.kill('SIGTERM'), 5 * 60_000);
+    child.once('error', () => {
+      clearTimeout(timeout);
+      reject(new GraphError('CODEX_AUTH_REQUIRED', 'Не удалось открыть вход в Codex. Повторите npx flowcairn.'));
+    });
+    child.once('close', (code) => {
+      clearTimeout(timeout);
+      if (code === 0) resolve(undefined);
+      else reject(new GraphError('CODEX_AUTH_REQUIRED', 'Вход в Codex не завершен. Повторите npx flowcairn.'));
+    });
+  });
+  codexLoginAvailable(toolchain.codexEntry);
 }
 
 function localCheckToolchain(profile) {
