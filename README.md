@@ -10,7 +10,7 @@
 
 ## Быстрый старт
 
-Нужны Node.js 22, проект с `package.json` и настроенный AI-клиент. Git не обязателен, Docker не требуется. [Клиенты и платформы](docs/INSTALLATION.md).
+Нужны Node.js 22 и проект с `package.json`. Flowcairn устанавливает проверенные Codex и Claude Code runtime вместе с пакетом и обновляет их после capability-проверки; Git не обязателен, Docker не требуется. [Клиенты и платформы](docs/INSTALLATION.md).
 
 ```sh
 npm install -D flowcairn

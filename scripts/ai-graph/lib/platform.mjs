@@ -16,8 +16,7 @@ export function isWsl(kernel = release()) {
 }
 
 export function defaultProvider(platform = process.platform) {
-  if (platform === 'darwin' || platform === 'win32') return 'codex';
-  if (platform === 'linux') return 'claude';
+  if (platform === 'darwin' || platform === 'linux' || platform === 'win32') return 'codex';
   throw new GraphError('PLATFORM', 'Операционная система не поддерживается.');
 }
 

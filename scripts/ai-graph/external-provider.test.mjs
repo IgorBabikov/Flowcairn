@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import { compilePlanningPlan } from './lib/planning.mjs';
 import { makeExternalConsent, probeExternalProvider, providerToolchain } from './lib/providers.mjs';
 import { SKILL_ROUTES } from './lib/config.mjs';
@@ -16,8 +17,16 @@ import { providerEnvironment, providerCandidates, assertProviderExecutablePlatfo
 const node = process.execPath;
 const worker = fileURLToPath(new URL('./lib/external-worker.mjs', import.meta.url));
 const fixtures = new Set();
+const require = createRequire(import.meta.url);
 function fixture() { const directory = mkdtempSync(path.join(os.tmpdir(), 'flowcairn-external-provider-')); fixtures.add(directory); return directory; }
 test.after(() => { for (const directory of fixtures) rmSync(directory, { recursive: true, force: true }); });
+
+test('bundled Claude Code runtime passes package/version checks before auth', () => {
+  const executable = require.resolve('@anthropic-ai/claude-code/bin/claude.exe');
+  const home = fixture();
+  const probe = probeExternalProvider('claude', { executable, env: { HOME: home, USERPROFILE: home, CLAUDE_CONFIG_DIR: home } });
+  assert.equal(probe.reason, 'PROVIDER_AUTH_REQUIRED');
+});
 function fakeCli(directory, response = '{"result":"{\\"summary\\":\\"ok\\"}"}', version = 'fixture-cli 1.0', help = '--print --output-format --sandbox --mode', authenticated = true) {
   const file = path.join(directory, 'fake-provider');
   writeFileSync(file, `#!${node}\nconst fs=require('node:fs'),args=process.argv.slice(2),help=${JSON.stringify(help)},authenticated=${JSON.stringify(authenticated)};if (args[0] === '--version') process.stdout.write(${JSON.stringify(version + '\n')}); else if (args[0] === 'auth' && args[1] === 'status') {process.stdout.write(JSON.stringify({loggedIn:authenticated})+'\\n');process.exitCode=authenticated?0:1;} else if (args[0] === 'status') {process.stdout.write(JSON.stringify({authenticated})+'\\n');process.exitCode=authenticated?0:1;} else if (args.includes('--help')) {if(['--setting-sources','--strict-mcp-config','--no-session-persistence','--permission-mode','--tools','--output-format','--json-schema','--print','--sandbox','--mode'].some(flag=>args.includes(flag)&&!help.includes(flag))) process.exitCode=2; else process.stdout.write(help+'\\n');} else {const assert=require('node:assert/strict'); if(!args.includes('--print')) { for(const [flag,value] of [['--tools','Read,Grep,Glob'],['--permission-mode','dontAsk']])assert.equal(args[args.indexOf(flag)+1],value);assert.ok(args.includes('--strict-mcp-config'));assert.ok(args.includes('--no-session-persistence'));assert.ok(args.includes('--json-schema'));assert.equal(args.includes('--bare'),false);}process.stdout.write(${JSON.stringify(response)});}\n`);

@@ -19,9 +19,10 @@ import {
 } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { inspectCodexInstallation, inspectProcess, probeRunner, runRegisteredAction } from './lib/runner.mjs';
+import { inspectCodexInstallation, inspectProcess, probeRunner, runRegisteredAction, RUNNER_TESTING } from './lib/runner.mjs';
 import { buildPrompt } from './lib/codex.mjs';
 import { AIResultSchema } from './lib/schemas.mjs';
 import { aiResponseSchema } from './lib/runner-ai-command.mjs';
@@ -31,6 +32,14 @@ import { MAX_CONTROL_ARG_CHARS, validCommand } from './lib/supervisor-control.mj
 const NODE_BINARY = realpathSync(process.execPath);
 const SUPERVISOR_FILE = fileURLToPath(new URL('./lib/supervisor.mjs', import.meta.url));
 const fixtures = new Set();
+const require = createRequire(import.meta.url);
+
+test('bundled official Codex launcher takes precedence over global and desktop PATH', () => {
+  const entry = require.resolve('@openai/codex/bin/codex.js');
+  const discovered = RUNNER_TESTING.discoverCodex({});
+  assert.equal(discovered.entry, realpathSync(entry));
+  assert.equal(discovered.manifest.version, require('@openai/codex/package.json').version);
+});
 
 function runnerContract() {
   const task = {
@@ -763,6 +772,28 @@ test('режим provider передает только модель и усил
     assert.ok(!prepared.command.args.includes('--ignore-user-config'));
     assert.equal(prepared.execution.model, 'gpt-5.6-sol');
     assert.equal(JSON.stringify(prepared.command.args).includes('untrusted-command'), false);
+  } finally {
+    RUNNER_TESTING.cleanupPrepared(prepared);
+    if (previousHome === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = previousHome;
+  }
+});
+
+test('режим provider использует настройки Codex по умолчанию без config.toml', async () => {
+  const outputPath = realpathSync(fixture());
+  const previousHome = process.env.CODEX_HOME;
+  process.env.CODEX_HOME = outputPath;
+  const contract = runnerContract();
+  const { RUNNER_TESTING } = await import('./lib/runner.mjs');
+  const prepared = RUNNER_TESTING.makeAiCommand({ ...contract, worktree: realpathSync(fixture()), skills: [], priorEvidence: null, outputPath,
+    profile: { outputPaths: [], ai: { provider: 'codex', model: 'provider-default', modelMode: 'provider' } },
+    toolchain: { node: NODE_BINARY, codexEntry: '/trusted/codex.js', digest: 'a'.repeat(64) },
+    dependencyToolchain: { dependencyPaths: [], hash: 'b'.repeat(64) },
+  });
+  try {
+    assert.equal(prepared.command.args.includes('--model'), false);
+    assert.equal(prepared.command.args.some((arg) => arg.startsWith('model_reasoning_effort=')), false);
+    assert.equal(prepared.execution.model, 'provider-default');
+    assert.equal(prepared.execution.reasoningEffort, 'provider-default');
   } finally {
     RUNNER_TESTING.cleanupPrepared(prepared);
     if (previousHome === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = previousHome;
