@@ -3,6 +3,7 @@ import type { Snapshot } from './contracts';
 import type { ProofEvidence, ProofFinding, RequirementProof, TaskProof } from './proof-contracts';
 import { humanText, nodeTitle, runtimeProblem, technicalProblem } from './presentation';
 import { ResourcePanel } from './ResourcePanel';
+import { ReadableText } from './ReadableText';
 import { TechnicalDetails } from './TechnicalDetails';
 
 const requirementLabels = { proven: 'Подтверждено', unproven: 'Нужна проверка', stale: 'Нужна перепроверка', failed: 'Проверка не пройдена', blocked: 'Заблокировано' };
@@ -31,7 +32,7 @@ function blockerParts(reason: string, proof: TaskProof, snapshot: Snapshot, prog
       : { title: checkLabels[check[1]] ?? 'Проверку', separator: ' ', detail: 'нужно повторить для текущего состояния файлов.' };
   }
   const requirement = proof.requirements.find(item => reason.startsWith(`${item.id}: `));
-  if (requirement) return { title: requirement.title, separator: ': ', detail: humanText(reason.slice(requirement.id.length + 2)) };
+  if (requirement) return { title: requirement.title.length > 120 ? `Требование ${requirement.id}` : requirement.title, separator: ': ', detail: humanText(reason.slice(requirement.id.length + 2)) };
   return { title: 'Проверка результата', separator: ': ', detail: humanText(reason) };
 }
 
@@ -68,7 +69,7 @@ export function TaskCockpit({ snapshot, busy, unavailable = false, embedded = fa
   const diagnostic = runtimeFailure ? technicalProblem(failureSource) : null;
   const placeholderContract = snapshot.phase === 'planning' && proof.requirements.length === 1 &&
     proof.requirements[0]?.title.trim() === snapshot.task?.description?.trim();
-  if (placeholderContract) return <section className="task-cockpit" aria-label="Задача и доказательства">
+  if (placeholderContract) return <section className="task-cockpit task-cockpit-placeholder" aria-label="Задача и доказательства">
     <h3>Требования еще формируются</h3>
     <p>После успешного анализа здесь появятся отдельные требования и способы их проверки. Исходное описание сохранено выше.</p>
     {runtimeFailure && <div className="workflow-problem" role="alert">
@@ -102,15 +103,15 @@ export function TaskCockpit({ snapshot, busy, unavailable = false, embedded = fa
       </details>}
     </header>
     <div className="cockpit-content">
-      {proven && proof.certificate && <Certificate expanded={!wide} proof={proof} onSelectRequirement={selectRequirement} />}
+      {proven && proof.certificate && <Certificate expanded={!wide && proof.requirements.every(item => item.title.length <= 280)} proof={proof} onSelectRequirement={selectRequirement} />}
       <nav className="cockpit-nav" aria-label="Сведения о задаче">{Object.entries(views).map(([name, label]) =>
         <button type="button" key={name} aria-pressed={view === name} onClick={() => setView(name as View)}>{label}</button>)}</nav>
-      {view === 'requirements' && <div className="requirements-layout">
+      {view === 'requirements' && <div className={`requirements-layout${selected && (selected.title.length > 280 || selected.verification.criterion.length > 280) ? ' is-long' : ''}`}>
         <section className="requirements-list" aria-label="Требования задачи">
           <h3>Что нужно получить</h3>
           {proof.requirements.length === 0 && <p>Требования еще не сформированы. Выполнение этапов само по себе не доказывает результат.</p>}
           {proof.requirements.map(requirement => <button type="button" key={requirement.id} className="requirement-choice" aria-pressed={selected?.id === requirement.id} onClick={() => setSelectedId(requirement.id)}>
-            <span>{requirement.title}</span>
+            <span className="requirement-choice-title">{requirement.title}</span>
             <small className={`requirement-status status-${requirement.status}`}>{requirementLabels[requirement.status]}{!requirement.mandatory && ' · необязательное'}</small>
           </button>)}
         </section>
@@ -127,7 +128,8 @@ export function TaskCockpit({ snapshot, busy, unavailable = false, embedded = fa
         {proof.findings.length ? proof.findings.map(finding => <Finding key={finding.id} finding={finding} snapshot={snapshot} />) : <p>Проблемы не зарегистрированы. Это не заменяет проверку требований.</p>}
       </section>}
       {view === 'cost' && <ResourcePanel usage={proof.usage} requirements={proof.requirements} />}
-      {view !== 'changes' && openFindings.length > 0 && <section className="open-findings"><h3>Открытые проблемы</h3>{openFindings.map(finding => <Finding key={finding.id} finding={finding} snapshot={snapshot} />)}</section>}
+      {view !== 'changes' && openFindings.some(finding => view !== 'requirements' || !selected?.findingIds.includes(finding.id)) &&
+        <section className="open-findings"><h3>Открытые проблемы</h3>{openFindings.filter(finding => view !== 'requirements' || !selected?.findingIds.includes(finding.id)).map(finding => <Finding key={finding.id} finding={finding} snapshot={snapshot} />)}</section>}
       {proof.contract && <details className="contract-details"><summary>Границы и условия задачи</summary>
         <ContractList title="Разрешенная область" values={proof.contract.scope} />
         <ContractList title="Ограничения" values={proof.contract.constraints} />
@@ -156,13 +158,17 @@ function RequirementDetails({ requirement, snapshot, busy, onOpenEvidence, onOpe
   const findings = proof.findings.filter(finding => requirement.findingIds.includes(finding.id));
   const acceptsHuman = requirement.verification.method === 'human' && requirement.status !== 'proven' && onAcceptRequirement && snapshot.integrity.valid && proof.acceptance?.allowed;
   return <section className="requirement-detail" aria-label="Доказательство требования">
-    <h3>{requirement.title}</h3>
+    {requirement.title.length > 280 ? <><h3>Требование</h3><ReadableText text={requirement.title} className="requirement-prose" /></> : <h3>{requirement.title}</h3>}
     <p className={`requirement-status status-${requirement.status}`}>{requirementLabels[requirement.status]}</p>
     {requirement.reason && <p>{humanText(requirement.reason)}</p>}
     <h4>Как проверяется</h4>
-    <p>{methodLabels[requirement.verification.method] ?? requirement.verification.method}: {requirement.verification.criterion}</p>
+    <p className="verification-method">{methodLabels[requirement.verification.method] ?? requirement.verification.method}</p>
+    {requirement.verification.criterion.trim() !== requirement.title.trim() && <ReadableText text={requirement.verification.criterion} className="requirement-prose" />}
     {requirement.verification.checkIds.length > 0 && <p>Проверки: {requirement.verification.checkIds.map(id => checkLabels[id] ?? id).join(', ')}</p>}
-    {requirement.verification.paths.length > 0 && <ul className="path-list">{requirement.verification.paths.map(path => <li key={path}><code>{path}</code></li>)}</ul>}
+    {requirement.verification.paths.length > 0 && <details className="verification-paths" open={requirement.verification.paths.length <= 5}>
+      <summary>Файлы проверки ({requirement.verification.paths.length})</summary>
+      <ul className="path-list">{requirement.verification.paths.map(path => <li key={path}><code>{path}</code></li>)}</ul>
+    </details>}
     <h4>Связанная работа</h4>
     {work.length ? <ul>{work.map(node => <li key={node.id}><strong>{nodeTitle(node, 'ru')}</strong><p>{node.status === 'passed' ? 'Этап завершен. ' : node.status === 'running' ? 'Выполняется. ' : 'Этап еще не завершен. '}{node.outcome}</p></li>)}</ul> : <p>Работа с этим требованием еще не связана.</p>}
     {artifacts.length > 0 && <><h4>Связанные результаты</h4><ul>{artifacts.map(artifact => <li key={artifact.id}><button className="text-button" type="button" onClick={() => onOpenArtifact(artifact.id)}>{artifact.title}</button></li>)}</ul></>}
@@ -218,7 +224,7 @@ function Certificate({ proof, onSelectRequirement, expanded }: { proof: TaskProo
   return <details className="completion-certificate" open={expanded}>
     <summary>Отчет о выполнении</summary>
     <p>Все обязательные требования подтверждены. Здесь собраны результаты проверок и приемки для текущего состояния задачи.</p>
-    <ul>{proof.requirements.filter(requirement => certificate.requirementIds.includes(requirement.id)).map(requirement => <li key={requirement.id}><button type="button" className="text-button" onClick={() => onSelectRequirement(requirement.id)}>{requirement.title}</button></li>)}</ul>
+    <ul>{proof.requirements.filter(requirement => certificate.requirementIds.includes(requirement.id)).map(requirement => <li key={requirement.id}><button type="button" className="text-button certificate-requirement-link" onClick={() => onSelectRequirement(requirement.id)}>{requirement.title}</button></li>)}</ul>
     <p>Подтверждено требований: {proof.coverage.proven} / {proof.coverage.required}. Результатов проверок: {certificate.evidenceIds.length}. Блокирующих проблем: {proof.findings.filter(finding => finding.blocking && finding.status === 'open').length}.</p>
     <ContractList title="Известные ограничения" values={certificate.limitations ?? proof.contract?.unknowns ?? []} />
     <details className="proof-technical"><summary>Данные отчета</summary><dl>

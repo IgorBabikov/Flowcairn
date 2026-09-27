@@ -64,8 +64,12 @@
 .wide-workspace .workflow-summary { max-width: 70ch; font-size: .87rem; margin-bottom: 26px; }
 .wide-workspace .workflow-panel .current-stage { display: none; }
 .wide-workspace .task-content-primary > .execution-status { margin: 0 0 24px; }
+.wide-workspace .task-content-primary > .execution-status,
+.wide-workspace .coverage-summary,
+.wide-workspace .proof-blockers { max-width: 1100px; }
 .wide-workspace .task-content-primary > .execution-status.stage { display: none; }
 .wide-workspace .task-progress { padding: 0; margin: 0 0 26px; border: 0; border-radius: 0; }
+.wide-workspace .task-progress.is-summary { max-width: 780px; padding: 18px 22px; margin-bottom: 22px; border: 1px solid var(--border); border-radius: 12px; }
 .wide-workspace .task-progress-head h3 { font-size: 1.4rem; }
 .wide-workspace .context-recovery, .wide-workspace .task-next-action { padding: 0 0 24px; }
 .wide-work-columns, .wide-work-row { display: grid; grid-template-columns: minmax(210px, .95fr) minmax(220px, 1.35fr) minmax(160px, .8fr); gap: 24px; align-items: center; }
@@ -98,11 +102,13 @@
 .wide-context-body dd { margin: 0 0 12px; }
 .wide-context-back { margin-bottom: 20px; font-size: .78rem; }
 .wide-workspace .task-overview .task-cockpit { border-radius: 0; }
+.wide-workspace .task-overview .task-cockpit-placeholder { padding: 0; }
 .wide-workspace .cockpit-header { padding: 0 0 20px; }
 .wide-workspace .cockpit-content { padding: 0; }
 .wide-workspace .completion-certificate { margin-top: 0; }
-.wide-workspace .cockpit-nav { margin: 18px 0; }
+.wide-workspace .cockpit-nav { max-width: 720px; margin: 18px 0; }
 .wide-workspace .requirements-layout { grid-template-columns: minmax(0, 1fr) 400px; gap: 28px; align-items: start; }
+.wide-workspace .requirements-layout.is-long { grid-template-columns: minmax(0, 1fr); }
 .wide-workspace .requirement-detail { padding: 24px; background: var(--page); border-left: 1px solid var(--border); min-width: 0; }
 .wide-workspace .requirement-detail h3 { margin-top: 0; }
 .wide-workspace .requirements-list h3 { margin-top: 0; }
@@ -139,3 +145,16 @@
 .wide-workspace .task-cockpit:has(.requirements-layout > .requirement-detail) .cockpit-content,
 .wide-workspace .task-cockpit:has(.requirements-layout > .requirement-detail) .requirements-layout { display: contents; }
 .wide-workspace .task-cockpit:has(.requirements-layout > .requirement-detail) .requirement-detail { grid-column: 2; grid-row: 1 / span 6; }
+.wide-workspace .task-cockpit:has(.requirements-layout.is-long > .requirement-detail) { grid-template-columns: minmax(0, 1fr); }
+.wide-workspace .task-cockpit:has(.requirements-layout.is-long > .requirement-detail) .requirement-detail {
+  grid-column: 1;
+  grid-row: auto;
+  width: 100%;
+  max-width: 78ch;
+  padding: 24px 0 0;
+  border-left: 0;
+  border-top: 1px solid var(--border);
+  background: transparent;
+}
+.wide-workspace .contract-details .path-list { columns: 3 260px; column-gap: 32px; }
+.wide-workspace .contract-details .path-list li { break-inside: avoid; }

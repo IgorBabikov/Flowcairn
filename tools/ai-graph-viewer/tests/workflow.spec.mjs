@@ -159,8 +159,9 @@ test('task heading keeps one collapsible copy of a long description', async ({ p
   await page.goto(`/#session=${token}`);
 
   await expect(page.getByRole('heading', { name: state.task.title, exact: true })).toHaveCount(1);
-  const description = page.getByText(state.task.description, { exact: true });
+  const description = page.locator('.task-description .collapsible-text > div');
   await expect(description).toHaveCount(1);
+  expect((await description.locator('.readable-text p').allTextContents()).join(' ').replace(/\s+/g, ' ').trim()).toBe(state.task.description);
   await expect(description).toHaveClass(/clamped/);
   await page.getByText('Описание задачи',{exact:true}).click();
   await expect(page.getByRole('button', { name: 'Показать полностью' })).toBeVisible();

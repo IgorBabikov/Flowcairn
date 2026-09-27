@@ -86,6 +86,7 @@
   .task-progress-head h3 { font-size: 1.05rem; }
   .task-progress-head p { font-size: .8rem; }
   .task-progress-count { display: none; }
+  .task-progress.is-summary .task-progress-count { display: block; margin-top: 8px; color: var(--plum-strong); }
   .task-overview .workflow-panel.embedded { padding: 16px 18px 22px; }
   .plan-primary-action .approve-workflow { width: 100%; }
   .task-next-action, :is(.task-overview, .task-content-primary) > .context-recovery { padding: 16px 18px; }

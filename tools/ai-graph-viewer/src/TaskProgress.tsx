@@ -21,6 +21,9 @@ export function TaskProgress({
   const completed = work.filter(node => node.status === 'passed').length;
   const sourceIndex = activeNodeIndex(snapshot);
   const activeId = sourceIndex >= 0 ? snapshot.nodes[sourceIndex]?.id : undefined;
+  const active = work.find(node => node.id === activeId);
+  const percentKnown = snapshot.phase === 'execution';
+  const percent = Math.round(completed / Math.max(work.length, 1) * 100);
   const currentIndex = Math.max(0, work.findIndex(node => node.id === activeId));
   const visible = execution.kind === 'stopping' || execution.kind === 'stop-uncertain'
     ? work.slice(currentIndex, currentIndex + 1)
@@ -29,25 +32,28 @@ export function TaskProgress({
   if (work.length === 0) return null;
 
   return (
-    <section className="task-progress" aria-labelledby="task-progress-heading">
+    <section className={`task-progress${summaryOnly ? ' is-summary' : ''}`} aria-labelledby="task-progress-heading">
       <div className="task-progress-head">
         <div>
           <h3 id="task-progress-heading">
-            {execution.kind === 'stopping' ? 'Текущий этап' : 'Что происходит сейчас'}
+            {execution.kind === 'stopping' ? 'Останавливаем текущий этап' : active ? `Сейчас: ${nodeTitle(active, 'ru')}` : 'Что происходит сейчас'}
           </h3>
-          <p>{completed} из {work.length} этапов завершено по данным исполнителя</p>
+          <p>{percentKnown
+            ? `${completed} из ${work.length} этапов текущего плана завершено`
+            : 'Идет анализ и подготовка плана. Длительность пока неизвестна.'}</p>
         </div>
-        <span className="task-progress-count" aria-hidden="true">{completed}/{work.length}</span>
+        {percentKnown && <span className="task-progress-count" aria-hidden="true">{percent}% этапов</span>}
       </div>
       <div
-        className="task-progress-track"
+        className={`task-progress-track${percentKnown ? '' : ' is-indeterminate'}`}
         role="progressbar"
-        aria-label="Завершенные этапы"
-        aria-valuemin={0}
-        aria-valuemax={work.length}
-        aria-valuenow={completed}
+        aria-label={percentKnown ? 'Завершенные этапы текущего плана' : 'Анализ и подготовка плана'}
+        aria-valuemin={percentKnown ? 0 : undefined}
+        aria-valuemax={percentKnown ? 100 : undefined}
+        aria-valuenow={percentKnown ? percent : undefined}
+        aria-valuetext={percentKnown ? `${completed} из ${work.length} этапов текущего плана завершено` : undefined}
       >
-        {work.map(node => <i key={node.id} data-complete={node.status === 'passed' ? 'true' : undefined} />)}
+        {percentKnown ? work.map(node => <i key={node.id} data-complete={node.status === 'passed' ? 'true' : undefined} />) : <i />}
       </div>
       {!summaryOnly && <ol className="task-progress-steps">
         {visible.map((node, index) => (
