@@ -286,7 +286,10 @@ for (const earlyExit of [0, 2]) test(`supervisor records early CLI exit ${earlyE
   const command = { executable: NODE_BINARY, args: ['-e', `process.stdin.once('data', () => { process.stdin.destroy(); process.stderr.write("startup rejected\\n"); process.exit(${earlyExit}); }); process.stdin.resume()`], cwd: fixture(), env: { PATH: '/usr/bin:/bin' } };
   const subject = supervisorFixture({ command, actionId: 'ai-analyze' });
   await subject.next('ready');
-  subject.child.stdin.write(`${JSON.stringify({ type: 'go', nonce: subject.nonce, command, input: 'x'.repeat(120000) })}\n`);
+  const payload = `${JSON.stringify({ type: 'go', nonce: subject.nonce, command, input: 'x'.repeat(120000) })}\n`;
+  subject.child.stdin.write(payload.slice(0, 256));
+  await new Promise(resolve => setTimeout(resolve, 25));
+  try { subject.child.stdin.write(payload.slice(256)); } catch { /* The child may already have closed its input pipe. */ }
   try {
     const final = await subject.next('finished');
     assert.equal(final.exitCode, earlyExit || 1);
