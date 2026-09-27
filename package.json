@@ -46,7 +46,7 @@
     "test:install": "node --test tests/install.test.mjs tests/install-platform.test.mjs tests/package-managers.test.mjs tests/skills-selection.test.mjs tests/uninstall-cli.test.mjs"
   },
   "dependencies": {
-    "@anthropic-ai/claude-code": "2.1.198",
+    "@anthropic-ai/claude-code": "2.1.282",
     "@openai/codex": "0.156.1",
     "picomatch": "4.0.7",
     "smol-toml": "1.8.0",
