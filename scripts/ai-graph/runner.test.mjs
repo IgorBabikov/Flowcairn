@@ -283,7 +283,7 @@ test('supervisor rejects a forged GO without starting the action', async () => {
 });
 
 for (const earlyExit of [0, 2]) test(`supervisor records early CLI exit ${earlyExit} with a large pending prompt`, async () => {
-  const command = { executable: NODE_BINARY, args: ['-e', `setTimeout(() => { process.stdin.destroy(); process.stderr.write("startup rejected\\n"); process.exit(${earlyExit}); }, 50)`], cwd: fixture(), env: { PATH: '/usr/bin:/bin' } };
+  const command = { executable: NODE_BINARY, args: ['-e', `process.stdin.once('data', () => { process.stdin.destroy(); process.stderr.write("startup rejected\\n"); process.exit(${earlyExit}); }); process.stdin.resume()`], cwd: fixture(), env: { PATH: '/usr/bin:/bin' } };
   const subject = supervisorFixture({ command, actionId: 'ai-analyze' });
   await subject.next('ready');
   subject.child.stdin.write(`${JSON.stringify({ type: 'go', nonce: subject.nonce, command, input: 'x'.repeat(120000) })}\n`);
