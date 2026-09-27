@@ -18,14 +18,18 @@ function date(value: string | null) {
   return value && !Number.isNaN(Date.parse(value)) ? new Date(value).toLocaleString('ru-RU') : 'Время не передано';
 }
 
-function blockerParts(reason: string, proof: TaskProof, progressing = false) {
+function blockerParts(reason: string, proof: TaskProof, snapshot: Snapshot, progressing = false) {
   if (reason === 'Исполнение находится в состоянии cancelled') return { title: 'Выполнение остановлено', separator: ': ', detail: 'Пользователь остановил этот запуск.' };
   if (reason === 'Исполнение находится в состоянии failed') return { title: 'Этап завершился с ошибкой', separator: ': ', detail: 'Откройте причину выше.' };
   if (reason === 'Исполнение находится в состоянии uncertain') return { title: 'Исход этапа не подтвержден', separator: ': ', detail: 'Требуется восстановление.' };
   const check = /^Обязательная проверка (check-[a-z]+) не подтверждена на текущем результате$/.exec(reason);
-  if (check?.[1]) return progressing
-    ? { title: 'Ожидается актуальный результат', separator: ': ', detail: `${checkLabels[check[1]] ?? 'Проверка'}.` }
-    : { title: checkLabels[check[1]] ?? 'Проверку', separator: ' ', detail: 'нужно повторить для текущего состояния файлов.' };
+  if (check?.[1]) {
+    const checkPending = snapshot.nodes.some(node => node.action.id === check[1] && ['pending', 'ready'].includes(node.status));
+    if (checkPending) return { title: checkLabels[check[1]] ?? 'Проверка', separator: ' ', detail: 'еще не запускалась.' };
+    return progressing
+      ? { title: 'Ожидается актуальный результат', separator: ': ', detail: `${checkLabels[check[1]] ?? 'Проверка'}.` }
+      : { title: checkLabels[check[1]] ?? 'Проверку', separator: ' ', detail: 'нужно повторить для текущего состояния файлов.' };
+  }
   const requirement = proof.requirements.find(item => reason.startsWith(`${item.id}: `));
   if (requirement) return { title: requirement.title, separator: ': ', detail: humanText(reason.slice(requirement.id.length + 2)) };
   return { title: 'Проверка результата', separator: ': ', detail: humanText(reason) };
@@ -94,7 +98,7 @@ export function TaskCockpit({ snapshot, busy, unavailable = false, embedded = fa
       {current && !proven && !embedded && <p className="cockpit-current"><strong>Сейчас:</strong> {nodeTitle(current, 'ru')}<span>{current.outcome}</span></p>}
       {proof.blockers.length > 0 && <details className="proof-blockers" open={!progressing && proof.blockers.length <= 3}>
         <summary><span>{progressing ? 'Что осталось проверить' : 'Что мешает завершению'}</span><span className="proof-blockers-count">{proof.blockers.length}</span></summary>
-        <ul>{proof.blockers.map((reason, index) => { const parts = blockerParts(reason, proof, progressing); return <li key={index}><strong>{parts.title}</strong><span>{parts.separator}{parts.detail}</span></li>; })}</ul>
+        <ul>{proof.blockers.map((reason, index) => { const parts = blockerParts(reason, proof, snapshot, progressing); return <li key={index}><strong>{parts.title}</strong><span>{parts.separator}{parts.detail}</span></li>; })}</ul>
       </details>}
     </header>
     <div className="cockpit-content">

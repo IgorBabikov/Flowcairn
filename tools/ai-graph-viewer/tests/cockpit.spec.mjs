@@ -180,6 +180,24 @@ test('stale blockers name the check and requirement for a person', async ({ page
   await expect(blockers).not.toContainText('R1:');
 });
 
+test('pending checks are shown as not started instead of needing a rerun', async ({ page }) => {
+  const state = taskWithProof();
+  state.proof.status = 'BLOCKED'; state.proof.coverage.proven = 0; state.proof.certificate = null;
+  state.proof.requirements[0].status = 'blocked';
+  const checks = [
+    ['check-typecheck', 'Проверка типов'],
+    ['check-lint', 'Проверка стиля кода'],
+    ['check-tests', 'Тесты'],
+    ['check-build', 'Сборка'],
+  ];
+  state.proof.blockers = checks.map(([id]) => `Обязательная проверка ${id} не подтверждена на текущем результате`);
+  state.nodes.push(...checks.map(([id, title]) => ({ ...state.nodes[0], id, title, status: 'pending', action: { id } })));
+  await mockApi(page, state); await page.goto(`/#session=${token}`);
+  const blockers = page.locator('.proof-blockers');
+  for (const [, title] of checks) await expect(blockers).toContainText(`${title} еще не запускалась.`);
+  await expect(blockers).not.toContainText('нужно повторить');
+});
+
 test('a failed live snapshot hides previous proof until fresh confirmation returns', async ({ page }) => {
   await mockApi(page, taskWithProof()); await page.goto(`/#session=${token}`);
   await expect(page.getByTestId('task-proof-status')).toHaveText('Результат подтвержден');
