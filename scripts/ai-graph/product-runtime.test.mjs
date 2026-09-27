@@ -39,7 +39,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 const request=(s,extra={})=>({operationId:`op-${randomUUID()}`,expectedRevision:s.revision,planHash:s.planHash,...extra});
 const analysis={requirements:['Валидация email'],constraints:['Сохранить интерфейс'],projectFacts:[{path:'src/form.mjs',fact:'Форма уже существует'}],acceptance:['Неверный email отклонен'],risks:[]};
-async function fixture(t,{consent=true,reviewFails=0,implementationFails=0,checkFails=0,uncertain=false,plannerUncertain=0,plannerFailures=0,steps=output.steps,maxReplans=2,scopeCandidates=['src']}={}) {
+async function fixture(t,{consent=true,reviewFails=0,implementationFails=0,checkFails=0,uncertain=false,plannerUncertain=0,plannerFailures=0,steps=output.steps,maxReplans=2,scopeCandidates=['src'],analysisOutput=analysis,supervisionFailure=null}={}) {
  const root=mkdtempSync(path.join(os.tmpdir(),'flowcairn-product-'));
  t.after(()=>rmSync(root,{recursive:true,force:true}));
  const worktree=path.join(root,'.ai-orchestrator','worktrees','fixture-1');
@@ -57,13 +57,14 @@ async function fixture(t,{consent=true,reviewFails=0,implementationFails=0,check
  registerTask:async(_root,input,options)=>options.service.create({...input,limits:{...input.limits,maxReplans}},{runId:options.run,operationId:options.operation,stage:options.stage,workflow:options.workflow,naturalIntakeHash:options.naturalIntakeHash}),
  execute:async({node,onStart,priorEvidence,reviewEvidence,task,plan})=>{
   calls.push({nodeId:node.id,action:node.action.id,priorEvidence,reviewEvidence,task,planVersion:plan.version});await onStart({ticket:'fixture',pid:process.pid});
+  if(node.action.id===supervisionFailure)return {exitCode:0,stopped:true,uncertain:false,failureReason:'TIMEOUT',timedOut:true,output:{stdoutDigest:hash}};
   if(node.action.id==='ai-plan'&&remainingPlannerFailures-- > 0)return {exitCode:1,stopped:true,uncertain:false,failureReason:'AI_INVALID_SCHEMA'};
   if(node.action.id==='check-tests')return {exitCode:checks++<checkFails?1:0,stopped:true,uncertain:false};
   const fail=(node.action.id==='ai-review' && reviews++<reviewFails) ||
     (node.action.id==='ai-implement' && implementations++<implementationFails);
   const plannerIsUncertain=node.action.id==='ai-plan'&&remainingPlannerUncertainty>0;
   if(plannerIsUncertain)remainingPlannerUncertainty-=1;
-  return {exitCode:0,stopped:true,uncertain:false,output:{...output,steps:undefined,verdict:uncertain&&node.action.id==='ai-analyze'?'uncertain':plannerIsUncertain?'uncertain':fail?'fail':'pass',skillsUsed:node.skills,findings:fail?[{severity:'blocking',message:'Неверный email принят',path:'src/form.mjs'}]:[],...(node.action.id==='ai-plan'?{steps}:{}),...(node.action.id==='ai-analyze'?{analysis}:{}),...(reviewEvidence?{reviewEvidenceHash:hashObject(reviewEvidence)}:{})}};
+  return {exitCode:0,stopped:true,uncertain:false,output:{...output,steps:undefined,verdict:uncertain&&node.action.id==='ai-analyze'?'uncertain':plannerIsUncertain?'uncertain':fail?'fail':'pass',skillsUsed:node.skills,findings:fail?[{severity:'blocking',message:'Неверный email принят',path:'src/form.mjs'}]:[],...(node.action.id==='ai-plan'?{steps}:{}),...(node.action.id==='ai-analyze'?{analysis:analysisOutput}:{}),...(reviewEvidence?{reviewEvidenceHash:hashObject(reviewEvidence)}:{})}};
  }
  };
  // optional fields не включаются в strict JSON fixture.
@@ -77,6 +78,44 @@ async function fixture(t,{consent=true,reviewFails=0,implementationFails=0,check
 test('product intake требует локальное согласие и не принимает browser scope',async(t)=>{
  const f=await fixture(t,{consent:false});await assert.rejects(f.intake(),e=>e.code==='ONBOARDING_REQUIRED');assert.equal(f.calls.length,0);
  await assert.rejects(f.service.intake({title:'Форма',description:'Добавить email',taskNumber:'1',operationId:'intake-bad',contextHash:hash,scope:['private']}));
+});
+
+test('Russian analysis near 32 KiB reaches planning and is scoped before implementation', async (t) => {
+ const analysisOutput = { ...analysis, acceptance: Array.from({ length: 8 }, (_, index) => `${index}: ${'Ф'.repeat(1950)}`) };
+ assert.ok(Buffer.byteLength(JSON.stringify(analysisOutput)) > 30 * 1024);
+ const f = await fixture(t, { analysisOutput });
+ const waiting = await f.settle(await f.intake());
+ const planner = f.calls.find(call => call.action === 'ai-plan');
+ assert.ok(planner, 'analysis must reach planning');
+ assert.deepEqual(planner.priorEvidence.analysis.result.analysis, analysisOutput);
+ await f.settle(await f.approve(waiting));
+ for (const action of ['ai-implement', 'ai-review']) {
+  const call = f.calls.find(item => item.action === action);
+  assert.ok(call, `${action} must start after selecting its context`);
+  assert.equal(call.priorEvidence.analysis, undefined);
+  assert.deepEqual(call.priorEvidence.projectFacts, analysisOutput.projectFacts);
+ }
+});
+
+test('analysis beyond the bounded handoff fails before planning', async (t) => {
+ const analysisOutput = { ...analysis, projectFacts: Array.from({ length: 20 }, (_, index) => ({ path: `src/file-${index}.ts`, fact: 'Ф'.repeat(1000) })) };
+ const f = await fixture(t, { analysisOutput });
+ const result = await f.settle(await f.intake());
+ assert.equal(result.status, 'failed');
+ assert.match(result.nodes.find(node => node.id === 'analyze').reason, /^ANALYSIS_LIMIT/);
+ assert.equal(f.calls.some(call => call.action === 'ai-plan'), false);
+});
+
+test('a supervisor failure with exit zero is never parsed as an AI result or accepted', async (t) => {
+ const f = await fixture(t, { supervisionFailure: 'ai-analyze' });
+ const result = await f.settle(await f.intake());
+ assert.equal(result.status, 'failed');
+ const node = result.nodes.find(item => item.id === 'analyze');
+ assert.match(node.reason, /^TIMEOUT/);
+ const receipt = f.service.receipt(result.runId, node.receiptIds.at(-1));
+ assert.equal(receipt.verdict, 'fail');
+ assert.equal(receipt.termination.timedOut, true);
+ assert.equal(f.calls.some(call => call.action === 'ai-plan'), false);
 });
 
 test('product intake accepts up to 64 safe project roots before planning', async(t)=>{
@@ -326,6 +365,53 @@ test('истекший общий срок не запускает implementatio
  s=await f.settle(s);
  assert.equal(s.completion,null);assert.equal(f.calls.filter(c=>c.action==='ai-implement').length,0);
  assert.equal(s.capabilities.run.allowed,false);
+});
+
+test('manual run of a registered autonomous task continues to exactly one unapproved execution plan',async(t)=>{
+ const f=await fixture(t);
+ const created=await f.service.create({id:'TASK-MANUAL-START',goal:'Форма',instructions:'Проверить email',scope:['src'],acceptance:['Email отклонен'],checks:['tests']},{runId:'manual-start-product',workflow:'autonomous',stage:'planning'});
+ const input=request(created);
+ const started=await f.service.command(created.runId,'run',input);
+ const next=await f.settle(started);
+ assert.notEqual(next.runId,created.runId,'completed planning must produce its execution successor');
+ assert.equal(next.status,'waiting-for-human');
+ assert.equal(next.nodes.find(node=>node.id==='approve-plan').status,'waiting-for-human');
+ assert.deepEqual(f.calls.map(call=>call.action),['ai-analyze','ai-plan']);
+ assert.equal(f.service.store.listRunIds().length,2);
+ await f.service.command(created.runId,'run',input);
+ await f.settle(started);
+ assert.equal(f.service.store.listRunIds().length,2,'idempotent run replay must not create another successor');
+ assert.deepEqual(f.calls.map(call=>call.action),['ai-analyze','ai-plan']);
+ assert.equal(f.service.close(),true);
+});
+
+test('stopping a manually started autonomous analysis prevents its continuation',async(t)=>{
+ const f=await fixture(t);
+ const created=await f.service.create({id:'TASK-MANUAL-STOP',goal:'Форма',instructions:'Проверить email',scope:['src'],acceptance:['Email отклонен'],checks:['tests']},{runId:'manual-stop-product',workflow:'autonomous',stage:'planning'});
+ let started,release;
+ const executing=new Promise(resolve=>{started=resolve;});
+ const stopped=new Promise(resolve=>{release=resolve;});
+ t.after(()=>release());
+ const execute=f.service.adapters.execute;
+ f.service.adapters.execute=async(args)=>{
+  const result=await execute(args);
+  started();
+  await stopped;
+  return result;
+ };
+ const running=f.service.command(created.runId,'run',request(created));
+ await executing;
+ assert.equal(f.service.close(),false,'an active command keeps the service open until termination');
+ const active=f.service.snapshot(created.runId);
+ await f.service.command(created.runId,'stop',request(active));
+ release();
+ const result=await f.settle(await running);
+ assert.equal(result.runId,created.runId);
+ assert.equal(result.successorRunId,null);
+ assert.equal(f.service.store.readRun(created.runId).stopRequested,true);
+ assert.deepEqual(f.calls.map(call=>call.action),['ai-analyze']);
+ assert.equal(f.service.store.listRunIds().length,1);
+ assert.equal(f.service.close(),true);
 });
 
 test('после перезапуска готовый read-only анализ продолжается, implementation ждет согласия',async(t)=>{

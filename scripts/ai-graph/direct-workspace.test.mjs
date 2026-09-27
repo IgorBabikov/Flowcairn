@@ -38,6 +38,19 @@ test('project without Git hashes live files but withholds private configuration'
   assert.deepEqual(second.files, first.files);
 });
 
+test('explicit sensitive-path denials do not reject an unchanged direct workspace', (t) => {
+  const root = fixture(t), before = fingerprintDirectWorkspace(root);
+  const reader = { permissions: ['ai.read'], resources: { writes: [] } };
+  const task = { scope: ['src'], forbiddenPaths: ['.npmrc', '.env', '.git', '.ai-orchestrator'] };
+  assert.equal(inspectDirectChanges(before, fingerprintDirectWorkspace(root), reader, task).allowed, true);
+  writeFileSync(path.join(root, '.npmrc'), 'changed-private-example\n');
+  assert.equal(inspectDirectChanges(before, fingerprintDirectWorkspace(root), reader, task).allowed, false);
+  assert.throws(() => inspectDirectChanges(before, before, reader, { ...task, scope: ['.npmrc'] }),
+    { code: 'SENSITIVE_WORKSPACE_PATH' });
+  assert.throws(() => inspectDirectChanges(before, before, reader, { ...task, forbiddenPaths: ['../.npmrc'] }),
+    { code: 'UNSAFE_WORKSPACE_PATH' });
+});
+
 test('direct source stores only verified immutable descriptors and excludes outputs', (t) => {
   const root = fixture(t);
   mkdirSync(path.join(root, 'dist'));
@@ -49,6 +62,29 @@ test('direct source stores only verified immutable descriptors and excludes outp
   assert.ok(!body.includes('result.js'));
   writeFileSync(path.join(root, 'src', 'feature.js'), 'export const ready = false;\n');
   assert.notEqual(captureDirectSource(root, { outputPaths: ['dist'] }).manifest.sourceHash, source.manifest.sourceHash);
+});
+
+test('conventional coverage outputs never invalidate direct source evidence', (t) => {
+  const root = fixture(t);
+  mkdirSync(path.join(root, 'coverage', '.tmp'), { recursive: true });
+  writeFileSync(path.join(root, 'coverage', '.tmp', 'part.json'), '{"hit":1}');
+  const first = fingerprintDirectWorkspace(root);
+  assert.ok(!first.files.some(file => file.path.startsWith('coverage/')));
+  writeFileSync(path.join(root, 'coverage', '.tmp', 'another.json'), '{"hit":2}');
+  assert.equal(fingerprintDirectWorkspace(root).hash, first.hash);
+  writeFileSync(path.join(root, 'src', 'feature.js'), 'export const ready = false;\n');
+  assert.notEqual(fingerprintDirectWorkspace(root).hash, first.hash);
+});
+
+test('check caches do not invalidate evidence while linter configuration still does', (t) => {
+  const root = fixture(t);
+  writeFileSync(path.join(root, '.eslintrc.json'), '{"rules":{}}');
+  const first = fingerprintDirectWorkspace(root);
+  for (const file of ['.eslintcache', '.stylelintcache', 'tsconfig.tsbuildinfo'])
+    writeFileSync(path.join(root, file), '{"generated":true}');
+  assert.equal(fingerprintDirectWorkspace(root).hash, first.hash);
+  writeFileSync(path.join(root, '.eslintrc.json'), '{"rules":{"eqeqeq":"error"}}');
+  assert.notEqual(fingerprintDirectWorkspace(root).hash, first.hash);
 });
 
 test('direct project rejects links in source and protected roots', (t) => {
@@ -157,4 +193,20 @@ test('AI inventories include ignored safe names and exclude content secrets and 
   writeFileSync(path.join(root, 'internal.md'), 'changed confidential note');
   assert.notEqual(adapters.fingerprint(root).hash, rawBefore.hash);
   assert.notEqual(adapters.projectSummary().contextHash, project.contextHash);
+});
+
+test('direct rebind uses newly confirmed output paths without changing the project root', t => {
+  const root = realpathSync(fixture(t));
+  mkdirSync(path.join(root, 'client'));
+  writeFileSync(path.join(root, 'client', 'bundle.js'), 'generated');
+  const first = captureDirectSource(root, { outputPaths: [] });
+  const binding = allocateDirectBinding({ root, task: { id: 'task-outputs' }, runId: 'run-outputs-old',
+    sourceHash: first.manifest.sourceHash, owner: 'fixture', outputPaths: [] });
+  const source = captureDirectSource(root, { outputPaths: ['client'] });
+  const next = replaceDirectBinding({ root, binding, runId: binding.runId, newRunId: 'run-outputs-new',
+    sourceHash: source.manifest.sourceHash, previousRunStopped: true, outputPaths: ['client'] });
+  assert.equal(next.worktree, root);
+  assert.deepEqual(next.outputPaths, ['client']);
+  assert.equal(next.sourceHash, source.manifest.sourceHash);
+  assert.deepEqual(verifyDirectBinding(root, next), next);
 });

@@ -40,6 +40,8 @@ import { providerToolchain } from './providers.mjs';
 import { codexModelSettings } from './codex-settings.mjs';
 import { managedProviderExecutable } from './managed-runtime.mjs';
 import { buildProjectInstructionContext } from './project-instruction-context.mjs';
+import { priorEvidenceLimit } from './context-limits.mjs';
+import { runnerOutcome } from './runner-outcome.mjs';
 import { EXTERNAL_WORKER_FILE, MAX_AI_PROCESS_OUTPUT, assertNoSymlinkAncestors, safeEnvironment, aiEnvironment, createExclusiveFile, makeAiCommand, makeExternalCommand, instructionDenials, selectedSourceContext, cleanupPrepared, aiResponseSchema } from './runner-ai-command.mjs';
 
 const NODE_BINARY = realpathSync(process.execPath);
@@ -119,7 +121,7 @@ function parseInputs({ node, task, plan, skills, priorEvidence, reviewEvidence }
   }
   if (priorEvidence !== undefined && priorEvidence !== null) {
     assertJsonBounds(priorEvidence, 5_000);
-    if (Buffer.byteLength(JSON.stringify(priorEvidence)) > 32 * 1024) {
+    if (Buffer.byteLength(JSON.stringify(priorEvidence)) > priorEvidenceLimit(parsedNode.data.action.id)) {
       fail('RUNNER_EVIDENCE_LIMIT', 'Prior evidence превышает лимит');
     }
   }
@@ -368,6 +370,7 @@ function codexHelp(entry, args, requiredFlags) {
 
 function verifyCodexCapabilities(entry) {
   const execFlags = [
+    '--ignore-user-config',
     '--ignore-rules',
     '--strict-config',
     '--ephemeral',
@@ -925,7 +928,9 @@ export async function runRegisteredAction({
     const finalPromise = waitForControl(
       supervisor.stdio[3],
       'finished',
-      input.task.limits.timeoutMs + STOP_GRACE_MS + 2_000,
+      // GO transport/startup can wait behind synchronous project validation.
+      // The supervisor independently enforces the action's unchanged timeout.
+      input.task.limits.timeoutMs + SUPERVISOR_READY_TIMEOUT_MS + STOP_GRACE_MS + 2_000,
       {
         child: supervisor,
         timeoutCode: 'RUNNER_RESULT_TIMEOUT',
@@ -950,10 +955,12 @@ export async function runRegisteredAction({
     let final = null;
     let stopped;
     let controlFailure = null;
+    let controlTimedOut = false;
     try {
       final = await finalPromise;
     } catch (error) {
       controlFailure = error;
+      controlTimedOut = error?.code === 'RUNNER_RESULT_TIMEOUT';
     } finally {
       signal?.removeEventListener('abort', abort);
       supervisor.stdin.destroy();
@@ -999,18 +1006,13 @@ export async function runRegisteredAction({
       controlFailure = error;
       output = null;
     }
-    const failureReason = aborted
-      ? 'ABORTED'
-      : (final?.failureReason ?? controlFailure?.code ?? controlFailure?.message ?? null);
+    const outcome = runnerOutcome({ final, controlFailure, controlTimedOut, aborted });
     const uncertain = !stopped;
     return {
-      exitCode: controlFailure ? 1 : (final?.exitCode ?? null),
+      ...outcome,
       output,
       stopped,
       uncertain,
-      failureReason,
-      timedOut: failureReason === 'TIMEOUT',
-      outputLimit: failureReason === 'OUTPUT_LIMIT',
       durationMs,
       process: processMetadata,
       execution: executionMetadata(prepared, output, final?.usage ?? null),

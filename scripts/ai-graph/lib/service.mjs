@@ -440,7 +440,8 @@ export class WorkflowService {
         return;
       }
       if (caps.run.run.allowed) {
-        await this.command(runId, 'run', request, { actor: state.actor });
+        // The current drive owns every successor in this bounded pass.
+        await this.#trackedCommand(runId, 'run', request, { actor: state.actor }, false);
         continue;
       }
       const discovered = await this.#discoverPlanningContext(state, task, plan, request, caps);
@@ -684,29 +685,30 @@ export class WorkflowService {
       fail('STALE_CONTEXT', 'Снимок изменился после выбора файлов. Подтвердите актуальную область задачи.');
     const task = TaskSpecSchema.parse({ ...taskInput, schemaVersion: 2, sourceHash });
     const taskHash = this.store.putObject('tasks', task);
-    const context = {
-      runtimeHash: this.adapters.identity(),
-      skills: this.adapters.skills(task),
-      resolveSkills: this.adapters.resolveSkills,
-      resolveReadPaths: this.adapters.resolveReadPaths,
-      contextHash: this.adapters.contextHash?.(task),
-      version,
-      parentPlanHash,
-      workflow,
-      analysisArtifact,
-      taskContract,
-      provider: this.adapters.project?.ai.provider,
-    };
-    if (workflow === 'autonomous' && stage === 'planning' && !this.#hasReadConsent())
-      fail('ONBOARDING_REQUIRED', 'Нет локального согласия на чтение выбранным AI');
-    const compiled = (stage === 'planning' ? compilePlanningPlan : compilePlan)(task, context).plan;
-    const staged = { ...compiled, ...(stage ? { stage } : {}), ...(workflow === 'autonomous' ? { workflow, autonomy: autonomyForNodes(draft?.nodes ?? compiled.nodes) } : {}) };
-    const proposal = draft ? { ...staged, nodes: draft.nodes, skills: context.skills.filter((skill) => draft.nodes.some((node) => node.skills.includes(skill.id))) } : staged;
-    proposal.taskContract = taskContract ?? proposal.taskContract ?? buildTaskContract(task, {
-      steps: proposal.nodes.filter((node) => node.action.id === 'ai-implement').map((node) => ({ id: node.id, nodeId: node.id, paths: node.resources.writes })),
+    const plan = this.#withReadContext(() => {
+      const context = {
+        runtimeHash: this.adapters.identity(),
+        skills: this.adapters.skills(task),
+        resolveSkills: this.adapters.resolveSkills,
+        resolveReadPaths: this.adapters.resolveReadPaths,
+        contextHash: this.adapters.contextHash?.(task),
+        version,
+        parentPlanHash,
+        workflow,
+        analysisArtifact,
+        taskContract,
+        provider: this.adapters.project?.ai.provider,
+      };
+      if (workflow === 'autonomous' && stage === 'planning' && !this.#hasReadConsent())
+        fail('ONBOARDING_REQUIRED', 'Нет локального согласия на чтение выбранным AI');
+      const compiled = (stage === 'planning' ? compilePlanningPlan : compilePlan)(task, context).plan;
+      const staged = { ...compiled, ...(stage ? { stage } : {}), ...(workflow === 'autonomous' ? { workflow, autonomy: autonomyForNodes(draft?.nodes ?? compiled.nodes) } : {}) };
+      const proposal = draft ? { ...staged, nodes: draft.nodes, skills: context.skills.filter((skill) => draft.nodes.some((node) => node.skills.includes(skill.id))) } : staged;
+      proposal.taskContract = taskContract ?? proposal.taskContract ?? buildTaskContract(task, {
+        steps: proposal.nodes.filter((node) => node.action.id === 'ai-implement').map((node) => ({ id: node.id, nodeId: node.id, paths: node.resources.writes })),
+      });
+      return validatePlan(proposal, task, context).plan;
     });
-    const validated = validatePlan(proposal, task, context),
-      plan = validated.plan;
     const planHash = this.store.putObject('plans', plan);
     const envelope = PlanningEnvelopeSchema.parse({
       schemaVersion: 2,
@@ -780,13 +782,15 @@ export class WorkflowService {
     const task = TaskSpecSchema.parse(this.store.readObject('tasks', state.taskHash));
     const plan = this.store.readObject('plans', state.planHash);
     assertPlanHash(plan, state.planHash);
-    validatePlan(
+    const validateCurrentPlan = () => validatePlan(
       plan,
       task,
       current
         ? { runtimeHash: this.adapters.identity(), skills: this.adapters.skills(task), resolveSkills: this.adapters.resolveSkills, resolveReadPaths: this.adapters.resolveReadPaths, contextHash: this.adapters.contextHash?.(task), provider: this.adapters.project?.ai.provider }
         : { mode: 'historical' },
     );
+    if (current) this.#withReadContext(validateCurrentPlan);
+    else validateCurrentPlan();
     const envelope = PlanningEnvelopeSchema.parse(
       this.store.readObject('envelopes', state.envelopeHash),
     );
@@ -1103,12 +1107,20 @@ export class WorkflowService {
     }, runId, verifySource);
   }
 
+  #withReadContext(read) {
+    return this.adapters.withReadContext ? this.adapters.withReadContext(read) : read();
+  }
+
   // SSE carries only persisted revision hints. It never evaluates execution permission.
   revision(runId) {
     return this.store.revision(runId);
   }
 
   listRuns() {
+    return this.#withReadContext(() => this.#listRuns());
+  }
+
+  #listRuns() {
     // Listing history must not rehash every source archive or spawn ownership checks.
     // Capabilities and full source integrity are evaluated when opening a snapshot/command.
     let context = null,
@@ -1306,10 +1318,13 @@ export class WorkflowService {
   }
 
   async command(runId, name, input, options = {}) {
-    this.#assertOpen(); this.pendingMutations++;
-    try { return await this.#command(runId, name, input, options); } finally { this.pendingMutations--; }
+    return this.#trackedCommand(runId, name, input, options);
   }
-  async #command(runId, name, input, { actor = 'local-operator' } = {}) {
+  async #trackedCommand(runId, name, input, options, scheduleContinuation = true) {
+    this.#assertOpen(); this.pendingMutations++;
+    try { return await this.#command(runId, name, input, options, scheduleContinuation); } finally { this.pendingMutations--; }
+  }
+  async #command(runId, name, input, { actor = 'local-operator' } = {}, scheduleContinuation = true) {
     this.#assertOpen();
     assertJsonBounds(input);
     const request = ControlRequestSchema.parse(input);
@@ -1569,6 +1584,8 @@ export class WorkflowService {
       if (deadlineTimer) clearTimeout(deadlineTimer);
       this.active.delete(runId);
     }
+    if (scheduleContinuation && plan.workflow === 'autonomous' && plan.stage === 'planning' &&
+        state.status === 'passed' && !state.stopRequested) this.#schedule(runId);
     return this.snapshot(runId);
   }
 
@@ -1665,7 +1682,7 @@ export class WorkflowService {
   }
 
   #replanHost() {
-    return { store: this.store, adapters: this.adapters,
+    return { store: this.store, adapters: this.adapters, withReadContext: this.#withReadContext.bind(this),
       semanticUncertainty: this.#semanticUncertainty.bind(this), assertWorkspace: this.#assertWorkspace.bind(this),
       read: this.#read.bind(this), analysis: this.#analysis.bind(this), artifact: this.#artifact.bind(this),
       assertConfiguredChecks, write: this.#write.bind(this), create: this.create.bind(this),
@@ -1686,7 +1703,8 @@ export class WorkflowService {
     if (request.contextSelection && (policyGrant || request.draft || !this.#contextClarification(state, plan)))
       fail('CONTEXT_CLARIFICATION_DENIED', 'Область можно уточнить после остановленного анализа, до согласования реализации');
     if (policyGrant && state.binding) await this.#assertWorkspace(state);
-    return replanRun(this.#replanHost(), { state, task, plan, request, digest, actor, policyGrant, discoveryChange });
+    const freshPlanningSource = Boolean(request.contextSelection) && state.binding?.mode === 'direct' && this.#contextClarification(state, plan);
+    return replanRun(this.#replanHost(), { state, task, plan, request, digest, actor, policyGrant, discoveryChange, freshPlanningSource });
   }
   async #finishReplan(state, request, digest, actor, prior) {
     return finishReplan(this.#replanHost(), state, request, digest, actor, prior);

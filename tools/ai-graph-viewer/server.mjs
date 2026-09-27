@@ -9,7 +9,10 @@ const TYPES = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
+  '.woff2': 'font/woff2',
 };
+const STATIC_FILES = new Set(['index.html', 'app.js', 'app.css',
+  'fonts/Manrope-Cyrillic-Variable.woff2', 'fonts/Manrope-Latin-Variable.woff2']);
 
 export function startViewer({ service, token, port = 4329, dist = path.join(DIRECTORY, 'dist') }) {
   if (!/^[a-zA-Z0-9_-]{24,128}$/.test(token))
@@ -107,7 +110,7 @@ export function startViewer({ service, token, port = 4329, dist = path.join(DIRE
       return response.end();
     }
     const name = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
-    if (!['index.html', 'app.js', 'app.css'].includes(name))
+    if (!STATIC_FILES.has(name))
       return send(response, 404, { error: 'not-found' });
     try {
       const file = path.join(dist, name),

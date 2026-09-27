@@ -11,6 +11,7 @@ import { boundPriorEvidence } from './bounded-context.mjs';
 import { selectAnalysisEvidence } from './analysis-evidence.mjs';
 import { normalizeRequirementReview, validateRequirementAssessments } from './requirement-verification.mjs';
 import { projectContextMap } from './project-context-map.mjs';
+import { MAX_ANALYSIS_BYTES } from './context-limits.mjs';
 
 const fail = (code, message) => { throw new GraphError(code, message); };
 const unique = (values) => [...new Set(values)];
@@ -154,13 +155,6 @@ export async function executeNode(host, state, task, plan, definition, signal) {
             })
             .slice(-12),
         };
-        while (Buffer.byteLength(JSON.stringify(priorEvidence)) > 30 * 1024) {
-          if (priorEvidence.artifacts.length) priorEvidence.artifacts.shift();
-          else if (priorEvidence.workspaceFiles.length) {
-            priorEvidence.workspaceFiles.pop();
-            priorEvidence.workspaceFilesTruncated = true;
-          } else fail('CONTEXT_LIMIT', 'Структурированный анализ превышает допустимый размер');
-        }
         if (plan.workflow === 'autonomous' && definition.action.id === 'ai-plan' && !priorEvidence.analysis && plan.taskContract?.rigor.level !== 'light')
           fail('ANALYSIS_REQUIRED', 'План требует сохраненного результата анализа');
         priorEvidence = boundPriorEvidence({ task, plan, node: definition, state, priorEvidence,
@@ -212,6 +206,7 @@ export async function executeNode(host, state, task, plan, definition, signal) {
       if (
         definition.action.id.startsWith('ai-') &&
         result.exitCode === 0 &&
+        !result.failureReason &&
         result.stopped &&
         !result.uncertain
       ) {
@@ -235,7 +230,7 @@ export async function executeNode(host, state, task, plan, definition, signal) {
           validateRequirementAssessments({ output: aiOutput, plan, node: definition, worktree: state.binding.worktree, fingerprint: before });
         }
         if (definition.action.id === 'ai-analyze' && plan.workflow === 'autonomous') {
-          if (Buffer.byteLength(JSON.stringify(aiOutput)) > 20 * 1024) fail('ANALYSIS_LIMIT', 'Анализ превышает ограниченный контекст передачи');
+          if (Buffer.byteLength(JSON.stringify(aiOutput)) > MAX_ANALYSIS_BYTES) fail('ANALYSIS_LIMIT', 'Анализ превышает 32 KiB; нужен более краткий результат с сохранением всех требований');
           if (AIAnalysisResultSchema.parse(aiOutput).analysis.projectFacts.some((fact) => !definition.resources.reads.some((scope) => fact.path === scope.replace(/\/$/, '') || fact.path.startsWith(scope.replace(/\/$/, '') + '/'))))
             fail('ANALYSIS_SCOPE', 'Факты анализа выходят за объявленный контекст');
         }
@@ -293,7 +288,7 @@ export async function executeNode(host, state, task, plan, definition, signal) {
       } else if (!assessment.allowed) {
         verdict = 'fail';
         reason = reason ?? 'Нарушена граница изменений';
-      } else if (result.exitCode !== 0) {
+      } else if (result.exitCode !== 0 || result.failureReason) {
         verdict = 'fail';
         reason = reason ?? host.sanitizeText(result.failureReason ?? 'Действие завершилось с ошибкой');
       } else if (definition.action.id.startsWith('ai-')) {
@@ -377,7 +372,7 @@ export async function executeNode(host, state, task, plan, definition, signal) {
           artifacts.push(host.putArtifact(action.artifacts[0], definition.title, check));
         }
       }
-      if (definition.action.id.startsWith('check-') && result.exitCode !== 0) {
+      if (definition.action.id.startsWith('check-') && (result.exitCode !== 0 || result.failureReason)) {
         const check = {
           id: definition.id,
           passed: false,

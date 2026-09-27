@@ -44,7 +44,7 @@ const args = process.argv.slice(2);
 if (args[0] === '--version') { console.log('codex-cli 9.9.9'); process.exit(0); }
 if (args[0] === 'login') process.exit(0);
 if (args[0] === 'sandbox') { console.log('--permission-profile'); process.exit(0); }
-if (args.includes('--help')) { console.log('--ignore-rules --strict-config --ephemeral --skip-git-repo-check --json --output-schema --output-last-message --cd --config --model'); process.exit(0); }
+if (args.includes('--help')) { console.log('--ignore-user-config --ignore-rules --strict-config --ephemeral --skip-git-repo-check --json --output-schema --output-last-message --cd --config --model'); process.exit(0); }
 const result = { summary: 'native-fixture-cwd:' + process.cwd(), verdict: 'pass', skillsUsed: [], findings: [], changedFiles: [], edits: [], moves: [], jsonTransfers: [], plan: [], reviewEvidenceHash: null };
 process.stdin.resume();
 process.stdin.on('end', () => { fs.writeFileSync(args[args.indexOf('--output-last-message') + 1], JSON.stringify(result)); console.log('fixture completed'); });

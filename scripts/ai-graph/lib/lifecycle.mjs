@@ -1,4 +1,4 @@
-import { isPrivateMode } from './host-filesystem.mjs';
+import { isPrivateMode, sameHostPath } from './host-filesystem.mjs';
 import { randomUUID } from 'node:crypto';
 import { closeSync, constants, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -150,7 +150,13 @@ export async function acquireUninstallGuard({ root }) {
       })];
     }));
     const inventory = () => {
-      const worktrees = new Set(states.flatMap((raw) => [raw.binding, raw.pendingBinding].filter(Boolean).map((binding) => binding.worktree)));
+      const worktrees = new Set(states.flatMap((raw) => [raw.binding, raw.pendingBinding].filter(Boolean).flatMap((binding) => {
+        if (binding.mode === 'direct') {
+          if (!sameHostPath(binding.worktree, ctx.root)) fail('UNINSTALL_WORKTREE_UNKNOWN', 'Прямой запуск относится к другому проекту');
+          return []; // The user project is never an installer-owned worktree.
+        }
+        return [binding.worktree];
+      })));
     const worktreeRoot = path.join(ctx.control, 'worktrees');
     if (exists(worktreeRoot)) {
       directory(ctx.control, 'worktrees');

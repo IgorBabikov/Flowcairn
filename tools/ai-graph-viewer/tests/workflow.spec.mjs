@@ -49,6 +49,7 @@ test('ready analysis shows a permitted start action or an explicit executor prob
 
 test('known startup failure explains what happened and offers a new plan', async ({ page }) => {
   const state = workflow();
+  state.contextClarification = true;
   state.phase = 'planning'; state.status = 'failed'; state.gates = [];
   state.nodes = [{ ...state.nodes[0], status: 'failed', reason: 'RUNNER_READY_TIMEOUT', capabilities: { ...allDenied, requestReplan: allowed } }];
   state.capabilities = { ...allDenied, requestReplan: allowed };
@@ -105,6 +106,20 @@ test('mismatched plan is never approved', async ({page}) => {
   await mockApi(page,current);await page.goto(`/#session=${token}`);
   await expect(page.getByRole('button',{name:'Согласовать и начать выполнение',exact:true})).toBeDisabled();
   await expect(page.getByText('Проверяем сохраненный план…')).toBeVisible();
+});
+
+test('runtime update exposes permitted plan revision without approving stale work', async ({ page }) => {
+  const state = workflow();
+  state.integrity = { valid: false, reason: 'RUNTIME_DRIFT: Runtime изменился' };
+  state.status = 'stale'; state.capabilities = { ...allDenied, revisePlan: allowed };
+  state.gates = []; state.nodes = state.nodes.map(node => ({ ...node, capabilities: allDenied }));
+  const fixture = await mockApi(page, state);
+  await page.goto(`/#session=${token}`);
+  await expect(page.getByTestId('task-proof-status')).toHaveText('План требует обновления');
+  await expect(page.getByRole('button', { name: 'Согласовать и начать выполнение', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Обновить план', exact: true }).click();
+  expect(fixture.calls.filter(call => call.action === 'revise-plan')).toHaveLength(1);
+  expect(fixture.calls.filter(call => ['gate', 'run'].includes(call.action))).toHaveLength(0);
 });
 test('completion requires explicit ready-for-review evidence', async ({page}) => {
   const current=workflow();current.status='passed';current.completion='ready-for-review';current.gates=[];current.delivery={workspacePath:'.ai-orchestrator/worktrees/form-12-1'};

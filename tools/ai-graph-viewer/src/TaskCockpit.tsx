@@ -18,15 +18,17 @@ function date(value: string | null) {
   return value && !Number.isNaN(Date.parse(value)) ? new Date(value).toLocaleString('ru-RU') : 'Время не передано';
 }
 
-function blockerText(reason: string, proof: TaskProof) {
-  if (reason === 'Исполнение находится в состоянии cancelled') return 'Выполнение остановлено пользователем.';
-  if (reason === 'Исполнение находится в состоянии failed') return 'Этап завершился с ошибкой; откройте причину выше.';
-  if (reason === 'Исполнение находится в состоянии uncertain') return 'Исход этапа не подтвержден; требуется восстановление.';
+function blockerParts(reason: string, proof: TaskProof, progressing = false) {
+  if (reason === 'Исполнение находится в состоянии cancelled') return { title: 'Выполнение остановлено', separator: ': ', detail: 'Пользователь остановил этот запуск.' };
+  if (reason === 'Исполнение находится в состоянии failed') return { title: 'Этап завершился с ошибкой', separator: ': ', detail: 'Откройте причину выше.' };
+  if (reason === 'Исполнение находится в состоянии uncertain') return { title: 'Исход этапа не подтвержден', separator: ': ', detail: 'Требуется восстановление.' };
   const check = /^Обязательная проверка (check-[a-z]+) не подтверждена на текущем результате$/.exec(reason);
-  if (check?.[1]) return `${checkLabels[check[1]] ?? 'Проверку'} нужно повторить для текущего состояния файлов.`;
+  if (check?.[1]) return progressing
+    ? { title: 'Ожидается актуальный результат', separator: ': ', detail: `${checkLabels[check[1]] ?? 'Проверка'}.` }
+    : { title: checkLabels[check[1]] ?? 'Проверку', separator: ' ', detail: 'нужно повторить для текущего состояния файлов.' };
   const requirement = proof.requirements.find(item => reason.startsWith(`${item.id}: `));
-  if (requirement) return `${requirement.title}: ${humanText(reason.slice(requirement.id.length + 2))}`;
-  return humanText(reason);
+  if (requirement) return { title: requirement.title, separator: ': ', detail: humanText(reason.slice(requirement.id.length + 2)) };
+  return { title: 'Проверка результата', separator: ': ', detail: humanText(reason) };
 }
 
 export function TaskCockpit({ snapshot, busy, unavailable = false, embedded = false, wide = false, onOpenEvidence, onOpenArtifact, onAcceptRequirement }: {
@@ -43,19 +45,33 @@ export function TaskCockpit({ snapshot, busy, unavailable = false, embedded = fa
   const [view, setView] = useState<View>('requirements');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   if (!proof) return null;
+  const runtimeDrift = !unavailable && snapshot.integrity.reason?.startsWith('RUNTIME_DRIFT:')
+    ? runtimeProblem(snapshot.integrity.reason) : null;
   if (unavailable || !snapshot.integrity.valid) return <section className="task-cockpit" aria-label="Задача и доказательства"><header className="cockpit-header">
     <h2>Актуальность результата не подтверждена</h2>
-    <p role="status">Не удалось прочитать текущее состояние задачи. Предыдущие результаты проверок и отчет скрыты до успешного обновления.</p>
+    <p role="status">{runtimeDrift ? `${runtimeDrift.summary} ${runtimeDrift.action}`
+      : 'Не удалось прочитать текущее состояние задачи. Предыдущие результаты проверок и отчет скрыты до успешного обновления.'}</p>
   </header></section>;
   const selected = proof.requirements.find(item => item.id === selectedId) ?? proof.requirements.find(item => item.status !== 'proven') ?? proof.requirements[0];
   const proven = snapshot.integrity.valid && proof.status === 'PROVEN';
+  const progressing = snapshot.status === 'running' && proof.status === 'RUNNING';
   const current = snapshot.nodes.find(node => node.id === snapshot.activeNodeId);
   const changes = proof.changedFiles ?? [...new Set(snapshot.nodes.flatMap(node => node.changedFiles))];
   const openFindings = proof.findings.filter(finding => finding.status === 'open');
-  const failedNode = snapshot.nodes.find(node => node.status === 'failed');
+  const failedNode = snapshot.nodes.find(node => node.status === 'failed') ?? snapshot.nodes.find(node => node.status === 'uncertain');
   const failureSource = snapshot.failureReason || failedNode?.reason;
-  const runtimeFailure = snapshot.status === 'failed' ? runtimeProblem(failureSource) : null;
+  const runtimeFailure = ['failed', 'uncertain'].includes(snapshot.status) ? runtimeProblem(failureSource) : null;
   const diagnostic = runtimeFailure ? technicalProblem(failureSource) : null;
+  const placeholderContract = snapshot.phase === 'planning' && proof.requirements.length === 1 &&
+    proof.requirements[0]?.title.trim() === snapshot.task?.description?.trim();
+  if (placeholderContract) return <section className="task-cockpit" aria-label="Задача и доказательства">
+    <h3>Требования еще формируются</h3>
+    <p>После успешного анализа здесь появятся отдельные требования и способы их проверки. Исходное описание сохранено выше.</p>
+    {runtimeFailure && <div className="workflow-problem" role="alert">
+      <strong>{runtimeFailure.title}</strong><p>{runtimeFailure.summary}</p><p>{runtimeFailure.action}</p>
+      {diagnostic && <TechnicalDetails code={diagnostic.code} message={diagnostic.message} />}
+    </div>}
+  </section>;
   const selectRequirement = (id: string) => { setSelectedId(id); setView('requirements'); };
   return <section className="task-cockpit" aria-label="Задача и доказательства">
     <header className="cockpit-header">
@@ -75,8 +91,11 @@ export function TaskCockpit({ snapshot, busy, unavailable = false, embedded = fa
         <p>{runtimeFailure.action}</p>
         {diagnostic && <TechnicalDetails code={diagnostic.code} message={diagnostic.message} />}
       </div>}
-      {current && !proven && <p className="cockpit-current"><strong>Сейчас:</strong> {nodeTitle(current, 'ru')}<span>{current.outcome}</span></p>}
-      {proof.blockers.length > 0 && <div className="proof-blockers"><strong>Что мешает завершению</strong><ul>{proof.blockers.map((reason, index) => <li key={index}>{blockerText(reason, proof)}</li>)}</ul></div>}
+      {current && !proven && !embedded && <p className="cockpit-current"><strong>Сейчас:</strong> {nodeTitle(current, 'ru')}<span>{current.outcome}</span></p>}
+      {proof.blockers.length > 0 && <details className="proof-blockers" open={!progressing && proof.blockers.length <= 3}>
+        <summary><span>{progressing ? 'Что осталось проверить' : 'Что мешает завершению'}</span><span className="proof-blockers-count">{proof.blockers.length}</span></summary>
+        <ul>{proof.blockers.map((reason, index) => { const parts = blockerParts(reason, proof, progressing); return <li key={index}><strong>{parts.title}</strong><span>{parts.separator}{parts.detail}</span></li>; })}</ul>
+      </details>}
     </header>
     <div className="cockpit-content">
       {proven && proof.certificate && <Certificate expanded={!wide} proof={proof} onSelectRequirement={selectRequirement} />}

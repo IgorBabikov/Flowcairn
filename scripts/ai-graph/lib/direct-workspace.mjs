@@ -1,5 +1,5 @@
 import { lstatHostSync as lstatSync, fstatHostSync as fstatSync } from './host-filesystem.mjs';
-import { hasSecretContent } from './source-policy.mjs';
+import { classifySource, hasSecretContent } from './source-policy.mjs';
 import { closeSync, openSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { noFollowReadFlags, crossStatIdentity } from './host-filesystem.mjs';
@@ -63,7 +63,7 @@ function scan(root, outputPaths) {
         if (excluded.isSymbolicLink()) fail('DIRECT_LINK', `Недопустимая ссылка: ${file}`);
         continue;
       }
-      if (outputPaths.some((prefix) => within(file, prefix))) {
+      if (classifySource(file).reason === 'output' || outputPaths.some((prefix) => within(file, prefix))) {
         if (lstatSync(target).isSymbolicLink()) fail('DIRECT_LINK', `Недопустимая ссылка в результатах: ${file}`);
         continue;
       }
@@ -79,24 +79,30 @@ function scan(root, outputPaths) {
     }
     const after = lstatSync(directory);
     if (after.ino !== before.ino || after.dev !== before.dev || after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs)
-      fail('DIRECT_CHANGED', 'Каталог проекта изменился во время проверки');
+      fail('DIRECT_CHANGED', `Каталог проекта изменился во время проверки: ${relative || '.'}`);
   };
   walk(root, '', 0);
   const byPath = (left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0;
   return { files: files.sort(byPath), privateFiles: privateFiles.sort(byPath) };
 }
 
-/** Hash the live project directory. Sensitive files affect freshness but never enter AI file lists. */
-export function fingerprintDirectWorkspace(root, { outputPaths = [], baselinePaths = [] } = {}) {
-  const canonical = realpathSync(root);
-  if (!lstatSync(canonical).isDirectory()) fail('DIRECT_ROOT', 'Нужен каталог проекта');
-  if (!Array.isArray(outputPaths) || outputPaths.length > 128 || !Array.isArray(baselinePaths) || baselinePaths.length > 512)
+export function validateDirectOutputPaths(outputPaths) {
+  if (!Array.isArray(outputPaths) || outputPaths.length > 128)
     fail('DIRECT_OPTIONS', 'Слишком много путей проверки');
   const outputs = stable(outputPaths);
   if (outputs.some((value) => typeof value !== 'string' || !value || value.startsWith('/') || value.includes('..') ||
     value.split('/').some((part) => !part || PRIVATE_ROOTS.has(part) || isSensitivePath(part)) ||
     ['src', 'app', 'lib', 'scripts', 'test', 'tests', 'package.json'].some((source) => within(source, value))))
     fail('DIRECT_OPTIONS', 'Каталог исходников нельзя исключить как результат сборки');
+  return outputs;
+}
+
+/** Hash the live project directory. Sensitive files affect freshness but never enter AI file lists. */
+export function fingerprintDirectWorkspace(root, { outputPaths = [], baselinePaths = [] } = {}) {
+  const canonical = realpathSync(root);
+  if (!lstatSync(canonical).isDirectory()) fail('DIRECT_ROOT', 'Нужен каталог проекта');
+  if (!Array.isArray(baselinePaths) || baselinePaths.length > 512) fail('DIRECT_OPTIONS', 'Слишком много путей проверки');
+  const outputs = validateDirectOutputPaths(outputPaths);
   const first = scan(canonical, outputs), second = scan(canonical, outputs);
   if (canonicalJson(first) !== canonicalJson(second)) fail('DIRECT_CHANGED', 'Проект изменился во время проверки');
   if (baselinePaths.some((file) => !second.files.some((entry) => entry.path === file)))

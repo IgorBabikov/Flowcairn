@@ -19,6 +19,12 @@ import { isSnapshot } from './contracts';
 const SESSION_KEY = 'flowcairn.graph.session';
 let cachedSessionToken: string | null | undefined;
 
+export type ReadApiError = ApiError & { readResource: string };
+export const snapshotResource = (runId: string) => `/api/runs/${encodeURIComponent(runId)}/snapshot`;
+export function isReadApiError(error: ApiError | null): error is ReadApiError {
+  return error?.code === 'READ_UNAVAILABLE' && 'readResource' in error && typeof error.readResource === 'string';
+}
+
 // A new launch URL may only change the fragment in an already open tab.
 // Reload so the new server session and persisted snapshot are initialized together.
 if (typeof window !== 'undefined')
@@ -82,6 +88,14 @@ async function requestJson<T>(url: string, init: RequestInit = {}): Promise<T> {
       },
     });
   } catch {
+    if (['GET', 'HEAD'].includes((init.method ?? 'GET').toUpperCase())) {
+      throw {
+        code: 'READ_UNAVAILABLE',
+        message: 'Не удалось обновить данные: ответ локального сервиса не получен.',
+        retryable: true,
+        readResource: url,
+      } satisfies ReadApiError;
+    }
     throw {
       code: 'NETWORK_UNCERTAIN',
       message: 'Ответ сервера не получен. Результат операции неизвестен.',
@@ -166,7 +180,7 @@ export const api = {
     return body.result;
   },
   async snapshot(runId: string): Promise<Snapshot> {
-    const body = await requestJson<unknown>(`/api/runs/${encodeURIComponent(runId)}/snapshot`);
+    const body = await requestJson<unknown>(snapshotResource(runId));
     if (!isSnapshot(body)) {
       throw {
         code: 'INVALID_SNAPSHOT',

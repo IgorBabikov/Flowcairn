@@ -160,6 +160,7 @@ export async function supervise(ticketPath) {
   let stderrBytes = 0;
   let diagnostic = Buffer.alloc(0);
   let stderrDiagnostic = Buffer.alloc(0);
+  let inputClosed = false;
   const stdoutHash = createHash('sha256');
   const stderrHash = createHash('sha256');
   const usageCollector = createUsageCollector();
@@ -288,6 +289,12 @@ export async function supervise(ticketPath) {
       if (windowsJob) { windowsJob.dispose(); windowsJob = null; }
       finish(null, null, `SPAWN_ERROR:${errorCode(error)}`);
     });
+    action.stdin.on('error', (error) => {
+      inputClosed = true;
+      // A CLI can reject startup before consuming stdin. Preserve its close
+      // event and diagnostic instead of crashing the supervisor on EPIPE.
+      if (!['EPIPE', 'ECONNRESET'].includes(errorCode(error))) terminate('INPUT_PIPE_FAILED');
+    });
     const collect = (stream, digest, isStdout) => {
       stream.on('data', (data) => {
         digest.update(data);
@@ -327,9 +334,9 @@ export async function supervise(ticketPath) {
       }
       if (process.platform === 'win32' && terminatingReason && !windowsStopVerified) return;
       finish(
-        code,
+        inputClosed && code === 0 ? 1 : code,
         signal,
-        terminatingReason ?? (code === 0 ? null : classifyAiFailure(diagnostic.toString('utf8'), stderrDiagnostic.toString('utf8'))),
+        terminatingReason ?? (code === 0 ? inputClosed ? 'INPUT_PIPE_CLOSED' : null : classifyAiFailure(diagnostic.toString('utf8'), stderrDiagnostic.toString('utf8'))),
       );
     });
     action.stdin.end(message.input);

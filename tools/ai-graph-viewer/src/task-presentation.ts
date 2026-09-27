@@ -14,6 +14,8 @@ const proofLabels = {
 export function taskStatusLabel(snapshot: Snapshot, execution: ExecutionPresentation, unavailable = false): string {
   const failedNode = snapshot.nodes.find(node => node.status === 'failed');
   const failure = runtimeProblem(snapshot.failureReason || failedNode?.reason);
+  if (!unavailable && !snapshot.integrity.valid && snapshot.integrity.reason?.startsWith('RUNTIME_DRIFT:'))
+    return runtimeProblem(snapshot.integrity.reason)?.title ?? 'План требует обновления';
   return unavailable || !snapshot.integrity.valid
     ? 'Состояние недоступно'
     : snapshot.status === 'cancelled'

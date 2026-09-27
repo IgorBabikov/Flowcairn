@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { request as httpRequest } from 'node:http';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -11,6 +11,9 @@ const token = 'fixture-capability-1234567890';
 async function fixture(t) {
   const dist = mkdtempSync(path.join(os.tmpdir(), 'graph-http-'));
   writeFileSync(path.join(dist, 'index.html'), '<html><head></head><body></body></html>');
+  mkdirSync(path.join(dist, 'fonts'));
+  for (const name of ['Manrope-Cyrillic-Variable.woff2', 'Manrope-Latin-Variable.woff2', 'unlisted.woff2'])
+    writeFileSync(path.join(dist, 'fonts', name), `font-fixture:${name}`);
   const calls = [];
   const lifecycle = [];
   const service = {
@@ -84,6 +87,20 @@ test('all data reads require bearer header and exact local origin; page has no i
   assert.ok(!html.includes('<script>'));
   assert.ok(page.headers.get('content-security-policy').includes("script-src 'self';"));
   assert.equal(page.headers.get('cache-control'), 'no-store');
+});
+
+test('bundled font assets load with the correct type without opening arbitrary static paths', async (t) => {
+  const f = await fixture(t);
+  for (const name of ['Manrope-Cyrillic-Variable.woff2', 'Manrope-Latin-Variable.woff2']) {
+    const response = await fetch(`${f.url}/fonts/${name}`);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('content-type'), 'font/woff2');
+    assert.equal(await response.text(), `font-fixture:${name}`);
+    const head = await fetch(`${f.url}/fonts/${name}`, { method: 'HEAD' });
+    assert.equal(head.status, 200);
+    assert.equal(await head.text(), '');
+  }
+  assert.equal((await fetch(`${f.url}/fonts/unlisted.woff2`)).status, 404);
 });
 
 test('unknown host, paths, methods and oversized bodies are rejected without domain effects', async (t) => {

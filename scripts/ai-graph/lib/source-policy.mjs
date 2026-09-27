@@ -5,6 +5,7 @@ export const normalizeSourcePath = (value) => String(value).normalize('NFKC').re
 const privateDirectories = new Set(['.git', '.ai', '.ai-orchestrator', '.agents', '.flowcairn.json', '.aws', '.azure', '.gcloud', '.ssh', '.kube', 'gcloud', '.codex', '.claude', '.cursor']);
 const dependencyDirectories = new Set(['node_modules', 'vendor', '.venv', 'venv', '__pycache__', '.pnpm-store']);
 const outputDirectories = new Set(['dist', 'build', 'coverage', '.next', '.nuxt', '.cache', 'target']);
+const outputFiles = new Set(['.eslintcache', '.stylelintcache']);
 const binaryExtension = /\.(?:png|jpe?g|gif|webp|ico|avif|pdf|zip|gz|tar|7z|woff2?|ttf|otf|mp[34]|mov|wav|exe|dll|so|dylib|sqlite3?|db|wasm|class|pyc)$/;
 
 export function isSensitivePath(value) {
@@ -30,7 +31,7 @@ export function hasSecretContent(value) {
     || /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/.test(text)
     || /\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-(?:ant-|proj-)?[A-Za-z0-9_-]{20,}|(?:AKIA|ASIA)[A-Z0-9]{16})\b/.test(text)
     || /\b[a-z][a-z0-9+.-]{0,31}:\/\/[^\s/@:]+:[^\s/@]+@/i.test(text)
-    || /["']?(?:password|passwd|pwd|secret|client_secret|api[_-]?key|token|access[_-]?token|auth[_-]?token)["']?\s*[:=]\s*["']?[^\s"'`,;}{]{8,}/i.test(text)
+    || /(?<![A-Za-z0-9_])["']?(?:[A-Za-z][A-Za-z0-9]{0,31}[_-]){0,4}(?:password|passwd|pwd|secret|client_secret|api[_-]?key|token|(?:access|auth|refresh|session|id|api|client|service|bearer|secret)[_-]?token)["']?\s*[:=]\s*["']?[^\s"'`,;}{]{8,}/i.test(text)
     || /(?:secret|password|api[_-]?key)[^\r\n]{0,40}[A-Za-z0-9+/=_-]{32,}/i.test(text);
 }
 
@@ -46,7 +47,7 @@ export function classifySource(value, bytes, { denyGlobs = [] } = {}) {
   if (isSensitivePath(normalized)) return { reason: 'sensitive-path' };
   if (denyGlobs.some((glob) => picomatch(normalizeSourcePath(glob), { dot: true, nonegate: true })(normalized))) return { reason: 'project-deny' };
   if (parts.some((part) => dependencyDirectories.has(part))) return { reason: 'dependency' };
-  if (parts.some((part) => outputDirectories.has(part))) return { reason: 'output' };
+  if (parts.some((part) => outputDirectories.has(part) || outputFiles.has(part) || part.endsWith('.tsbuildinfo'))) return { reason: 'output' };
   if (binaryExtension.test(normalized)) return { reason: 'binary' };
   if (bytes !== undefined && bytes !== null) {
     const buffer = Buffer.from(bytes);

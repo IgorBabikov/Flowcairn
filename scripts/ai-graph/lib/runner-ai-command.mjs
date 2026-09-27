@@ -190,6 +190,7 @@ export function makeAiCommand({
     const effectiveModel = inherited?.model ?? selectedModel;
     const args = [
       'exec',
+      '--ignore-user-config',
       '--ignore-rules',
       '--strict-config',
       '--ephemeral',

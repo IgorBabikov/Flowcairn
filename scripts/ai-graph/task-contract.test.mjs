@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { TaskSpecSchema } from './lib/schemas.mjs';
 import { hashObject } from './lib/io.mjs';
-import { buildTaskContract, selectTaskRigor, validateTaskContract } from './lib/task-contract.mjs';
+import { buildTaskContract, isOmnibusAcceptance, selectTaskRigor, validateTaskContract } from './lib/task-contract.mjs';
 import { boundPriorEvidence, taskContractForNode } from './lib/bounded-context.mjs';
 import { buildPrompt } from './lib/codex.mjs';
 
@@ -73,6 +73,62 @@ test('known anchored analysis references reuse original requirements, including 
   assert.equal(contract.requirements[3].mandatory, true);
 });
 
+test('planner cannot introduce an explicit criterion explanation under a second ID', () => {
+  const detail = 'Export every note title without changing its text';
+  for (const title of [detail, `req-001: ${detail}`, `  ${detail.replaceAll(' ', '  ')}  `]) {
+    const duplicate = { id: 'req-002', title, mandatory: true,
+      verification: { method: 'check', checkIds: ['check-tests'], criterion: title, paths: ['src/export.mjs'] } };
+    assert.throws(() => compile({
+      analysis: { requirements: [`req-001: ${detail}`] },
+      proposal: { ...proposal, requirements: [...proposal.requirements, duplicate] },
+      steps: [{ ...step, requirementIds: ['req-001', 'req-002'] }],
+    }), { code: 'CONTRACT_REQUIREMENT_DUPLICATE' });
+  }
+});
+
+test('grouped references cannot be reintroduced as standalone analysis or proposal obligations', () => {
+  const input = { ...task, acceptance: ['First result', 'Second result'] };
+  const detail = 'Preserve both results while validating their input';
+  const reference = `req-001/002: ${detail}`;
+  const original = buildTaskContract(input);
+  const originalProposal = { ...proposal, requirements: original.requirements.map(({ workIds: _, origin: __, ...item }) => item) };
+  for (const title of [detail, `req-001 / req-002: ${detail}`]) {
+    assert.throws(() => buildTaskContract(input, { analysis: { requirements: [reference] },
+      proposal: { ...originalProposal, requirements: [...originalProposal.requirements, { id: 'req-003', title, mandatory: true,
+        verification: { method: 'human', checkIds: [], criterion: title, paths: ['src'] } }] } }),
+    { code: 'CONTRACT_REQUIREMENT_DUPLICATE' });
+  }
+  assert.throws(() => buildTaskContract(input, { analysis: { requirements: [detail, reference] } }),
+    { code: 'CONTRACT_REQUIREMENT_DUPLICATE' });
+  assert.deepEqual(buildTaskContract(input, { analysis: { requirements: ['req-001: First result', 'First result'] } }).requirements,
+    original.requirements);
+});
+
+test('referenced explanations do not prevent genuinely additional analysis requirements', () => {
+  const detail = 'Export every note title without changing its text';
+  const title = 'Export remains available without a network connection';
+  const additional = { id: 'offline-export', title, mandatory: true,
+    verification: { method: 'check', checkIds: ['check-tests'], criterion: title, paths: ['src/export.mjs'] } };
+  const contract = compile({ analysis: { requirements: [`req-001: ${detail}`, title] },
+    proposal: { ...proposal, requirements: [...proposal.requirements, additional] },
+    steps: [{ ...step, requirementIds: ['req-001', 'offline-export'] }],
+  });
+  assert.deepEqual(contract.requirements[0], compile({ proposal, steps: [step] }).requirements[0]);
+  assert.equal(contract.requirements[1].id, additional.id);
+  assert.equal(contract.requirements[1].title, title);
+  assert.equal(contract.requirements[1].mandatory, true);
+  assert.deepEqual(contract.requirements[1].verification, additional.verification);
+  assert.deepEqual(contract.requirements[1].workIds, ['step-export']);
+});
+
+test('historical contracts retain existing additional IDs rather than silently merging them', () => {
+  const previous = compile({ proposal, steps: [step] });
+  previous.requirements.push({ ...structuredClone(previous.requirements[0]), id: 'req-002',
+    title: 'Previously accepted detail', origin: 'analysis',
+    verification: { ...previous.requirements[0].verification, criterion: 'Previously accepted detail' } });
+  assert.deepEqual(compile({ previousContract: previous }), previous);
+});
+
 test('natural task description keeps each analyzed criterion separately linked and checked', () => {
   const description = 'Изменить форму регистрации: отклонять неверный email и сохранять валидный email.';
   const input = { ...task, intakeKind: 'natural', instructions: description, acceptance: [description] };
@@ -101,6 +157,26 @@ test('structured task keeps its one explicit criterion even when instructions us
   assert.equal(contract.requirements.length, 1);
   assert.equal(contract.requirements[0].origin, 'acceptance');
   assert.equal(contract.acceptanceHash, undefined);
+});
+
+test('omnibus detection and planner instructions agree for natural, explicit and legacy intake', () => {
+  const description = 'Complete two distinct outcomes';
+  const natural = { ...task, intakeKind: 'natural', instructions: description, acceptance: [description] };
+  const explicit = { ...natural, acceptance: ['First result', 'Second result'] };
+  const structured = { ...task, instructions: description, acceptance: [description] };
+  const legacy = { ...structured, taskNumber: 'LEGACY-1' };
+  const node = { id: 'plan-task', action: { id: 'ai-plan' }, resources: { reads: ['src'], writes: [] } };
+  for (const [input, expected] of [[natural, true], [legacy, true], [explicit, false], [structured, false]]) {
+    assert.equal(isOmnibusAcceptance(input), expected);
+    const prompt = buildPrompt({ nodeId: node.id, task: input, plan: { stage: 'planning', nodes: [node] }, skills: '', priorEvidence: null });
+    if (expected) {
+      assert.match(prompt, /Каждый пункт priorEvidence\.analysis\.requirements сделай собственным обязательным требованием/);
+      assert.doesNotMatch(prompt, /Исходная acceptance содержит явные критерии/);
+    } else {
+      assert.match(prompt, /Пункты analysis\.requirements вида req-ID: пояснение/);
+      assert.doesNotMatch(prompt, /Каждый пункт priorEvidence\.analysis\.requirements сделай собственным обязательным требованием/);
+    }
+  }
 });
 
 test('unknown or unanchored analysis references never silently lose requirements', () => {
