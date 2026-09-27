@@ -18,6 +18,7 @@ import { effectiveInstructionFiles } from './instructions.mjs';
 import { projectInstructionMetadata } from './project-instruction-context.mjs';
 import { directAdapters } from './direct-adapters.mjs';
 import { taskContextInventory } from './intake.mjs';
+import { createReadContext } from './read-context.mjs';
 
 const fail = (code, message) => { throw new GraphError(code, message); };
 const unique = (values) => [...new Set(values)];
@@ -150,27 +151,35 @@ export async function defaultAdapters(root) {
   const rules = existsSync(rulesFile) ? await import(rulesFile.href) : null;
   const resolveContext = Reflect.get(SkillsPolicy, 'resolveNodeSkills');
   const projectSkills = Reflect.get(profile, 'skillManifest') ?? [];
-  const contextual = (action, scope) => resolveContext(root, { action, scope: scope.map((entry) => entry.replace(/\/$/, '')), manifestPaths: profile.manifests, projectSkills });
-  const instructionInspection = () => {
+  const readContext = createReadContext();
+  const contextual = (action, scope) => {
+    const normalizedScope = scope.map((entry) => entry.replace(/\/$/, ''));
+    return readContext.memo(JSON.stringify(['skills', action, normalizedScope, profile.manifests, projectSkills]),
+      () => resolveContext(root, { action, scope: normalizedScope, manifestPaths: profile.manifests, projectSkills }));
+  };
+  const instructionInspection = () => readContext.memo('instructions', () => {
     const inspection = rules?.inspectInstructions({ projectRoot: root });
     if (inspection && !inspection.complete) fail('INSTRUCTION_INCOMPLETE', 'Discovery инструкций неполное; требуется уточнить проектный контекст');
     return inspection;
-  };
-  const relevantInstructions = (scope = null) => effectiveInstructionFiles(instructionInspection() ?? { files: [] }, { provider: profile.ai.provider, scope });
+  });
+  const relevantInstructions = (scope = null, inspection = instructionInspection()) =>
+    effectiveInstructionFiles(inspection ?? { files: [] }, { provider: profile.ai.provider, scope });
   const resolveReadPaths = (node, task) => {
     if (!node.action.id.startsWith('ai-')) return node.resources.reads;
-    const discovered = new Set((instructionInspection()?.files ?? []).map((file) => file.path));
+    const inspection = instructionInspection();
+    const discovered = new Set((inspection?.files ?? []).map((file) => file.path));
     const scope = node.resources.writes.length ? node.resources.writes : task.scope;
     const selected = node.action.id === 'ai-implement' ? [...node.resources.reads, ...node.resources.writes] : task.scope;
     const explicitTargets = new Set([...task.scope, ...node.resources.writes]);
     return unique([...selected.filter((file) => !discovered.has(file) || explicitTargets.has(file)), ...task.contextPaths.filter((file) => !discovered.has(file)),
-      ...relevantInstructions(scope).map((file) => file.path)]);
+      ...relevantInstructions(scope, inspection).map((file) => file.path)]);
   };
   const resolveSkills = (node, task) => node.action.id.startsWith('ai-') && resolveContext
     ? contextual(node.action.id, node.resources.writes.length ? node.resources.writes : task.scope).ids
     : [...resolveAction(node.action.id).skills];
   const adapters = {
     project: profile,
+    withReadContext: readContext.run,
     taskContextInventory: () => taskContextInventory(root),
     identity: () => profile.workspaceMode === 'direct'
       ? pinnedRuntimeIdentity(root)
@@ -192,7 +201,7 @@ export async function defaultAdapters(root) {
       const direct = profile.workspaceMode === 'direct';
       const stablePath = ({ path: file, kind, scope }) => ({ path: file, kind, scope });
       return hashObject({
-        instructions: direct ? relevantInstructions(task.scope).map(stablePath) : inspection?.fingerprint ?? null,
+        instructions: direct ? relevantInstructions(task.scope, inspection).map(stablePath) : inspection?.fingerprint ?? null,
         explicitMarkdown: direct ? explicitMarkdown.map(stablePath) : explicitMarkdown,
         skills: resolveContext ? ['ai-plan', 'ai-analyze', 'ai-implement', 'ai-review'].map((action) => {
           const selected = contextual(action, task.scope);

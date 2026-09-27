@@ -238,3 +238,30 @@ test('invalid context requests never gain private access and stop after a bounde
   assert.equal(f.service.store.readRun(snapshot.runId).contextDiscoveryRound, 4);
   assert.equal(snapshot.capabilities.run.allowed, false);
 });
+
+for (const explicit of [true, false]) test(`direct stopped analysis takes fresh source only with explicit context confirmation: ${explicit}`, async t => {
+  const f = await fixture(t);
+  const allocate = f.adapters.allocate;
+  f.adapters.allocate = input => ({ ...allocate(input), mode: 'direct' });
+  let current = await f.service.create({ id: 'TASK-FRESH-CONTEXT', goal: fields.title, instructions: fields.description,
+    taskNumber: fields.taskNumber, intakeKind: 'natural', scope: ['src'], acceptance: [fields.description], checks: [] },
+  { runId: 'run-fresh-context', stage: 'planning', workflow: 'autonomous' });
+  current = await f.service.command(current.runId, 'run', request(current));
+  assert.equal(current.contextClarification, true);
+  f.addFile('translations/ru.json');
+  f.adapters.inspectChanges = () => ({ allowed: false, changedFiles: ['generated/old.js'] });
+  const body = { ...fields, contextHash: f.project().contextHash }, preview = f.service.previewIntake(body);
+  const extra = explicit ? { contextSelection: { contextHash: body.contextHash, previewHash: preview.previewHash,
+    scope: [...preview.scope, 'translations/ru.json'], resolutions: [{ reference: 'tmg.ru.json', kind: 'existing', path: 'translations/ru.json' }] } } : {};
+  const action = f.service.command(current.runId, 'replan', request(current, extra));
+  if (!explicit) await assert.rejects(action, { code: 'REPLAN_SCOPE' });
+  else {
+    const next = await action;
+    assert.notEqual(next.runId, current.runId);
+    const state = f.service.store.readRun(next.runId);
+    assert.ok(!state.permissions.some(p => p.includes('write')));
+    assert.equal(state.initialFingerprint.hash, f.adapters.fingerprint().hash);
+    await f.settle(next);
+  }
+  await f.service.close();
+});

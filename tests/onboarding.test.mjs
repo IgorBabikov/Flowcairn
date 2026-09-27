@@ -399,3 +399,13 @@ test('obsolete check preparation commands fail without preparing images', () => 
     });
   }
 });
+
+test('setup updates build output directories while refusing source exclusions', async t => {
+  const root = fixture(t);
+  initializeProject(root, options);
+  const { inspectOnboarding, onboardingInput, saveOnboarding } = await import('../bin/onboarding.mjs');
+  const input = onboardingInput({ ...options, model: 'provider-default', 'provider-version': '2.1.198 (Claude Code)', outputs: 'client,admin' }, inspectOnboarding(root).profileHash);
+  const result = await saveOnboarding(root, input);
+  assert.deepEqual(result.profile.outputPaths, ['client', 'admin']);
+  await assert.rejects(saveOnboarding(root, { ...input, profileHash: inspectOnboarding(root).profileHash, outputPaths: ['src'] }), { code: 'DIRECT_OPTIONS' });
+});

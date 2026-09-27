@@ -11,12 +11,13 @@ const fail = (code, message) => { throw new GraphError(code, message); };
 const unique = (values) => [...new Set(values)];
 
 // Prepare and resume immutable successor runs; the service owns authorization and CAS writes.
-export async function replanRun(host, { state, task, plan, request, digest, actor, policyGrant = undefined, discoveryChange = null }) {
+export async function replanRun(host, { state, task, plan, request, digest, actor, policyGrant = undefined, discoveryChange = null, freshPlanningSource = false }) {
+  const readPhase = (read) => host.withReadContext ? host.withReadContext(read) : read();
   const originalTask = task;
   const contextChange = discoveryChange ?? (request.contextSelection ? host.resolveContextSelection(task, request.contextSelection) : null);
   if (contextChange) task = { ...task, scope: contextChange.scope,
     contextNotes: contextChange.feedback, contextPaths: contextChange.contextPaths ?? originalTask.contextPaths };
-  const context = {
+  const context = readPhase(() => ({
     runtimeHash: host.adapters.identity(),
     skills: host.adapters.skills(task),
     resolveSkills: host.adapters.resolveSkills,
@@ -28,7 +29,7 @@ export async function replanRun(host, { state, task, plan, request, digest, acto
     provider: host.adapters.project?.ai.provider,
     analysis: contextChange ? null : host.analysis(state, plan),
     ...(plan.stage === 'execution' && plan.taskContract ? { taskContract: plan.taskContract } : {}),
-  };
+  }));
   let nextContract = plan.stage === 'execution' ? plan.taskContract : null;
   let nextDraft = request.draft ?? null;
   let nextStage = plan.stage;
@@ -45,7 +46,7 @@ export async function replanRun(host, { state, task, plan, request, digest, acto
       const artifactId = state.nodes[planner.id].artifacts.find((id) => host.artifact(id).kind === 'analysis');
       if (!artifactId) fail('PLANNING_EVIDENCE_MISSING', 'Нет сохраненного planning result');
       const output = AIPlanningResultSchema.parse(JSON.parse(host.artifact(artifactId).content));
-      const executable = compileTaskProposal(task, output, context).plan;
+      const executable = readPhase(() => compileTaskProposal(task, output, context).plan);
       nextContract = executable.taskContract;
       nextDraft = { nodes: executable.nodes };
       nextStage = 'execution';
@@ -85,8 +86,8 @@ export async function replanRun(host, { state, task, plan, request, digest, acto
       (id) => ReceiptSchema.parse(host.store.readObject('receipts', id)));
     const proposal = { summary: 'Исправить по evidence предыдущей версии', verdict: 'pass', skillsUsed: [],
       findings: [], changedFiles: [], edits: [], plan: [], steps };
-    const executable = compileTaskProposal(task, proposal, { ...context, repairReadPaths,
-      isolatedReadStepIds }).plan;
+    const executable = readPhase(() => compileTaskProposal(task, proposal, { ...context, repairReadPaths,
+      isolatedReadStepIds }).plan);
     nextDraft = { nodes: executable.nodes };
     nextContract = executable.taskContract;
   }
@@ -101,11 +102,11 @@ export async function replanRun(host, { state, task, plan, request, digest, acto
     host.assertConfiguredChecks(task, host.adapters.project, nextDraft);
     if (nextContract && request.draft) nextContract = buildTaskContract(task, { previousContract: nextContract,
       steps: nextDraft.nodes.filter((node) => node.action.id === 'ai-implement').map((node) => ({ id: node.id, nodeId: node.id, paths: node.resources.writes })) });
-    validatePlan(
+    readPhase(() => validatePlan(
       { ...compilePlan(task, context).plan, ...(plan.workflow === 'autonomous' ? { workflow: 'autonomous', autonomy: autonomyForNodes(nextDraft.nodes), stage: nextStage } : {}), ...(nextContract ? { taskContract: nextContract } : {}), nodes: nextDraft.nodes, skills: context.skills.filter((skill) => nextDraft.nodes.some((node) => node.skills.includes(skill.id))) },
       task,
       context,
-    );
+    ));
   }
   const { schemaVersion: _, sourceHash: __, ...input } = task;
   if (nextStage === 'planning' && plan.workflow === 'autonomous' && task.intakeKind === 'natural') input.contextDiscovery = true;
@@ -120,7 +121,7 @@ export async function replanRun(host, { state, task, plan, request, digest, acto
       resources: { writes: policyGrant ? unique(plan.nodes.flatMap((node) => node.resources.writes)) : originalTask.scope },
     };
     if (
-      !host.adapters.inspectChanges(host.resolveFingerprint(state.initialFingerprint), fingerprint, scopeNode, originalTask)
+      !freshPlanningSource && !host.adapters.inspectChanges(host.resolveFingerprint(state.initialFingerprint), fingerprint, scopeNode, originalTask)
         .allowed
     )
       fail('REPLAN_SCOPE', 'Нельзя включить изменения вне утвержденного scope в новый план');

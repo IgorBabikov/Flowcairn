@@ -28,17 +28,19 @@ import { AIResultSchema } from './lib/schemas.mjs';
 import { aiResponseSchema } from './lib/runner-ai-command.mjs';
 import { classifyAiFailure } from './lib/supervisor.mjs';
 import { MAX_CONTROL_ARG_CHARS, validCommand } from './lib/supervisor-control.mjs';
+import { managedProviderExecutable } from './lib/managed-runtime.mjs';
+import { runnerOutcome } from './lib/runner-outcome.mjs';
 
 const NODE_BINARY = realpathSync(process.execPath);
 const SUPERVISOR_FILE = fileURLToPath(new URL('./lib/supervisor.mjs', import.meta.url));
 const fixtures = new Set();
 const require = createRequire(import.meta.url);
 
-test('bundled official Codex launcher takes precedence over global and desktop PATH', () => {
-  const entry = require.resolve('@openai/codex/bin/codex.js');
+test('managed or bundled official Codex takes precedence over global and desktop PATH', () => {
+  const entry = managedProviderExecutable('codex') ?? require.resolve('@openai/codex/bin/codex.js');
   const discovered = RUNNER_TESTING.discoverCodex({});
   assert.equal(discovered.entry, realpathSync(entry));
-  assert.equal(discovered.manifest.version, require('@openai/codex/package.json').version);
+  assert.equal(discovered.manifest.version, JSON.parse(readFileSync(path.resolve(path.dirname(entry), '../package.json'), 'utf8')).version);
 });
 
 function runnerContract() {
@@ -280,6 +282,22 @@ test('supervisor rejects a forged GO without starting the action', async () => {
   await closeSupervisor(subject);
 });
 
+for (const earlyExit of [0, 2]) test(`supervisor records early CLI exit ${earlyExit} with a large pending prompt`, async () => {
+  const command = { executable: NODE_BINARY, args: ['-e', `process.stdin.once('data', () => { process.stdin.destroy(); process.stderr.write("startup rejected\\n"); process.exit(${earlyExit}); }); process.stdin.resume()`], cwd: fixture(), env: { PATH: '/usr/bin:/bin' } };
+  const subject = supervisorFixture({ command, actionId: 'ai-analyze' });
+  await subject.next('ready');
+  const payload = `${JSON.stringify({ type: 'go', nonce: subject.nonce, command, input: 'x'.repeat(120000) })}\n`;
+  subject.child.stdin.write(payload.slice(0, 256));
+  await new Promise(resolve => setTimeout(resolve, 25));
+  try { subject.child.stdin.write(payload.slice(256)); } catch { /* The child may already have closed its input pipe. */ }
+  try {
+    const final = await subject.next('finished');
+    assert.equal(final.exitCode, earlyExit || 1);
+    assert.equal(final.failureReason, earlyExit ? 'NON_ZERO_EXIT' : 'INPUT_PIPE_CLOSED');
+    assert.equal(JSON.parse(readFileSync(subject.ticket, 'utf8')).state, 'finished');
+  } finally { await closeSupervisor(subject); }
+});
+
 test('supervisor accepts a bounded filesystem policy above the old 16 KiB argument limit', async () => {
   const directory = fixture();
   const command = {
@@ -356,6 +374,21 @@ test('supervisor records timeout and stops the owned process group', async () =>
   );
   const final = await subject.next('finished');
   assert.equal(final.failureReason, 'TIMEOUT');
+  await closeSupervisor(subject);
+  assert.throws(() => process.kill(-subject.child.pid, 0), { code: 'ESRCH' });
+});
+
+test('graceful SIGTERM exit cannot turn a timed-out action into success', async () => {
+  const command = { executable: NODE_BINARY,
+    args: ['-e', 'process.on("SIGTERM", () => process.exit(0)); setInterval(() => {}, 1000)'],
+    cwd: fixture(), env: { PATH: '/usr/bin:/bin:/usr/sbin:/sbin' } };
+  const subject = supervisorFixture({ command, timeoutMs: 1_000 });
+  await subject.next('ready');
+  subject.child.stdin.write(`${JSON.stringify({ type: 'go', nonce: subject.nonce, command, input: '' })}\n`);
+  const final = await subject.next('finished');
+  assert.equal(final.exitCode, 0);
+  assert.equal(final.failureReason, 'TIMEOUT');
+  assert.equal(runnerOutcome({ final }).exitCode, 1);
   await closeSupervisor(subject);
   assert.throws(() => process.kill(-subject.child.pid, 0), { code: 'ESRCH' });
 });
@@ -769,7 +802,7 @@ test('режим provider передает только модель и усил
   try {
     assert.equal(prepared.command.args[prepared.command.args.indexOf('--model') + 1], 'gpt-5.6-sol');
     assert.ok(prepared.command.args.includes('model_reasoning_effort="high"'));
-    assert.ok(!prepared.command.args.includes('--ignore-user-config'));
+    assert.ok(prepared.command.args.includes('--ignore-user-config'));
     assert.equal(prepared.execution.model, 'gpt-5.6-sol');
     assert.equal(JSON.stringify(prepared.command.args).includes('untrusted-command'), false);
   } finally {

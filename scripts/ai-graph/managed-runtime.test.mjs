@@ -36,7 +36,7 @@ function installer(provider, fail = false) {
       return { status: 0 };
     }
     if (args.includes('--version')) return { status: 0, stdout: provider === 'codex' ? 'codex-cli 9.9.9' : '9.9.9 (Claude Code)' };
-    return { status: 0, stdout: '--strict-config --ephemeral --output-schema --output-last-message --cd --config --model --permission-profile --print --output-format --permission-mode --tools --strict-mcp-config --no-session-persistence --json-schema --ignore-rules --skip-git-repo-check --json' };
+    return { status: 0, stdout: '--strict-config --ephemeral --output-schema --output-last-message --cd --config --model --permission-profile --print --output-format --permission-mode --tools --strict-mcp-config --no-session-persistence --json-schema --ignore-user-config --ignore-rules --skip-git-repo-check --json' };
   };
 }
 for (const provider of ['codex', 'claude']) {

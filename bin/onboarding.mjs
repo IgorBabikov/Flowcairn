@@ -15,6 +15,7 @@ import { inspectCodexInstallation } from '../scripts/ai-graph/lib/runner.mjs';
 import { paint } from './terminal.mjs';
 import { prepareCodex } from './codex-setup.mjs';
 import { prepareClaude } from './claude-setup.mjs';
+import { validateDirectOutputPaths } from '../scripts/ai-graph/lib/direct-workspace.mjs';
 
 const effort = z.enum(['low', 'medium', 'high', 'xhigh']);
 const SetupSchema = z.strictObject({
@@ -27,6 +28,7 @@ const SetupSchema = z.strictObject({
   testPolicy: z.enum(['keep', 'add']), coverage: z.boolean(), readConsent: z.boolean(),
   checkMode: z.enum(['none', 'trusted-local', 'hardened']).optional(),
   checks: ProjectProfileSchema.shape.checks.optional(),
+  outputPaths: ProjectProfileSchema.shape.outputPaths.optional(),
 });
 const fail = (code, message) => { throw new GraphError(code, message); };
 
@@ -187,6 +189,7 @@ export function onboardingInput(options, profileHash) {
     testPolicy: options['test-policy'] ?? 'keep', coverage: options.coverage === true, readConsent: options['read-consent'] === true,
     ...(options['check-mode'] !== undefined ? { checkMode: options['check-mode'] } : {}),
     ...(options.checks !== undefined ? { checks: String(options.checks).split(',').map((item) => item.trim()).filter(Boolean) } : {}),
+    ...(options.outputs !== undefined ? { outputPaths: String(options.outputs).split(',').map(item => item.trim()).filter(Boolean) } : {}),
   });
 }
 
@@ -263,6 +266,7 @@ export async function migrateLegacyCheckMode(root, { dryRun = false } = {}) {
 }
 
 function configuredProfile(root, previous, value) {
+  if (value.outputPaths !== undefined) validateDirectOutputPaths(value.outputPaths);
   const { model: _model, reviewModel: _review, modelMode: _mode, reasoningEffort: _effort, reviewReasoningEffort: _reviewEffort, provider: _provider, providerPath: _providerPath, providerVersion: _providerVersion, providerManaged: _providerManaged, codexPath: _codexPath, ...extraAi } = previous.ai;
   let checkSettings = {};
   if (value.checkMode !== undefined || value.checks !== undefined) {
@@ -281,6 +285,7 @@ function configuredProfile(root, previous, value) {
   }
   const workspaceMode = value.workspaceMode ?? previous.workspaceMode ?? 'worktree';
   return ProjectProfileSchema.parse({ ...previous,
+      ...(value.outputPaths !== undefined ? { outputPaths: value.outputPaths } : {}),
       ...checkSettings,
       workspaceMode,
       ai: { ...extraAi, provider:value.provider, model:value.model, modelMode:value.modelMode, reasoningEffort:value.reasoningEffort,
@@ -294,8 +299,8 @@ function configuredProfile(root, previous, value) {
 }
 
 function sameProfileStructure(previous, next) {
-  const { ai: _previousAi, onboarding: _previousOnboarding, workspaceMode: _previousWorkspace, checkMode: _previousMode, checks: _previousChecks, checkScripts: _previousScripts, ...previousStructure } = previous;
-  const { ai: _nextAi, onboarding: _nextOnboarding, workspaceMode: _nextWorkspace, checkMode: _nextMode, checks: _nextChecks, checkScripts: _nextScripts, ...nextStructure } = next;
+  const { ai: _previousAi, onboarding: _previousOnboarding, workspaceMode: _previousWorkspace, checkMode: _previousMode, checks: _previousChecks, checkScripts: _previousScripts, outputPaths: _previousOutputs, ...previousStructure } = previous;
+  const { ai: _nextAi, onboarding: _nextOnboarding, workspaceMode: _nextWorkspace, checkMode: _nextMode, checks: _nextChecks, checkScripts: _nextScripts, outputPaths: _nextOutputs, ...nextStructure } = next;
   return hashObject(previousStructure) === hashObject(nextStructure);
 }
 
@@ -330,7 +335,7 @@ export async function saveOnboarding(root, input, { dryRun = false } = {}) {
     const previous = loadProjectProfile(root);
     const profile = configuredProfile(root, previous, value);
     if (!sameProfileStructure(previous, profile))
-      fail('PROFILE_MIGRATION_SCOPE', 'Настройка может менять только AI, проверки и onboarding; остальные структурные поля проекта сохранены.');
+      fail('PROFILE_MIGRATION_SCOPE', 'Настройка может менять только AI, проверки, каталоги результатов и onboarding; остальные структурные поля проекта сохранены.');
     const bytes = Buffer.from(JSON.stringify(profile,null,2)+'\n');
     let profileAfter, ownerAfter;
     try {

@@ -1,9 +1,9 @@
 import { GraphError } from './io.mjs';
 import { isWithin, overlaps } from './registry.mjs';
 import { buildTaskContract } from './task-contract.mjs';
+import { priorEvidenceLimit } from './context-limits.mjs';
 
 const bytes = (value) => Buffer.byteLength(JSON.stringify(value));
-const MAX_CONTEXT_BYTES = 30 * 1024;
 
 export function dependencyNodeIds(plan, node) {
   const byId = new Map(plan.nodes.map((item) => [item.id, item]));
@@ -29,6 +29,7 @@ export function taskContractForNode(task, plan, node, priorEvidence = null) {
 
 /** Select by graph dependencies, requirement links and declared paths, never by whole history. */
 export function boundPriorEvidence({ task, plan, node, state, priorEvidence, readReceipt = null }) {
+  const maxContextBytes = priorEvidenceLimit(node.action.id) - 2 * 1024;
   const dependencies = dependencyNodeIds(plan, node);
   const relevantNodes = dependencies.map((id) => state.nodes[id]).filter(Boolean);
   const artifacts = new Set([...relevantNodes.flatMap((item) => item.artifacts), ...(state.planningArtifacts ?? [])]);
@@ -63,13 +64,13 @@ export function boundPriorEvidence({ task, plan, node, state, priorEvidence, rea
     }
     delete result.analysis;
   }
-  while (bytes(result) > MAX_CONTEXT_BYTES && result.artifacts.length) result.artifacts.shift();
-  while (bytes(result) > MAX_CONTEXT_BYTES && result.workspaceFiles.length) {
+  while (bytes(result) > maxContextBytes && result.artifacts.length) result.artifacts.shift();
+  while (bytes(result) > maxContextBytes && result.workspaceFiles.length) {
     result.workspaceFiles.pop();
     result.workspaceFilesTruncated = true;
   }
-  if (bytes(result) > MAX_CONTEXT_BYTES)
-    throw new GraphError('CONTEXT_LIMIT', 'Обязательный контекст текущего шага превышает 30 KiB; требуется сузить задачу');
+  if (bytes(result) > maxContextBytes)
+    throw new GraphError('CONTEXT_LIMIT', `Обязательный контекст текущего шага превышает ${maxContextBytes / 1024} KiB; требуется сузить задачу`);
   return result;
 }
 

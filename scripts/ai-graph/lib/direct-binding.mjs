@@ -45,12 +45,13 @@ function writeBinding(root, binding) {
 }
 
 /** Rebind only after a stopped run; every write still checks current source bytes. */
-export function replaceDirectBinding({ root, binding, runId, newRunId, sourceHash, previousRunStopped }) {
+export function replaceDirectBinding({ root, binding, runId, newRunId, sourceHash, previousRunStopped, outputPaths = undefined }) {
   if (previousRunStopped !== true || binding.runId !== runId) fail('DIRECT_BINDING', 'Предыдущая работа не остановлена');
   verifyDirectBinding(root, binding);
-  const current = fingerprintDirectWorkspace(root, { outputPaths: binding.outputPaths ?? [] });
+  const nextOutputs = outputPaths ?? binding.outputPaths ?? [];
+  const current = fingerprintDirectWorkspace(root, { outputPaths: nextOutputs });
   if (current.hash !== sourceHash) fail('DIRECT_DRIFT', 'Текущий проект изменился во время подготовки плана');
-  const next = { ...binding, runId: newRunId, sourceHash, previousRunId: runId };
+  const next = { ...binding, runId: newRunId, sourceHash, previousRunId: runId, outputPaths: nextOutputs };
   writeBinding(root, next);
   return next;
 }

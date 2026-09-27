@@ -14,6 +14,13 @@ function referencedDetail(title, existingIds) {
   return ids.every((id) => existingIds.has(id)) ? prefix[2].trim() : null;
 }
 
+/** Only a natural intake's unsplit description needs decomposition into new requirement IDs. */
+export function isOmnibusAcceptance(task) {
+  return Boolean((task.intakeKind === 'natural' || (!task.intakeKind && task.taskNumber)) &&
+    task.acceptance.length === 1 &&
+    normalize(task.acceptance[0]) === normalize(task.instructions.slice(0, 4000)));
+}
+
 /** Deterministic effort selection never changes permissions or removes configured checks. */
 export function selectTaskRigor(task, analysis = null) {
   const reasons = [];
@@ -60,9 +67,7 @@ function bindWork(requirements, steps) {
 /** AI proposes semantics; the runtime preserves the original obligations and allowed verification. */
 export function buildTaskContract(task, { proposal = null, analysis = null, previousContract = null, steps = [] } = {}) {
   const instructionsHash = hashObject(task.instructions);
-  const omnibusAcceptance = (task.intakeKind === 'natural' || (!task.intakeKind && task.taskNumber)) &&
-    task.acceptance.length === 1 &&
-    normalize(task.acceptance[0]) === normalize(task.instructions.slice(0, 4000));
+  const omnibusAcceptance = isOmnibusAcceptance(task);
   if (previousContract) {
     const previous = TaskContractSchema.parse(previousContract);
     const decomposed = omnibusAcceptance && previous.acceptanceHash === hashObject(task.acceptance);
@@ -98,6 +103,14 @@ export function buildTaskContract(task, { proposal = null, analysis = null, prev
   });
   const titles = new Set(requirements.map((item) => normalize(item.title)));
   const existingIds = new Set(requirements.map((item) => item.id));
+  const referencedDetails = new Set((decomposing ? [] : analysis?.requirements ?? [])
+    .map((title) => referencedDetail(title, existingIds)).filter((detail) => detail !== null).map(normalize));
+  // Reject a new proposal instead of silently merging IDs or rewriting immutable contracts.
+  for (const candidate of proposed?.requirements ?? []) {
+    if (!existingIds.has(candidate.id) &&
+        referencedDetails.has(normalize(referencedDetail(candidate.title, existingIds) ?? candidate.title)))
+      fail('CONTRACT_REQUIREMENT_DUPLICATE', 'Уточнение существующего требования нельзя повторить под новым идентификатором');
+  }
   for (const rawTitle of analysis?.requirements ?? []) {
     const detail = referencedDetail(rawTitle, existingIds);
     if (detail && !decomposing) continue;
@@ -105,6 +118,8 @@ export function buildTaskContract(task, { proposal = null, analysis = null, prev
       ? rawTitle.replace(/^(?:req-[a-z0-9-]+(?:\s*[/,]\s*(?:req-[a-z0-9-]+|[0-9]{3}))*)\s*:\s*/i, '').trim()
       : rawTitle;
     if (titles.has(normalize(title))) continue;
+    if (referencedDetails.has(normalize(title)))
+      fail('CONTRACT_REQUIREMENT_DUPLICATE', 'Уточнение существующего требования повторено как отдельное обязательство анализа');
     const candidate = proposed?.requirements.find((item) => normalize(item.title) === normalize(title));
     if (decomposing && proposed && !candidate)
       fail('CONTRACT_ANALYSIS_COVERAGE', 'План должен отдельно проверить каждый пункт анализа');

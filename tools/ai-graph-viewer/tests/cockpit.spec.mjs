@@ -66,6 +66,31 @@ test('execution failure with proof shows the real runtime cause above requiremen
   await expect(page.getByTestId('task-proof-status')).toHaveText('AI-исполнитель завершился с ошибкой');
   await expect(page.locator('.task-cockpit .workflow-problem')).toContainText('ненулевым кодом');
   await expect(page.locator('.task-cockpit .workflow-problem .technical-details')).not.toHaveAttribute('open', '');
+  await expect(page.locator('.proof-blockers li')).toBeVisible();
+});
+
+test('ongoing work keeps outstanding verification available without presenting it as a stop', async ({ page }, testInfo) => {
+  const state = taskWithProof();
+  state.status = 'running'; state.completion = null;
+  state.execution = { state: 'running', stopRequested: false };
+  state.activeNodeId = state.nodes[1].id;
+  state.nodes[1].status = 'running';
+  state.proof.status = 'RUNNING'; state.proof.certificate = null; state.proof.coverage.proven = 0;
+  state.proof.requirements[0].status = 'blocked';
+  state.proof.blockers = ['Обязательная проверка check-tests не подтверждена на текущем результате',
+    'R1: Не подтверждено выполнение всей связанной работы'];
+  await mockApi(page, state); await page.goto(`/#session=${token}`);
+  await expect(page.locator('.execution-status')).toBeVisible();
+  await expect(page.locator('.cockpit-current')).toHaveCount(0);
+  const remaining = page.locator('details.proof-blockers');
+  await expect(remaining.locator('summary')).toContainText('Что осталось проверить');
+  await expect(remaining.locator('.proof-blockers-count')).toHaveText('2');
+  await expect(remaining.locator('li').first()).toBeHidden();
+  await page.screenshot({ path: testInfo.outputPath('running-verification-collapsed.png') });
+  await remaining.locator('summary').press('Enter');
+  await expect(remaining.locator('li').first()).toBeVisible();
+  await expect(remaining).toContainText('Ожидается актуальный результат: Тесты.');
+  await expect(page.getByTestId('requirement-coverage')).toContainText('0 из 1');
 });
 
 test('mobile run rail opens as a modal and restores focus', async ({ page }, testInfo) => {
@@ -153,6 +178,24 @@ test('stale blockers name the check and requirement for a person', async ({ page
   await expect(blockers).toContainText('Форма отклоняет пустой адрес: Нужна актуальная успешная проверка требования');
   await expect(blockers).not.toContainText('check-tests');
   await expect(blockers).not.toContainText('R1:');
+});
+
+test('pending checks are shown as not started instead of needing a rerun', async ({ page }) => {
+  const state = taskWithProof();
+  state.proof.status = 'BLOCKED'; state.proof.coverage.proven = 0; state.proof.certificate = null;
+  state.proof.requirements[0].status = 'blocked';
+  const checks = [
+    ['check-typecheck', 'Проверка типов'],
+    ['check-lint', 'Проверка стиля кода'],
+    ['check-tests', 'Тесты'],
+    ['check-build', 'Сборка'],
+  ];
+  state.proof.blockers = checks.map(([id]) => `Обязательная проверка ${id} не подтверждена на текущем результате`);
+  state.nodes.push(...checks.map(([id, title]) => ({ ...state.nodes[0], id, title, status: 'pending', action: { id } })));
+  await mockApi(page, state); await page.goto(`/#session=${token}`);
+  const blockers = page.locator('.proof-blockers');
+  for (const [, title] of checks) await expect(blockers).toContainText(`${title} еще не запускалась.`);
+  await expect(blockers).not.toContainText('нужно повторить');
 });
 
 test('a failed live snapshot hides previous proof until fresh confirmation returns', async ({ page }) => {
@@ -257,4 +300,79 @@ test('cockpit remains readable on desktop and mobile', async ({ page }, testInfo
     }).map(element => ({ tag: element.tagName, className: element.className, width: element.getBoundingClientRect().width })).slice(0, 8));
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), JSON.stringify(overflow)).toBe(true);
   }
+});
+
+test('planning placeholder does not repeat the entire ticket as a requirement', async ({ page }) => {
+  const state = taskWithProof();
+  state.phase = 'planning'; state.status = 'failed'; state.completion = null;
+  state.task.description = 'Long initial task '.repeat(100);
+  state.proof.requirements[0].title = state.task.description;
+  state.proof.requirements[0].status = 'blocked';
+  state.proof.status = 'BLOCKED'; state.proof.certificate = null;
+  state.nodes[0].status = 'failed'; state.nodes[0].reason = 'RUNNER_CONTROL_CLOSED';
+  await mockApi(page, state); await page.goto(`/#session=${token}`);
+  await expect(page.getByRole('heading', { name: 'Требования еще формируются' })).toBeVisible();
+  await expect(page.locator('.requirement-choice')).toHaveCount(0);
+  await expect(page.locator('.task-cockpit')).not.toContainText(state.task.description);
+  await expect(page.locator('.task-cockpit')).toContainText('Потеряна связь с AI-исполнителем');
+});
+
+test('running planning exposes the current stage alongside provisional requirements', async ({ page }) => {
+  const state = taskWithProof();
+  state.phase = 'planning'; state.status = 'running'; state.completion = null;
+  state.execution = { state: 'running', stopRequested: false };
+  state.task.description = 'Подготовить задачу с несколькими требованиями';
+  state.proof.requirements[0].title = state.task.description;
+  state.proof.status = 'RUNNING'; state.proof.certificate = null;
+  state.nodes = [{ ...state.nodes[0], id: 'plan-task', title: 'Подготовка плана', status: 'running' }];
+  state.activeNodeId = 'plan-task';
+  await mockApi(page, state); await page.goto(`/#session=${token}`);
+  await expect(page.getByRole('heading', { name: 'Требования еще формируются' })).toBeVisible();
+  await expect(page.locator('.execution-status')).toContainText('Сейчас: Подготовка плана');
+});
+
+test('provisional proof does not hide the permitted start of analysis', async ({ page }) => {
+  const state = taskWithProof();
+  state.phase = 'planning'; state.status = 'ready'; state.completion = null;
+  state.activeNodeId = null;
+  state.nodes = [{ ...state.nodes[0], id: 'analyze', title: 'Анализ задачи', status: 'ready' }];
+  state.capabilities = { ...allDenied, run: { allowed: true, reason: null } };
+  state.proof.status = 'BLOCKED'; state.proof.certificate = null; state.proof.coverage.proven = 0;
+  state.proof.requirements[0].status = 'blocked';
+  const fixture = await mockApi(page, state);
+  await page.goto(`/#session=${token}`);
+  const start = page.getByRole('button', { name: 'Начать анализ', exact: true });
+  await expect(start).toBeEnabled();
+  await start.click();
+  expect(fixture.calls.filter(call => call.action === 'run')).toHaveLength(1);
+});
+
+test('requirement proof does not hide the unapproved execution plan', async ({ page }) => {
+  const state = taskWithProof(), pending = snapshot();
+  state.status = 'waiting-for-human'; state.completion = null;
+  state.nodes = pending.nodes; state.gates = pending.gates;
+  state.capabilities = pending.capabilities;
+  state.proof.status = 'UNPROVEN'; state.proof.certificate = null;
+  state.proof.coverage.proven = 0;
+  state.proof.requirements.forEach(requirement => { requirement.status = 'unproven'; });
+  const fixture = await mockApi(page, state);
+  await page.goto(`/#session=${token}`);
+  const approve = page.getByRole('button', { name: 'Согласовать и начать выполнение', exact: true });
+  await expect(approve).toBeEnabled();
+  await approve.click();
+  expect(fixture.calls.filter(call => call.action === 'gate')).toHaveLength(1);
+});
+
+test('uncertain runtime failure with proof keeps the permitted replan accessible', async ({ page }) => {
+  const state = taskWithProof();
+  state.phase = 'planning'; state.status = 'uncertain'; state.resolutionKind = 'semantic';
+  state.completion = null; state.contextClarification = true;
+  state.nodes[0].status = 'uncertain'; state.nodes[0].reason = 'SENSITIVE_WORKSPACE_PATH';
+  state.capabilities = { ...allDenied, requestReplan: { allowed: true, reason: null } };
+  state.proof.status = 'BLOCKED'; state.proof.certificate = null;
+  const fixture = await mockApi(page, state);
+  await page.goto(`/#session=${token}`);
+  await expect(page.locator('.task-cockpit .workflow-problem')).toBeVisible();
+  await page.getByRole('button', { name: 'Повторить с новым планом', exact: true }).click();
+  expect(fixture.calls.filter(call => call.action === 'replan')).toHaveLength(1);
 });

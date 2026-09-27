@@ -73,3 +73,32 @@ test('verified dead lease is removed, but a later edited replacement is preserve
   assert.equal(guard.processProbe().verified, false);
   guard.release(); assert.equal(existsSync(file), true);
 });
+
+function directState(root) {
+  const hash = 'a'.repeat(64), now = new Date().toISOString(), runId = 'run-direct-lifecycle';
+  return { schemaVersion: 2, runId, revision: 0, taskHash: hash, planHash: hash, envelopeHash: hash,
+    sourceHash: hash, sourceBundle: 'source.json', planVersion: 1, maxReplans: 1, supersedesRunId: null,
+    createdAt: now, updatedAt: now, status: 'failed', finalDisposition: null, nodes: {}, permissions: [],
+    binding: { mode: 'direct', worktree: realpathSync(root), taskId: 'task-direct', attemptId: 1, leaseId: 'lease-direct', sourceHash: hash, runId, owner: 'fixture' },
+    workspaceFingerprint: null, initialFingerprint: null, activeOperation: null, operations: {}, planningArtifacts: [],
+    actor: 'fixture', intakeHash: hash, createOperationId: 'create-direct', setupPending: false };
+}
+
+test('stopped direct project binding is never classified as a disposable worktree', async t => {
+  const root = fixture(t), store = new GraphStore(root), state = directState(root);
+  store.createRun(state.runId, state);
+  const guard = await acquireUninstallGuard({ root });
+  try {
+    assert.deepEqual(guard.worktreePaths, []);
+    assert.equal(guard.graphBindings[0].worktree, realpathSync(root));
+    assert.equal(guard.processProbe().verified, true);
+  } finally { guard.release(); }
+  assert.equal(existsSync(root), true);
+});
+
+test('direct marker does not authorize a binding outside the current project', async t => {
+  const root = fixture(t), store = new GraphStore(root), state = directState(root);
+  state.binding.worktree = realpathSync(fixture(t));
+  store.createRun(state.runId, state);
+  await assert.rejects(acquireUninstallGuard({ root }), { code: 'UNINSTALL_WORKTREE_UNKNOWN' });
+});

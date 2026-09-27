@@ -12,7 +12,7 @@ const REGISTRY = 'https://registry.npmjs.org/';
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const SPECS = Object.freeze({
-  codex: Object.freeze({ packageName: '@openai/codex', entry: 'bin/codex.js', help: ['exec', '--help'], secondary: ['sandbox', '--help'], required: ['--ignore-rules', '--skip-git-repo-check', '--json', '--strict-config', '--ephemeral', '--output-schema', '--output-last-message', '--cd', '--config', '--model'], secondaryRequired: ['--permission-profile'] }),
+  codex: Object.freeze({ packageName: '@openai/codex', entry: 'bin/codex.js', help: ['exec', '--help'], secondary: ['sandbox', '--help'], required: ['--ignore-user-config', '--ignore-rules', '--skip-git-repo-check', '--json', '--strict-config', '--ephemeral', '--output-schema', '--output-last-message', '--cd', '--config', '--model'], secondaryRequired: ['--permission-profile'] }),
   claude: Object.freeze({ packageName: '@anthropic-ai/claude-code', entry: 'bin/claude.exe', help: ['--help'], required: ['--print', '--output-format', '--permission-mode', '--tools', '--strict-mcp-config', '--no-session-persistence', '--json-schema'] }),
 });
 

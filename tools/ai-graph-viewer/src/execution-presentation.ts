@@ -1,4 +1,5 @@
 import type { Snapshot } from './contracts';
+import { nodeTitle } from './presentation';
 
 export type ExecutionPresentation = {
   kind: 'running' | 'stopping' | 'stopped' | 'stop-uncertain' | 'idle';
@@ -15,6 +16,12 @@ const running: ExecutionPresentation = {
   tone: 'info',
   busy: true,
 };
+
+function runningPresentation(snapshot: Snapshot): ExecutionPresentation {
+  const active = snapshot.nodes.find(node => node.id === snapshot.activeNodeId && node.status === 'running')
+    ?? snapshot.nodes.find(node => node.status === 'running');
+  return active ? { ...running, description: `Сейчас: ${nodeTitle(active, 'ru')}` } : running;
+}
 
 const stopping: ExecutionPresentation = {
   kind: 'stopping',
@@ -53,10 +60,10 @@ export function executionPresentation(
         busy: false,
       };
     case 'running':
-      return running;
+      return runningPresentation(snapshot);
     default:
       return snapshot?.status === 'running'
-        ? running
+        ? runningPresentation(snapshot)
         : {
             kind: 'idle',
             title: '',

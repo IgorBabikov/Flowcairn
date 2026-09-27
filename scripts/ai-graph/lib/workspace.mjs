@@ -50,7 +50,7 @@ function decodeName(value) {
   }
 }
 
-function assertSafePath(value, { allowControl = false } = {}) {
+function assertSafePath(value, { allowControl = false, allowGit = false } = {}) {
   if (
     typeof value !== 'string' ||
     !value ||
@@ -67,7 +67,7 @@ function assertSafePath(value, { allowControl = false } = {}) {
   if (parts.some((part) => !part || part === '.' || part === '..')) {
     fail('UNSAFE_WORKSPACE_PATH', 'Workspace path содержит небезопасный сегмент');
   }
-  if (parts.some((part) => part.toLowerCase() === '.git')) {
+  if (!allowGit && parts.some((part) => part.toLowerCase() === '.git')) {
     fail('UNSAFE_WORKSPACE_PATH', 'Workspace path не может указывать на .git');
   }
   if (parts[0].toLowerCase() === '@git') {
@@ -96,7 +96,8 @@ function assertNotSensitivePath(relativePath) {
   }
 }
 
-function boundedPaths(value, label, options) {
+function boundedPaths(value, label, { allowSensitive = false, allowControl = false, allowGit = false } = {}) {
+  const options = { allowControl, allowGit };
   if (!Array.isArray(value) || value.length > MAX_INPUT_PATHS) {
     fail('INVALID_WORKSPACE_OPTIONS', `${label} должен быть bounded массивом paths`);
   }
@@ -104,7 +105,7 @@ function boundedPaths(value, label, options) {
   for (const entry of paths) {
     // Control storage is allowed only as an excluded output-policy declaration.
     if (options?.allowControl && (entry === '.ai-orchestrator' || entry.startsWith('.ai-orchestrator/'))) continue;
-    assertNotSensitivePath(entry);
+    if (!allowSensitive) assertNotSensitivePath(entry);
   }
   return [...new Set(paths)].sort(comparePath);
 }
@@ -510,8 +511,8 @@ export function compareWorkspaces(before, after) {
   return [...changed].sort(comparePath);
 }
 
-function contractPaths(value, label) {
-  return boundedPaths(value, label);
+function contractPaths(value, label, options = {}) {
+  return boundedPaths(value, label, options);
 }
 
 function hasPermission(node, permission) {
@@ -540,7 +541,9 @@ export function inspectWorkspaceChanges(before, after, node, task) {
   }
   const nodeWrites = contractPaths(node.resources.writes, 'node.resources.writes');
   const taskScope = contractPaths(task.scope, 'task.scope');
-  const forbidden = contractPaths(task.forbiddenPaths ?? [], 'task.forbiddenPaths');
+  // A denial names protected paths without making them readable or writable.
+  const forbidden = contractPaths(task.forbiddenPaths ?? [], 'task.forbiddenPaths',
+    { allowSensitive: true, allowControl: true, allowGit: true });
   const canWriteSource = hasPermission(node, 'workspace.source.write');
   const changedFiles = compareWorkspaces(before, after);
   const violations = [];

@@ -58,6 +58,7 @@ export function TaskOverview({
 }) {
   const [selectedWorkId, setSelectedWorkId] = useState<string | null>(null);
   const { gate } = planDecision(snapshot, plan, unavailable);
+  const waitingToStart = snapshot.phase === 'planning' && snapshot.status === 'ready' && !gate;
   const showContext = wide && (!snapshot.proof || Boolean(gate));
   const selectWork = (id: string) => { setSelectedWorkId(id); onContextChange(true); };
   const title = snapshot.task?.title || snapshot.task?.goal || 'Задача';
@@ -104,20 +105,27 @@ export function TaskOverview({
         <button className="button primary" type="button" disabled={busy || !snapshot.capabilities.requestReplan?.allowed}
           onClick={actions.onReplan}>Подготовить новый план</button>
       </div>}
-      {snapshot.status === 'failed' && snapshot.capabilities.requestReplan?.allowed && <div className="context-recovery">
-        <p>Ошибка сохранена в отчете. Новая версия плана начнет отдельную попытку без повторного использования неизвестного результата.</p>
-        <button className="button primary" type="button" disabled={busy}
+      {(['failed', 'uncertain'].includes(snapshot.status) || !snapshot.integrity.valid) && snapshot.capabilities.requestReplan?.allowed && <div className="context-recovery">
+        <p>Предыдущий результат сохранен. Новая версия плана начнет отдельную попытку без повторного использования неизвестного результата.</p>
+        <button className="button primary" type="button" disabled={busy || unavailable}
           onClick={actions.onReplan}>Повторить с новым планом</button>
       </div>}
+      {!snapshot.integrity.valid && /^(?:RUNTIME|SKILL|POLICY)_DRIFT:/.test(snapshot.integrity.reason ?? '') &&
+        !snapshot.capabilities.requestReplan?.allowed && snapshot.capabilities.revisePlan?.allowed && <div className="context-recovery">
+        <p>План подготовлен до изменения Flowcairn или инструкций. Подготовьте актуальную версию перед началом работы.</p>
+        <button className="button primary" type="button" disabled={busy || unavailable}
+          onClick={() => actions.onRevise('Подготовить актуальную версию плана после изменения Flowcairn или инструкций. Сохранить цель, все требования, границы задачи и обязательные проверки.')}>
+          Обновить план</button>
+      </div>}
       {snapshot.contextClarification && <div className="context-recovery">
-        <p>Уточните файлы и папки задачи, чтобы продолжить анализ.</p>
-        <button className="button primary" type="button" disabled={busy || !snapshot.capabilities.requestReplan?.allowed}
+        <p>Если причина связана с выбором файлов, можно уточнить контекст задачи.</p>
+        <button className="button secondary" type="button" disabled={busy || !snapshot.capabilities.requestReplan?.allowed}
           onClick={actions.onClarify}>Уточнить контекст</button>
       </div>}
-      {executionFocused && !(wide && gate) ? (
+      {executionFocused && !gate ? (
         <><TaskProgress snapshot={snapshot} execution={execution} summaryOnly={wide} />
           {wide && <WideWorkList snapshot={snapshot} plan={plan} selectedId={selectedWorkId} onSelect={selectWork} />}</>
-      ) : snapshot.proof && !(wide && gate) ? (
+      ) : snapshot.proof && !gate && !waitingToStart ? (
         <TaskCockpit
           snapshot={snapshot}
           wide={wide}

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MarkerType, type ReactFlowInstance, type Edge } from '@xyflow/react';
-import { api, sessionToken, watchRevisions } from './api';
+import { api, isReadApiError, sessionToken, snapshotResource, watchRevisions, type ReadApiError } from './api';
 import { humanText } from './presentation';
 import { TaskComposer } from './TaskComposer';
 import { TaskClarification } from './TaskClarification';
@@ -63,6 +63,8 @@ export function App() {
   const [taskView, setTaskView] = useState<'overview' | 'graph'>('overview');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<ApiError | null>(null);
+  const [readErrors, setReadErrors] = useState<Record<string, ReadApiError>>({});
+  const displayedError = error ?? Object.values(readErrors)[0] ?? null;
   const [stopError, setStopError] = useState<ApiError | null>(null);
   const [notice, setNotice] = useState('');
   const [streamConnected, setStreamConnected] = useState(false);
@@ -92,12 +94,41 @@ export function App() {
   const snapshotRef = useRef<Snapshot | null>(null);
   const historyRevisionRef = useRef(-1);
   const runsRequestRef = useRef(0);
+  const loadRequestRef = useRef(0);
   const comparisonRequestRef = useRef(0);
   const inFlightRef = useRef(false);
   const stopInFlightRef = useRef(false);
   const pollInFlightRef = useRef(false);
   const snapshotRefreshesRef = useRef(new Map<string, SnapshotRefresh>());
+  const snapshotReadSequenceRef = useRef(new Map<string, number>());
+  const snapshotSettledReadRef = useRef(new Map<string, number>());
   const visibleRuns = useMemo(() => newestRunsByTask(runs), [runs]);
+
+  const clearReadError = useCallback((resource: string) => {
+    const recovered = (current: ApiError | null) =>
+      isReadApiError(current) && current.readResource === resource ? null : current;
+    // A follow-up GET after a confirmed command can reach these existing error channels.
+    setError(recovered);
+    setStopError(recovered);
+    setReadErrors(current => {
+      if (!Object.hasOwn(current, resource)) return current;
+      const remaining = { ...current };
+      delete remaining[resource];
+      return remaining;
+    });
+  }, []);
+  const reportReadError = useCallback((reason: unknown) => {
+    const failure = reason as ApiError;
+    if (isReadApiError(failure)) setReadErrors(current => ({ ...current, [failure.readResource]: failure }));
+    else setError(current => current ?? failure);
+  }, []);
+  const beginSnapshotRead = useCallback((runId: string) => {
+    const sequence = (snapshotReadSequenceRef.current.get(runId) ?? 0) + 1;
+    snapshotReadSequenceRef.current.set(runId, sequence);
+    return sequence;
+  }, []);
+  const newerSnapshotReadSettled = useCallback((runId: string, sequence: number) =>
+    (snapshotSettledReadRef.current.get(runId) ?? 0) > sequence, []);
 
   useEffect(() => {
     const query = window.matchMedia('(max-width: 1179px)');
@@ -137,6 +168,7 @@ export function App() {
 
   const selectRun = useCallback((runId: string | null) => {
     if (selectedRunRef.current !== runId) {
+      if (selectedRunRef.current) clearReadError(snapshotResource(selectedRunRef.current));
       snapshotRef.current = null;
       historyRevisionRef.current = -1;
       setSnapshot(null);
@@ -161,7 +193,7 @@ export function App() {
     }
     selectedRunRef.current = runId;
     setSelectedRunId(runId);
-  }, []);
+  }, [clearReadError]);
 
   const commitSnapshot = useCallback(
     (next: Snapshot, options: { select?: boolean; expectedRunId?: string } = {}) => {
@@ -229,9 +261,12 @@ export function App() {
 
   const refreshRuns = useCallback(async () => {
     const request = ++runsRequestRef.current;
-    const result = await api.listRuns();
+    let result;
+    try { result = await api.listRuns(); }
+    catch (reason) { if (request !== runsRequestRef.current) return; throw reason; }
     if (request !== runsRequestRef.current) return;
     setRuns(result.runs);
+    clearReadError('/api/runs');
     if (result.runs.length === 0) {
       selectRun(null);
       return;
@@ -239,7 +274,7 @@ export function App() {
     const current = selectedRunRef.current;
     if (!current || !result.runs.some((run) => run.runId === current))
       selectRun(newestRunsByTask(result.runs)[0]?.runId ?? null);
-  }, [selectRun]);
+  }, [clearReadError, selectRun]);
 
   const refreshSnapshot = useCallback(
     (runId: string, quiet = false, hintedRevision = -1) => {
@@ -255,11 +290,14 @@ export function App() {
         reportErrors: !quiet,
       } satisfies SnapshotRefresh;
       refresh.promise = (async () => {
+        let readSequence = 0;
         try {
           let authoritativeBlocked = false;
           let caughtUp = false;
           for (let attempt = 0; attempt < 2 && selectedRunRef.current === runId; attempt += 1) {
+            readSequence = beginSnapshotRead(runId);
             const next = await api.snapshot(runId);
+            if (newerSnapshotReadSettled(runId, readSequence)) return;
             const previousRevision =
               snapshotRef.current?.runId === runId ? (snapshotRef.current.revision ?? -1) : -1;
             if (!commitSnapshot(next, { expectedRunId: runId })) {
@@ -270,6 +308,8 @@ export function App() {
                 return;
               continue;
             }
+            snapshotSettledReadRef.current.set(runId, readSequence);
+            clearReadError(snapshotResource(runId));
             setSelectedNodeId((current) =>
               current && workflowProjection(next).nodes.some((node) => node.id === current)
                 ? current
@@ -277,7 +317,6 @@ export function App() {
             );
             if ((next.revision ?? -1) > previousRevision)
               await refreshHistory(runId).catch(() => undefined);
-            if (refresh.reportErrors) setError(null);
             if (next.revision == null) {
               authoritativeBlocked = true;
               break;
@@ -290,8 +329,11 @@ export function App() {
           if (!authoritativeBlocked && !caughtUp && selectedRunRef.current === runId)
             setStreamConnected(false);
         } catch (reason) {
-          if (selectedRunRef.current === runId) setSnapshotUnavailable(true);
-          if (refresh.reportErrors) setError(reason as ApiError);
+          if (selectedRunRef.current === runId && !newerSnapshotReadSettled(runId, readSequence)) {
+            snapshotSettledReadRef.current.set(runId, readSequence);
+            setSnapshotUnavailable(true);
+            if (refresh.reportErrors || !snapshotRef.current) reportReadError(reason);
+          }
         } finally {
           if (snapshotRefreshesRef.current.get(runId) === refresh)
             snapshotRefreshesRef.current.delete(runId);
@@ -300,21 +342,24 @@ export function App() {
       snapshotRefreshesRef.current.set(runId, refresh);
       return refresh.promise;
     },
-    [commitSnapshot, refreshHistory],
+    [beginSnapshotRead, clearReadError, commitSnapshot, newerSnapshotReadSettled, refreshHistory, reportReadError],
   );
 
   const load = useCallback(async () => {
+    const request = ++loadRequestRef.current;
     setLoading(true);
     try {
-      const [, context] = await Promise.all([refreshRuns(), api.project()]);
-      setProject(context);
-      setError(null);
+      await Promise.all([refreshRuns(), api.project().then(context => {
+        if (request !== loadRequestRef.current) return;
+        setProject(context);
+        clearReadError('/api/project');
+      })]);
     } catch (reason) {
-      setError(reason as ApiError);
+      if (request === loadRequestRef.current) reportReadError(reason);
     } finally {
-      setLoading(false);
+      if (request === loadRequestRef.current) setLoading(false);
     }
-  }, [refreshRuns]);
+  }, [clearReadError, refreshRuns, reportReadError]);
 
   useEffect(() => {
     if (authenticated) queueMicrotask(() => void load());
@@ -332,6 +377,7 @@ export function App() {
     queueMicrotask(() => {
       if (!active) return;
       setLoading(true);
+      const readSequence = beginSnapshotRead(selectedRunId);
       Promise.allSettled([
         api.snapshot(selectedRunId),
         api.plan(selectedRunId),
@@ -339,17 +385,21 @@ export function App() {
       ])
         .then(async ([snapshotResult, planResult, eventsResult]) => {
           if (!active) return;
-          if (snapshotResult.status === 'fulfilled') {
+          if (newerSnapshotReadSettled(selectedRunId, readSequence)) {
+            // A newer GET settled while the initial plan/history were still loading.
+          } else if (snapshotResult.status === 'fulfilled') {
             const accepted = commitSnapshot(snapshotResult.value, { expectedRunId: selectedRunId });
             if (accepted) {
-              setError(null);
+              snapshotSettledReadRef.current.set(selectedRunId, readSequence);
+              clearReadError(snapshotResource(selectedRunId));
               setSelectedNodeId(
                 snapshotResult.value.activeNodeId ?? snapshotResult.value.nodes[0]?.id ?? null,
               );
             }
           } else {
+            snapshotSettledReadRef.current.set(selectedRunId, readSequence);
             setSnapshotUnavailable(true);
-            setError(snapshotResult.reason as ApiError);
+            reportReadError(snapshotResult.reason);
           }
           if (planResult.status === 'fulfilled') {
             const expectedHash =
@@ -369,7 +419,7 @@ export function App() {
     return () => {
       active = false;
     };
-  }, [commitHistory, commitPlan, commitSnapshot, selectedRunId]);
+  }, [beginSnapshotRead, clearReadError, commitHistory, commitPlan, commitSnapshot, newerSnapshotReadSettled, reportReadError, selectedRunId]);
 
   useEffect(() => {
     const delay = !selectedRunId || streamConnected ? 30_000 : 2_000;
@@ -715,7 +765,6 @@ export function App() {
 
   function requestReplan() {
     if (!snapshot?.planHash || snapshot.revision == null || !getCapability(snapshot.capabilities, 'requestReplan').allowed) return;
-    if (snapshot.contextClarification) { setClarifying(snapshot); return; }
     if (snapshot.phase !== 'planning') { setShowDraft(true); return; }
     const id = operationId('replan');
     void sendOperation({kind: 'control', key: `${snapshot.runId}:replan`, operationId: id,
@@ -772,18 +821,18 @@ export function App() {
   const showingTask = !composing && taskView === 'overview';
   const overviewActions: TaskOverviewActions = {
     onApprove: approveWorkflow, onRevise: reviseWorkflow, onStart: () => void execute('run'),
-    onSetup: () => setShowSetup(true), onClarify: requestReplan, onReplan: requestReplan,
+    onSetup: () => setShowSetup(true), onClarify: () => { if (snapshot) setClarifying(snapshot); }, onReplan: requestReplan,
     onRecover: (nodeId) => void execute('recover', nodeId), onOpenEvidence: openProofEvidence,
     onOpenArtifact: openProofArtifact, onAcceptRequirement: acceptRequirement,
     onOpenTechnical: (nodeId) => { if (nodeId) setSelectedNodeId(nodeId); setTaskView('graph'); setDetailsOpen(true); },
   };
   const composer = <TaskComposer
     capability={project?.capabilities.intake ?? null}
-    busy={busy} pending={pending?.kind === 'create'} error={error}
+    busy={busy} pending={pending?.kind === 'create'} error={displayedError}
     onSubmit={createRun}
     onRetry={() => {
       if (pending?.kind === 'create') void sendOperation(pending);
-      else void api.project().then(context => { setProject(context); setError(null); }).catch(reason => setError(reason as ApiError));
+      else void api.project().then(context => { setProject(context); clearReadError('/api/project'); }).catch(reportReadError);
     }}
     onClose={snapshot && !busy && pending?.kind !== 'create' ? () => { setShowCreate(false); (window.matchMedia('(max-width: 720px)').matches ? runsButton.current : document.getElementById('new-task'))?.focus(); } : undefined}
   />;
@@ -878,14 +927,14 @@ export function App() {
           onDismiss={() => setStopError(null)}
         />
       )}
-      {error && !showCreate && pending?.kind !== 'create' && (
+      {displayedError && !composing && pending?.kind !== 'create' && (
         <ErrorNotice
-          error={error}
+          error={displayedError}
           labels={labels}
           pending={pending}
           busy={busy}
           onRetry={() => (pending ? void sendOperation(pending) : void load())}
-          onDismiss={() => setError(null)}
+          onDismiss={() => error ? setError(null) : isReadApiError(displayedError) && clearReadError(displayedError.readResource)}
         />
       )}
       {notice && (

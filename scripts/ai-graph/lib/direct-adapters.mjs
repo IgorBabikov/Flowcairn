@@ -78,7 +78,7 @@ export function directAdapters(root, profile, base) {
       owner: options.owner, outputPaths: profile.outputPaths }),
     verifyBinding: (binding) => verifyDirectBinding(projectRoot, binding),
     withBindingFence: (binding, callback) => withDirectBindingFence(projectRoot, binding, callback),
-    replaceBinding: (options) => replaceDirectBinding({ root: projectRoot, ...options }),
+    replaceBinding: (options) => replaceDirectBinding({ root: projectRoot, ...options, outputPaths: profile.outputPaths }),
     prepareToolchain: (worktree) => prepareToolchain({ root: projectRoot, worktree }),
     verifyToolchain: (worktree, manifest) => verifyToolchain({ root: projectRoot, worktree, manifest }),
     fingerprint,
