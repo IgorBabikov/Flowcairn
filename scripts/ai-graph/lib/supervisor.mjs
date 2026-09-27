@@ -295,6 +295,11 @@ export async function supervise(ticketPath) {
       // event and diagnostic instead of crashing the supervisor on EPIPE.
       if (!['EPIPE', 'ECONNRESET'].includes(errorCode(error))) terminate('INPUT_PIPE_FAILED');
     });
+    action.stdin.on('close', () => {
+      // Some Unix runtimes close a child's destroyed stdin without emitting EPIPE.
+      // Treat an unflushed input stream as the same failed-start condition.
+      if (!action.stdin.writableFinished) inputClosed = true;
+    });
     const collect = (stream, digest, isStdout) => {
       stream.on('data', (data) => {
         digest.update(data);
