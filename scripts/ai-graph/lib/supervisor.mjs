@@ -338,10 +338,11 @@ export async function supervise(ticketPath) {
         }
       }
       if (process.platform === 'win32' && terminatingReason && !windowsStopVerified) return;
+      const earlyAiExit = code === 0 && initial.actionId?.startsWith('ai-') && stdoutBytes === 0 && stderrBytes > 0;
       finish(
-        inputClosed && code === 0 ? 1 : code,
+        (inputClosed || earlyAiExit) && code === 0 ? 1 : code,
         signal,
-        terminatingReason ?? (code === 0 ? inputClosed ? 'INPUT_PIPE_CLOSED' : null : classifyAiFailure(diagnostic.toString('utf8'), stderrDiagnostic.toString('utf8'))),
+        terminatingReason ?? (code === 0 ? inputClosed || earlyAiExit ? 'INPUT_PIPE_CLOSED' : null : classifyAiFailure(diagnostic.toString('utf8'), stderrDiagnostic.toString('utf8'))),
       );
     });
     action.stdin.end(message.input);
