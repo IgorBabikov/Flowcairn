@@ -209,6 +209,9 @@ test('keeps run rail actions on one compact line', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
   await mockApi(page, chain());
   await page.goto(`/#session=${token}`);
+  await expect(page.locator('.rail-heading')).toBeVisible();
+  await expect(page.locator('#new-task')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Обновить', exact: true })).toBeVisible();
   const heading = await page.locator('.rail-heading').boundingBox();
   const newTask = await page.locator('#new-task').boundingBox();
   const refresh = await page.getByRole('button', { name: 'Обновить', exact: true }).boundingBox();
