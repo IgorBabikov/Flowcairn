@@ -108,6 +108,15 @@ test('bounded absent manifest probes preserve multi-path task applicability', (t
   assert.throws(() => verifyProjectContext(f.root, context), { code: 'CONTEXT_DRIFT' });
 });
 
+test('Skill context accepts the full task scope limit without truncating paths', (t) => {
+  const f = fixture(t);
+  const scope = Array.from({ length: 64 }, (_, index) => `module-${index}`);
+  const context = discoverProjectContext(f.root, { scope });
+  assert.deepEqual(context.scope, scope.sort());
+  assert.deepEqual(verifyProjectContext(f.root, context), context);
+  assert.throws(() => discoverProjectContext(f.root, { scope: [...scope, 'extra/new.js'] }), { code: 'CONTEXT_SCOPE_INVALID' });
+});
+
 test('mixed workspace selects nearest package and does not inherit root or sibling norms', (t) => {
   const f = fixture(t); f.pkg('package.json', { express: '*' }, { workspaces: ['apps/*'] });
   f.pkg('apps/web/package.json', { vue: '*' }); f.write('apps/web/src/index.js', '');

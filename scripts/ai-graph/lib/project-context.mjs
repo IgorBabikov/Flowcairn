@@ -86,7 +86,9 @@ export function readContextFile(root, relative, { maxBytes = MAX_FILE_BYTES, opt
 }
 
 function checkedScope(root, scope) {
-  if (!Array.isArray(scope) || !scope.length || scope.length > 32) fail('CONTEXT_SCOPE_INVALID', 'Нужен ограниченный scope узла');
+  // Task intake and TaskSpecSchema allow up to 64 paths; Skill discovery must
+  // accept the same bounded scope before the task is registered.
+  if (!Array.isArray(scope) || !scope.length || scope.length > 64) fail('CONTEXT_SCOPE_INVALID', 'Нужен ограниченный scope узла (не более 64 путей)');
   return sorted(scope.map((entry) => {
     const normalized = typeof entry === 'string' ? entry.replace(/\/$/, '') : entry;
     const safe = safeContextPath(normalized, true);

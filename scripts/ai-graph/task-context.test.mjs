@@ -66,6 +66,42 @@ test('many project roots do not prevent selecting one exact file', () => {
   assert.deepEqual(preview.scope, ['area-37/entry.ts']);
 });
 
+test('automatic scope overflow starts bounded discovery without dropping arbitrary paths', () => {
+  const files = ['package.json', ...Array.from({ length: 65 }, (_, i) => `src/area-${i}/components/entry.ts`)];
+  const preview = buildTaskContext(input('Обновить components для новых модулей.', { files }));
+  assert.equal(preview.ready, true);
+  assert.deepEqual(preview.scope, ['package.json']);
+  const initial = initialTaskContext(preview, { ai: { provider: 'codex' } });
+  assert.deepEqual(initial.scope, ['package.json']);
+  assert.match(initial.notes.join(' '), /contextRequests/);
+});
+
+test('natural task can name more than 32 files without requiring a shorter description', () => {
+  const names = Array.from({ length: 33 }, (_, i) => `src/file-${i}.ts`);
+  const request = input(`Обновить ${names.join(', ')}`, { files: ['package.json', ...names] });
+  const preview = buildTaskContext(request);
+  assert.equal(preview.ready, true);
+  assert.deepEqual(preview.scope, ['package.json']);
+  assert.match(initialTaskContext(preview, { ai: { provider: 'codex' } }).notes.join(' '), /contextRequests/);
+  const confirmed = buildTaskContext({ ...request, selection: { previewHash: preview.previewHash, scope: preview.scope, resolutions: [] } });
+  assert.equal(confirmed.ready, true);
+  assert.deepEqual(confirmed.scope, ['package.json']);
+});
+
+test('a missing reference after the first 32 stays visible to intake and analysis', () => {
+  const names = Array.from({ length: 32 }, (_, i) => `src/file-${i}.ts`);
+  const missing = 'src/missing.ts';
+  const preview = buildTaskContext(input(`Обновить ${names.join(', ')} и ${missing}`, { files: ['package.json', ...names] }));
+  assert.equal(preview.ready, true);
+  assert.deepEqual(preview.scope, ['package.json']);
+  assert.match(preview.feedback.join(' '), /src\/missing\.ts/);
+  assert.match(initialTaskContext(preview, { ai: { provider: 'codex' } }).notes.join(' '), /src\/missing\.ts/);
+  const confirmed = buildTaskContext({ ...input(`Обновить ${names.join(', ')} и ${missing}`, { files: ['package.json', ...names] }),
+    selection: { previewHash: preview.previewHash, scope: preview.scope, resolutions: [] } });
+  assert.equal(confirmed.ready, true);
+  assert.match(confirmed.feedback.join(' '), /src\/missing\.ts/);
+});
+
 test('one resolved reference does not hide another missing source file', () => {
   const preview = buildTaskContext(input('Перенести missing.json и обновить src/a.ts.'));
   assert.equal(preview.ready, false);
