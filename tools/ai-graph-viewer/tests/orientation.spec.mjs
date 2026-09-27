@@ -102,13 +102,13 @@ for (const width of [1366,390]) {
 
 test('lost snapshot does not keep reassuring running copy on screen',async({page})=>{
   await mockApi(page,running());await page.goto(`/#session=${token}`);
-  await expect(page.getByRole('heading',{name:'Что происходит сейчас',exact:true})).toBeVisible();
+  await expect(page.locator('.task-progress h3')).toContainText('Сейчас:');
   await page.route('**/api/runs/run-demo/snapshot',route=>route.abort('connectionreset'));
   await page.getByRole('button',{name:'Обновить',exact:true}).click();
   await expect(page.getByTestId('task-proof-status')).toBeVisible();
   await expect(page.getByTestId('task-proof-status')).toHaveText('Состояние недоступно');
   await expect(page.getByText('Flowcairn выполняет текущий этап',{exact:true})).toHaveCount(0);
-  await expect(page.getByRole('heading',{name:'Что происходит сейчас',exact:true})).toHaveCount(0);
+  await expect(page.locator('.task-progress')).toHaveCount(0);
 });
 
 test('desktop inspector returns keyboard focus after closing the sidebar',async({page})=>{

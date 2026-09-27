@@ -52,6 +52,33 @@ test('task cockpit leads to requirement evidence and advanced graph', async ({ p
   await expect(page.getByTestId('task-proof-status')).toHaveText('Результат подтвержден');
 });
 
+test('long requirement stays readable at wide and mobile widths', async ({ page }, testInfo) => {
+  const state = taskWithProof();
+  const title = Array.from({ length: 18 }, (_, index) =>
+    `Шаг ${index + 1}. Проверить локальный результат и сохранить совместимость существующего интерфейса.`).join(' ');
+  state.proof.requirements[0].title = title;
+  state.proof.requirements[0].verification.criterion = title;
+  for (const width of [3440, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await mockApi(page, state);
+    await page.goto(`/#session=${token}`);
+    const requirement = page.getByRole('region', { name: 'Доказательство требования' });
+    await expect(page.locator('.requirements-layout.is-long')).toBeVisible();
+    await expect(page.locator('.completion-certificate')).not.toHaveAttribute('open', '');
+    await expect(requirement.getByRole('heading', { name: 'Требование' })).toBeVisible();
+    expect(await requirement.locator('.requirement-prose p').count()).toBeGreaterThan(1);
+    await expect(requirement.locator('.verification-method')).toHaveText('Выполнение проверки');
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    const detail = await requirement.boundingBox();
+    expect(detail.width).toBeLessThan(1000);
+    await page.screenshot({ path: testInfo.outputPath(`long-requirement-${width}.png`) });
+    if (width === 390) {
+      await requirement.locator('.requirement-prose').scrollIntoViewIfNeeded();
+      await page.screenshot({ path: testInfo.outputPath('long-requirement-mobile-reading.png') });
+    }
+  }
+});
+
 test('execution failure with proof shows the real runtime cause above requirement gaps', async ({ page }) => {
   const state = taskWithProof();
   state.status = 'failed';
@@ -80,7 +107,8 @@ test('ongoing work keeps outstanding verification available without presenting i
   state.proof.blockers = ['Обязательная проверка check-tests не подтверждена на текущем результате',
     'R1: Не подтверждено выполнение всей связанной работы'];
   await mockApi(page, state); await page.goto(`/#session=${token}`);
-  await expect(page.locator('.execution-status')).toBeVisible();
+  await expect(page.locator('.task-progress')).toBeVisible();
+  await expect(page.locator('.task-progress h3')).toContainText('Внесение изменений');
   await expect(page.locator('.cockpit-current')).toHaveCount(0);
   const remaining = page.locator('details.proof-blockers');
   await expect(remaining.locator('summary')).toContainText('Что осталось проверить');
@@ -317,18 +345,43 @@ test('planning placeholder does not repeat the entire ticket as a requirement', 
   await expect(page.locator('.task-cockpit')).toContainText('Потеряна связь с AI-исполнителем');
 });
 
-test('running planning exposes the current stage alongside provisional requirements', async ({ page }) => {
+test('task tab shows the active planning stage and only counts known execution stages', async ({ page }, testInfo) => {
   const state = taskWithProof();
   state.phase = 'planning'; state.status = 'running'; state.completion = null;
   state.execution = { state: 'running', stopRequested: false };
   state.task.description = 'Подготовить задачу с несколькими требованиями';
   state.proof.requirements[0].title = state.task.description;
+  state.proof.requirements[0].status = 'blocked';
   state.proof.status = 'RUNNING'; state.proof.certificate = null;
-  state.nodes = [{ ...state.nodes[0], id: 'plan-task', title: 'Подготовка плана', status: 'running' }];
-  state.activeNodeId = 'plan-task';
-  await mockApi(page, state); await page.goto(`/#session=${token}`);
+  state.proof.coverage.proven = 0;
+  state.nodes = [
+    { ...state.nodes[0], id: 'analyze', title: 'Анализ задачи и проекта', action: { id: 'ai-analyze', kind: 'analysis' }, status: 'running' },
+    { ...state.nodes[1], id: 'plan-task', title: 'Подготовка плана', status: 'pending' },
+  ];
+  state.activeNodeId = 'analyze';
+  await page.setViewportSize({ width: 3440, height: 900 });
+  const fixture = await mockApi(page, state); await page.goto(`/#session=${token}`);
   await expect(page.getByRole('heading', { name: 'Требования еще формируются' })).toBeVisible();
-  await expect(page.locator('.execution-status')).toContainText('Сейчас: Подготовка плана');
+  await expect(page.locator('.task-progress h3')).toHaveText('Сейчас: Анализ задачи и проекта');
+  await expect(page.locator('.task-progress-track')).not.toHaveAttribute('aria-valuenow');
+  await expect(page.locator('.task-progress-count')).toHaveCount(0);
+  await expect(page.locator('.execution-status')).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath('planning-wide.png') });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.locator('.task-progress h3')).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath('planning-mobile.png') });
+
+  const next = fixture.current();
+  next.revision += 1; next.phase = 'execution';
+  next.nodes[0].status = 'passed'; next.nodes[1].status = 'running'; next.nodes[1].title = 'Проверка результата'; next.activeNodeId = 'plan-task';
+  await expect(page.locator('.task-progress h3')).toHaveText('Сейчас: Проверка результата');
+  await expect(page.locator('.task-progress-count')).toHaveText('50% этапов');
+  await expect(page.locator('.task-progress-count')).toBeVisible();
+  await expect(page.locator('.task-progress-track')).toHaveAttribute('aria-valuenow', '50');
+  await expect(page.locator('.task-progress-track')).toHaveAttribute('aria-valuetext', '1 из 2 этапов текущего плана завершено');
+  await page.screenshot({ path: testInfo.outputPath('execution-mobile.png') });
 });
 
 test('provisional proof does not hide the permitted start of analysis', async ({ page }) => {

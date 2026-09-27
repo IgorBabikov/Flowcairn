@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { ReadableText } from './ReadableText';
 
 export function CollapsibleText({
   id,
@@ -13,7 +14,7 @@ export function CollapsibleText({
   const collapsible = text.length > maxLength;
   return (
     <div className="collapsible-text">
-      <p id={id} className={collapsible && !expanded ? 'clamped' : undefined}>{text}</p>
+      <div id={id} className={collapsible && !expanded ? 'clamped' : undefined}><ReadableText text={text} /></div>
       {collapsible && (
         <button
           type="button"

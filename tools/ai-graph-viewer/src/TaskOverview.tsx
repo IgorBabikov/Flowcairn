@@ -64,6 +64,7 @@ export function TaskOverview({
   const title = snapshot.task?.title || snapshot.task?.goal || 'Задача';
   const description = snapshot.task?.description || snapshot.task?.goal || '';
   const executionFocused = !unavailable && snapshot.integrity.valid && !snapshot.proof && execution.kind !== 'idle';
+  const progressWithProof = !unavailable && snapshot.integrity.valid && Boolean(snapshot.proof) && !gate && execution.kind === 'running';
   const status = taskStatusLabel(snapshot, execution, unavailable);
   return (
     <article className={`task-overview${wide ? ' is-wide' : ''}${showContext && contextOpen ? ' with-context' : ''}`} aria-label="Обзор задачи">
@@ -89,7 +90,7 @@ export function TaskOverview({
       </header>}
 
       <div className="task-content-layout"><div className="task-content-primary">
-      {!unavailable && snapshot.integrity.valid && <ExecutionStatus value={execution} />}
+      {!unavailable && snapshot.integrity.valid && !progressWithProof && <ExecutionStatus value={execution} />}
       {(execution.kind === 'stop-uncertain' || snapshot.proof?.status === 'STALE') && <div className="task-next-action">
         {execution.kind === 'stop-uncertain' && !unavailable && snapshot.integrity.valid &&
           (snapshot.capabilities.recover?.allowed || snapshot.nodes.some(node => node.capabilities.recover?.allowed))
@@ -122,6 +123,7 @@ export function TaskOverview({
         <button className="button secondary" type="button" disabled={busy || !snapshot.capabilities.requestReplan?.allowed}
           onClick={actions.onClarify}>Уточнить контекст</button>
       </div>}
+      {progressWithProof && <TaskProgress snapshot={snapshot} execution={execution} summaryOnly />}
       {executionFocused && !gate ? (
         <><TaskProgress snapshot={snapshot} execution={execution} summaryOnly={wide} />
           {wide && <WideWorkList snapshot={snapshot} plan={plan} selectedId={selectedWorkId} onSelect={selectWork} />}</>

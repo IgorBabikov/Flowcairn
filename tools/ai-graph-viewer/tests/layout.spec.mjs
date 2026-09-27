@@ -188,7 +188,7 @@ test('task-first running view leads with the task and keeps the graph behind an 
   await page.goto(`/#session=${token}`);
 
   await expect(page.getByRole('heading', { name: 'Добавить форму регистрации компании' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Что происходит сейчас' })).toBeVisible();
+  await expect(page.locator('.task-progress h3')).toContainText('Сейчас:');
   await expect(page.locator('.react-flow')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Граф', exact: true })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath('task-first-running-1366x768.png') });
@@ -200,7 +200,7 @@ test('task-first running view leads with the task and keeps the graph behind an 
 
   await page.getByRole('button', { name: 'Задача', exact: true }).click();
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(page.getByRole('heading', { name: 'Что происходит сейчас' })).toBeVisible();
+  await expect(page.locator('.task-progress h3')).toContainText('Сейчас:');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: testInfo.outputPath('task-first-running-390x844.png') });
 });
@@ -209,6 +209,9 @@ test('keeps run rail actions on one compact line', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
   await mockApi(page, chain());
   await page.goto(`/#session=${token}`);
+  await expect(page.locator('.rail-heading')).toBeVisible();
+  await expect(page.locator('#new-task')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Обновить', exact: true })).toBeVisible();
   const heading = await page.locator('.rail-heading').boundingBox();
   const newTask = await page.locator('#new-task').boundingBox();
   const refresh = await page.getByRole('button', { name: 'Обновить', exact: true }).boundingBox();
