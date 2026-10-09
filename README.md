@@ -12,9 +12,9 @@
 
 [Быстрый старт](#быстрый-старт) · [Как это работает](#как-это-работает) · [Документация](docs/README.md) · [Telegram автора](https://t.me/Babikov_build)
 
-<img src="https://raw.githubusercontent.com/IgorBabikov/Flowcairn/main/.github/media/flowcairn-frontend-world.jpg" width="960" alt="Интерфейс Flowcairn: Гильдия, Мастерская и Архив в изометрическом игровом мире" />
+<img src="https://raw.githubusercontent.com/IgorBabikov/Flowcairn/main/.github/media/flowcairn-0.5.1-world.jpg" width="960" alt="Flowcairn 0.5.1: Гильдия, Мастерская и Архив в изометрическом игровом мире" />
 
-<sub>Настоящий интерфейс на демонстрационных данных. На снимке показан тестовый проект, а не результат выполнения пользовательской задачи.</sub>
+<sub>Актуальный интерфейс версии 0.5.1 на демонстрационных данных.</sub>
 
 </div>
 
@@ -58,9 +58,30 @@ npx flowcairn
 
 Книга открывается большим разворотом: объяснение и код рядом. На узком экране можно переключаться между ними, сохраняя место чтения. Новый шаг начинается с начала, а рядом с цитатой виден окружающий код.
 
-<img src="https://raw.githubusercontent.com/IgorBabikov/Flowcairn/main/.github/media/flowcairn-frontend-codebook.jpg" width="960" alt="Книга кода Flowcairn: разбор frontend-поиска товаров и JavaScript-код защиты от устаревших ответов" />
+<img src="https://raw.githubusercontent.com/IgorBabikov/Flowcairn/main/.github/media/flowcairn-0.5.1-codebook.jpg" width="960" alt="Flowcairn 0.5.1: большой разворот книги с объяснением и полным контекстом JavaScript-функции поиска" />
 
 *Демонстрационная frontend-задача: поиск товаров на JavaScript. Пользователь вводит «рюкзак», затем «термос»; разбор объясняет, почему поздний ответ первого запроса не меняет выдачу. Данные учебные, внешний AI при съемке не запускался.*
+
+<details>
+<summary><strong>Следующий шаг разбора</strong></summary>
+
+Новый шаг открывается с начала. Обсуждаемые строки выделены внутри сохраненного кода; начало функции и окружающие строки остаются видны.
+
+<img src="https://raw.githubusercontent.com/IgorBabikov/Flowcairn/main/.github/media/flowcairn-0.5.1-next-step.jpg" width="960" alt="Следующий шаг учебной книги: объяснение обработки ошибки и выделенные строки catch с окружающим кодом" />
+
+</details>
+
+#### Чтение на узком экране
+
+Объяснение и код открываются отдельно. При переключении сохраняются место чтения и черновик вопроса; продолжение выполнения находится в отдельном представлении.
+
+<table>
+  <tr><th>Объяснение</th><th>Сохраненный код</th></tr>
+  <tr>
+    <td><img src="https://raw.githubusercontent.com/IgorBabikov/Flowcairn/main/.github/media/flowcairn-0.5.1-mobile-explanation.jpg" width="300" alt="Объяснение выбранного шага на узком экране 390 пикселей" /></td>
+    <td><img src="https://raw.githubusercontent.com/IgorBabikov/Flowcairn/main/.github/media/flowcairn-0.5.1-mobile-code.jpg" width="300" alt="Сохраненный код с номерами строк и выделенной цитатой на узком экране 390 пикселей" /></td>
+  </tr>
+</table>
 
 Чтение не считается приемкой кода или доказательством освоенного навыка. [Как проверить пользу обучения](docs/LEARNING-PILOT.md).
 
