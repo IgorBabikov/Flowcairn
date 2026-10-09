@@ -8,6 +8,11 @@ export const stepDetails = page => page.getByTestId('diagnostic-node-details');
 export async function closeSurface(page) {
   await expect(page.locator('dialog[open]:not(.game-overlay)')).toHaveCount(0);
   if (await page.locator('.game-overlay[open]').count()) {
+    // Normal navigation waits for the surface to allow closing. Tests of the
+    // pending/uncertain guard send Escape directly instead of using this helper.
+    const close = page.locator('.game-overlay[open] .game-close');
+    await expect(close).toBeVisible();
+    await expect(close).toBeEnabled();
     await page.keyboard.press('Escape');
     await expect(page.locator('.game-overlay[open]')).toHaveCount(0);
   }

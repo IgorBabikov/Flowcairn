@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { book, openDiagnostics, openQuest, selectStep, showVersion, stepDetails, stepPicker, visitNewQuest, visitResult, newQuest } from './ui-paths.mjs';
+import { book, closeSurface, openDiagnostics, openQuest, selectStep, showVersion, stepDetails, stepPicker, visitNewQuest, visitResult, newQuest } from './ui-paths.mjs';
 import { mockApi, snapshot, projectContext, allowed, allDenied, graphNode, token } from './fixtures.mjs';
 
 async function openSteps(page) {
@@ -225,7 +225,9 @@ test('approval shows only the skills and checks actually present in the backend 
 
 test('task form has exactly three fields even with a large or dirty project', async ({page}) => {
   const context = {...projectContext, scopeCandidates: Array.from({length:40}, (_, i) => `area-${i}`), bootstrap:{firstTask:true, required:true, changedPaths:['package.json'], untrackedCandidates:['src/new.ts'],snapshotHash:'c'.repeat(64)}};
-  const fixture = await mockApi(page, snapshot(), {emptyUntilIntake:true, projectContext:context});
+  let releaseIntake;
+  const intakeResponseGate = new Promise(resolve => { releaseIntake = resolve; });
+  const fixture = await mockApi(page, snapshot(), {emptyUntilIntake:true, projectContext:context, intakeResponseGate});
   await visitNewQuest(page);
   const form = page.locator('#quest-intake');
   await expect(form.locator('input, textarea, select')).toHaveCount(3);
@@ -234,7 +236,25 @@ test('task form has exactly three fields even with a large or dirty project', as
   await form.getByLabel('Что нужно сделать').fill('Сделать валидацию полей');
   await form.getByLabel('Номер задачи').fill('FORM-12');
   await startTask(page);
+  await expect.poll(() => fixture.calls.filter(call => call.action === 'intake').length).toBe(1);
+  await expect(page.locator('.game-overlay[open] .game-close')).toBeDisabled();
+  await page.evaluate(() => {
+    window.navigationEscapes = 0;
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape') window.navigationEscapes += 1;
+    });
+  });
+  try {
+    // With no accepted reply, normal navigation must fail at its close-permission
+    // wait, without sending Escape. Use the default assertion timeout unchanged.
+    await expect(closeSurface(page)).rejects.toThrow(/toBeEnabled/);
+    expect(await page.evaluate(() => window.navigationEscapes)).toBe(0);
+    await expect(form).toBeVisible();
+    await expect(form.getByLabel('Что нужно сделать')).toHaveValue('Сделать валидацию полей');
+  } finally { releaseIntake(); }
   await openSteps(page);
+  expect(await page.evaluate(() => window.navigationEscapes)).toBe(1);
+  await expect(book(page).locator('.diagnostic-heading p')).toHaveText('Новая форма');
   await expect(stepPicker(page)).toBeVisible();
   await expect(stepDetails(page)).toBeVisible();
   const body = fixture.calls.find(call => call.action === 'intake').body;
