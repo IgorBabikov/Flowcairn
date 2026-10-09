@@ -515,11 +515,25 @@ test('coalesces SSE bursts and polling into one snapshot request', async ({ page
 });
 
 test('accepts a fail-closed snapshot without revision and stops catch-up', async ({ page }) => {
+  const clockStart = new Date('2026-10-09T00:00:00Z');
+  await page.clock.install({ time: clockStart });
+  await page.clock.pauseAt(clockStart);
   const fixture = await mockApi(page, snapshot(), {
     failClosedSnapshotAfterFirst: true,
     streamBurst: [4],
   });
   await page.goto(`/#session=${token}`);
+  await expect(page.getByTestId('rpg-runtime-status')).toHaveText('Состояние недоступно');
+  expect(fixture.snapshotReads()).toBe(2);
+  // No revision means SSE catch-up stops immediately, but normal disconnected
+  // polling must continue. Keep navigation time separate from that 2s timer.
+  await page.clock.runFor(1999);
+  expect(fixture.snapshotReads()).toBe(2);
+  const nextPoll = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/snapshot'));
+  await page.clock.runFor(1);
+  await (await nextPoll).finished();
+  await page.clock.runFor(500);
+  expect(fixture.snapshotReads()).toBe(3);
 
   await openDiagnostics(page, 'nodes');
   await expect(page.getByTestId('rpg-runtime-status')).toHaveText('Состояние недоступно');
@@ -529,8 +543,7 @@ test('accepts a fail-closed snapshot without revision and stops catch-up', async
   await expect(book(page).getByRole('button', { name: 'Запустить', exact: true })).toHaveCount(0);
   await openDiagnostics(page, 'result');
   await expect(book(page).locator('.workflow-summary')).toHaveText('Целостность данных не подтверждена');
-  await page.waitForTimeout(500);
-  expect(fixture.snapshotReads()).toBe(2);
+  expect(fixture.snapshotReads()).toBe(3);
   expect(fixture.maxSnapshotReads()).toBe(1);
 });
 

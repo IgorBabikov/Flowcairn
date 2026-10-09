@@ -1,4 +1,5 @@
-import { closeSync, fstatSync, lstatSync, openSync, readFileSync, readdirSync, readlinkSync, realpathSync } from 'node:fs';
+import { closeSync, fstatSync, lstatSync, openSync, readFileSync, readSync, readdirSync, readlinkSync, realpathSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { noFollowReadFlags, lstatHostSync, crossStatIdentity } from './host-filesystem.mjs';
 import { GraphError, hashObject, sha256 } from './io.mjs';
@@ -7,6 +8,22 @@ import { isSensitivePath, hasSecretContent } from './source-policy.mjs';
 const fail = (code, message) => { throw new GraphError(code, message); };
 const identity = (s) => [s.dev, s.ino, s.mode, s.nlink, s.size, s.mtimeNs, s.ctimeNs].join(':');
 const within = (root, file) => file === root || file.startsWith(root + path.sep);
+const MAX_EXECUTABLE_BYTES = 512 * 1024 * 1024;
+
+function executableDigest(fd, size) {
+  const hash = createHash('sha256'), buffer = Buffer.alloc(256 * 1024);
+  let bytes = 0;
+  while (true) {
+    // Read at most the pinned size plus one byte: growth cannot make this loop unbounded.
+    const count = readSync(fd, buffer, 0, Math.min(buffer.length, size - bytes + 1), null);
+    if (!count) break;
+    bytes += count;
+    if (bytes > size) fail('CHECK_INPUT_DRIFT', 'Инструмент проверки вырос во время чтения.');
+    hash.update(buffer.subarray(0, count));
+  }
+  if (bytes !== size) fail('CHECK_INPUT_DRIFT', 'Размер инструмента проверки изменился во время чтения.');
+  return { hash: hash.digest('hex'), bytes };
+}
 
 function comparablePathStat(file, raw) {
   // Node22.13.1 Windows may omit the path volume. The existing host bridge
@@ -19,6 +36,7 @@ function comparablePathStat(file, raw) {
 
 /** Inspect bytes only. An executable --version is a command, never a discovery probe. */
 export function checkFileIdentity(file, { executable = false, opaque = false, maxBytes = 16 * 1024 * 1024 } = {}) {
+  if (executable) maxBytes = Math.min(maxBytes, MAX_EXECUTABLE_BYTES);
   const before = lstatSync(file, { bigint: true });
   if (before.isSymbolicLink())
     fail('CHECK_INPUT_UNSAFE', 'Инструмент или вход проверки не может быть символической ссылкой.');
@@ -36,14 +54,15 @@ export function checkFileIdentity(file, { executable = false, opaque = false, ma
   try {
     const opened = fstatSync(fd, { bigint: true });
     if (crossStatIdentity(opened) !== crossStatIdentity(comparable)) fail('CHECK_INPUT_DRIFT', 'Вход проверки изменился до чтения.');
-    const bytes = readFileSync(fd);
+    const bytes = executable ? null : readFileSync(fd);
+    const digest = executable ? executableDigest(fd, Number(before.size)) : { hash: sha256(bytes), bytes: bytes.length };
     const after = fstatSync(fd, { bigint: true }), live = lstatSync(file, { bigint: true });
     // Same-origin comparisons retain every raw device bit and timestamp.
-    if (BigInt(bytes.length) !== before.size || identity(after) !== identity(opened) || identity(live) !== identity(before) ||
+    if (BigInt(digest.bytes) !== before.size || identity(after) !== identity(opened) || identity(live) !== identity(before) ||
         crossStatIdentity(comparablePathStat(file, live)) !== crossStatIdentity(opened))
       fail('CHECK_INPUT_DRIFT', 'Вход проверки изменился во время чтения.');
     if (!executable && !opaque && hasSecretContent(bytes.toString('utf8'))) fail('CHECK_INPUT_UNSAFE', 'Вход проверки исключен политикой секретов.');
-    return { hash: sha256(bytes), bytes: bytes.length, mode: Number(before.mode & 0o777n) };
+    return { ...digest, mode: Number(before.mode & 0o777n) };
   } finally { closeSync(fd); }
 }
 
@@ -113,7 +132,7 @@ export function resolveCheckExecutable(root, requested, env = process.env) {
     let before;
     try { before = executablePathIdentity(candidate); } catch (error) { if (['ENOENT', 'ENOTDIR'].includes(error.code)) continue; throw error; }
     if (/\.(?:cmd|bat|ps1)$/i.test(before.canonicalPath)) fail('CHECK_EXECUTABLE_UNSAFE', 'Shell launcher не поддерживается.');
-    const file = checkFileIdentity(before.canonicalPath, { executable: true, maxBytes: 256 * 1024 * 1024 });
+    const file = checkFileIdentity(before.canonicalPath, { executable: true, maxBytes: MAX_EXECUTABLE_BYTES });
     if (hashObject(executablePathIdentity(candidate)) !== hashObject(before) || realpathSync(candidate) !== before.canonicalPath)
       fail('CHECK_INPUT_DRIFT', 'Цепочка ссылок инструмента изменилась во время проверки.');
     return { executable: path.resolve(candidate), canonicalPath: before.canonicalPath,
