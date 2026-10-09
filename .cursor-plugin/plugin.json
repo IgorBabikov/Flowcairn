@@ -1,8 +1,8 @@
 {
   "name": "flowcairn",
   "displayName": "flowcairn",
-  "description": "Сложная задача: план, выполнение и проверенный результат.",
-  "version": "0.4.4",
+  "description": "Выполнение задач и изучение своего кода в 2D-мире.",
+  "version": "0.5.0",
   "author": {
     "name": "Igor Babikov"
   },
@@ -13,7 +13,8 @@
     "ai-workflow",
     "graph",
     "skills",
-    "developer-tools"
+    "developer-tools",
+    "code-learning"
   ],
   "skills": "./skills/"
 }

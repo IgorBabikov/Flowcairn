@@ -68,7 +68,8 @@ test('Codex argv applies independent controls with exact read-only policy and no
   assert.equal(command.args.some(value => value.includes('bypass') || value.includes('workspace-write')), false);
   const fsConfig = settings.find(value => value.startsWith('permissions.flowcairn-learning.filesystem='));
   const parsed = parse(fsConfig).permissions['flowcairn-learning'].filesystem;
-  assert.deepEqual(parsed, helpers.filesystem(scratch));
+  assert.equal(Object.getPrototypeOf(parsed), null);
+  assert.deepEqual({ ...parsed }, helpers.filesystem(scratch));
   assert.equal('ANTHROPIC_API_KEY' in command.env, false); assert.equal('OPENAI_API_KEY' in command.env, false);
   assert.equal(Object.isFrozen(command.args), true);
 });

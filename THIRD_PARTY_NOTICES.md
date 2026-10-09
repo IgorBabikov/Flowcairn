@@ -16,7 +16,7 @@ Flowcairn распространяется по [MIT](LICENSE). Ниже ука�
 | `react` | 19.2.7 | Браузерный bundle | MIT |
 | `react-dom` | 19.2.7 | Браузерный bundle | MIT |
 | `scheduler` | 0.27.0 | Браузерный bundle | MIT |
-| `smol-toml` | 1.8.0 | Runtime | BSD-3-Clause |
+| `smol-toml` | 1.9.0 | Runtime | BSD-3-Clause |
 | `yaml` | 2.9.1 | Runtime | ISC |
 | `zod` | 4.6.5 | Runtime | MIT |
 | `@pixi/colord` | 2.9.6 | Браузерный bundle | MIT |
@@ -194,7 +194,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-## smol-toml 1.8.0
+## smol-toml 1.9.0
 
 Лицензия: BSD-3-Clause. Источник: `smol-toml/LICENSE` установленного npm-пакета.
 
