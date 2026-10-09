@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 const cache = mkdtempSync(path.join(os.tmpdir(), 'flowcairn-pack-check-'));
@@ -12,6 +13,21 @@ try {
   assert.ok(files.includes('bin/terminal.mjs'), 'Архив не содержит оформление терминала.');
   for (const required of ['bin/flowcairn.mjs', 'bin/workspaces.mjs', 'skills/project-context/SKILL.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'tools/ai-graph-viewer/dist/index.html', 'tools/ai-graph-viewer/dist/app.js', 'tools/ai-graph-viewer/dist/app.css'])
     assert.ok(files.includes(required), `Архив не содержит ${required}. Выполните npm run build.`);
+  const rpgRoot = 'tools/ai-graph-viewer/dist/assets/rpg';
+  const manifestPath = `${rpgRoot}/world.json`;
+  assert.ok(files.includes(manifestPath), 'Архив не содержит карту игрового мира. Выполните npm run build.');
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  assert.equal(manifest.schemaVersion, 1, 'Неизвестная версия карты игрового мира.');
+  const assets = { ...manifest.assets, ...manifest.uiAssets };
+  for (const name of ['world.png', 'hero-idle.png', 'mentor-idle.png', 'workshop-room.png', 'archive-room.png', 'ui-codex.png', 'ui-quest-scroll.png']) {
+    const file = `${rpgRoot}/${name}`;
+    assert.ok(files.includes(file), `Архив не содержит игровой ассет ${name}.`);
+    const entry = Object.values(assets).find(asset => asset.file === name);
+    assert.ok(entry, `Карта не описывает игровой ассет ${name}.`);
+    const bytes = readFileSync(file);
+    assert.equal(bytes.length, entry.bytes, `Размер ${name} не соответствует карте.`);
+    assert.equal(createHash('sha256').update(bytes).digest('hex'), entry.sha256, `Хеш ${name} не соответствует карте.`);
+  }
   assert.ok(!files.some(file => /(^|\/)(node_modules|\.git|\.ai-orchestrator|\.env)(\/|$)/.test(file)));
   console.log(`Устанавливаемый архив: ${files.length} файлов; runtime, skills и собранный UI на месте.`);
 } finally { rmSync(cache, { recursive: true, force: true }); }

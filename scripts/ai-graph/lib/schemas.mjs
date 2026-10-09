@@ -1,5 +1,10 @@
 import { z } from 'zod';
 import { GraphError } from './io.mjs';
+import { Id, Hash, Text, RelativePath } from './schema-primitives.mjs';
+import { PlanChecksSchema } from './check-schemas.mjs';
+import { ExecutionStagesSchema, LearningModeSchema } from './stage-schemas.mjs';
+import { ContinuationSchema, RunLearningSchema } from './learning-schemas.mjs';
+export { Id, Hash, Text, RelativePath } from './schema-primitives.mjs';
 
 export function assertJsonBounds(value, maxEntries = 20000) {
   const queue = [[value, 0]];
@@ -28,37 +33,6 @@ export function assertJsonBounds(value, maxEntries = 20000) {
 }
 
 export const SCHEMA_VERSION = 2;
-export const Id = z.string().regex(/^[a-z][a-z0-9-]{1,79}$/);
-export const Hash = z.string().regex(/^[a-f0-9]{64}$/);
-export const Text = z.string().min(1).max(4000);
-export const RelativePath = z
-  .string()
-  .min(1)
-  .max(512)
-  // Keep the basic boundary visible in provider JSON Schema as well as in Zod.
-  // A simple provider-compatible pattern rejects root and absolute paths;
-  // the refinement below remains the full trusted path check.
-  .regex(/^(?:[^./\\]|\.[^./\\])[^\\]*$/)
-  .refine((value) => {
-    if (
-      value.includes('\\') ||
-      value.includes('\0') ||
-      value.startsWith('/') ||
-      /^[a-z]:/i.test(value)
-    )
-      return false;
-    return !value
-      .replace(/\/$/, '')
-      .split('/')
-      .some(
-        (part) =>
-          !part ||
-          part === '.' ||
-          part === '..' ||
-          part.toLowerCase() === '.git' ||
-          part.toLowerCase() === '.ai-orchestrator',
-      );
-  }, 'Expected a contained repository-relative path');
 export const Permission = z.enum(['ai.read', 'workspace.source.write', 'workspace.output.write']);
 export const Status = z.enum([
   'pending',
@@ -121,7 +95,7 @@ export const TaskContractProposalSchema = z.strictObject({
   assumptions: z.array(Text).max(20),
   unknowns: z.array(Text).max(20),
 });
-export const TaskInputSchema = z.strictObject({
+export const TaskInputV2Schema = z.strictObject({
   id: z.string().regex(/^[A-Z][A-Z0-9-]{2,40}$/),
   intakeKind: z.literal('natural').optional(),
   goal: Text,
@@ -148,7 +122,7 @@ export const TaskInputSchema = z.strictObject({
     })
     .default({ maxAttempts: 2, maxReplans: 2, timeoutMs: 600000 }),
 });
-export const TaskSpecSchema = TaskInputSchema.extend({
+export const TaskSpecV2Schema = TaskInputV2Schema.extend({
   schemaVersion: z.literal(2),
   sourceHash: Hash,
 });
@@ -179,7 +153,7 @@ export const NodeDefinitionSchema = z.strictObject({
     backoffMs: z.number().int().min(0).max(60000),
   }),
 });
-export const GraphPlanSchema = z.strictObject({
+export const GraphPlanV2Schema = z.strictObject({
   stage: z.enum(['planning', 'execution']).optional(),
   workflow: z.literal('autonomous').optional(),
   analysisArtifact: Hash.optional(),
@@ -197,7 +171,7 @@ export const GraphPlanSchema = z.strictObject({
   skills: z.array(SkillManifestSchema).max(20),
   nodes: z.array(NodeDefinitionSchema).min(2).max(64),
 });
-export const PlanningEnvelopeSchema = z.strictObject({
+export const PlanningEnvelopeV2Schema = z.strictObject({
   schemaVersion: z.literal(2),
   taskHash: Hash,
   sourceHash: Hash,
@@ -371,7 +345,7 @@ const StoredFingerprintSchema = z.union([
   FingerprintSchema,
   z.strictObject({ hash: Hash }),
 ]);
-const BindingSchema = z.strictObject({
+export const BindingSchema = z.strictObject({
   worktree: z.string().max(4096),
   taskId: z.string().max(80),
   attemptId: z.number().int().min(1),
@@ -383,7 +357,8 @@ const BindingSchema = z.strictObject({
   outputPaths: z.array(RelativePath).max(128).optional(),
   previousRunId: Id.optional(),
 });
-export const RunStateSchema = z.strictObject({
+export const PendingBindingSchema = BindingSchema.nullable().optional();
+export const RunStateV2Schema = z.strictObject({
   schemaVersion: z.literal(2),
   runId: Id,
   revision: z.number().int().min(0),
@@ -431,7 +406,7 @@ export const RunStateSchema = z.strictObject({
   permissions: z.array(Permission).max(3),
   providerConsentHash: Hash.nullable().optional(),
   binding: BindingSchema.nullable(),
-  pendingBinding: BindingSchema.nullable().optional(),
+  pendingBinding: PendingBindingSchema,
   workspaceFingerprint: StoredFingerprintSchema.nullable(),
   initialFingerprint: StoredFingerprintSchema.nullable(),
   activeOperation: z
@@ -473,6 +448,44 @@ export const RunStateSchema = z.strictObject({
   recovered: z.boolean().optional(),
   failureReason: z.string().max(12000).optional(),
 });
+// Preserve all V2 shapes and parsing defaults for historical hashes.
+export const TaskInputSchema = TaskInputV2Schema;
+export const TaskInputV3Schema = TaskInputV2Schema.extend({
+  checks: z.array(Id).max(6).default([]),
+  learningMode: LearningModeSchema.optional(),
+});
+export const TaskSpecV3Schema = TaskInputV3Schema.extend({
+  schemaVersion: z.literal(3), sourceHash: Hash,
+});
+export const TaskSpecSchema = z.discriminatedUnion('schemaVersion', [TaskSpecV2Schema, TaskSpecV3Schema]);
+export const GraphPlanV3Schema = GraphPlanV2Schema.extend({
+  schemaVersion: z.literal(3),
+  stage: z.enum(['planning', 'execution']),
+  checkRegistryHash: Hash,
+  checks: PlanChecksSchema,
+  learning: z.strictObject({ version: z.literal(1), initialMode: LearningModeSchema }),
+  executionStages: ExecutionStagesSchema.nullable(),
+}).refine((plan) => (plan.stage === 'planning') === (plan.executionStages === null), {
+  message: 'Execution stages are required for execution and absent during planning', path: ['executionStages'],
+});
+export const GraphPlanSchema = z.discriminatedUnion('schemaVersion', [GraphPlanV2Schema, GraphPlanV3Schema]);
+export const PlanningEnvelopeV3Schema = PlanningEnvelopeV2Schema.extend({
+  schemaVersion: z.literal(3), checkRegistryHash: Hash,
+});
+export const PlanningEnvelopeSchema = z.discriminatedUnion('schemaVersion', [PlanningEnvelopeV2Schema, PlanningEnvelopeV3Schema]);
+export const RunStateV3Schema = RunStateV2Schema.extend({
+  schemaVersion: z.literal(3),
+  status: z.enum([...Status.options, 'learning-hold']),
+  continuation: ContinuationSchema,
+  learning: RunLearningSchema,
+}).refine((run) => run.status !== 'learning-hold' || run.continuation.kind === 'learning-hold', {
+  message: 'A learning hold requires its durable continuation', path: ['continuation'],
+}).refine((run) => run.continuation.kind !== 'learning-hold' ||
+  (run.status === 'learning-hold' && !run.stopRequested && run.finalDisposition === null), {
+  message: 'A learning hold is neither cancelled nor accepted', path: ['status'],
+});
+export const RunStateSchema = z.discriminatedUnion('schemaVersion', [RunStateV2Schema, RunStateV3Schema]);
+
 export const ContextResolutionSchema = z.discriminatedUnion('kind', [
   z.strictObject({ reference: z.string().min(1).max(512), kind: z.literal('existing'), path: RelativePath }),
   z.strictObject({ reference: z.string().min(1).max(512), kind: z.literal('create'), path: RelativePath }),
@@ -539,6 +552,7 @@ export const ProductIntakeSchema = z.strictObject({
   operationId: Id,
   contextHash: Hash,
   selection: ContextSelectionSchema.optional(),
+  learningMode: LearningModeSchema.optional(),
 });
 export const IntakePreviewSchema = ProductIntakeSchema.omit({ operationId: true }).extend({ runId: Id.optional() });
 export const NaturalIntakeSchema = z.union([ProductIntakeSchema, LegacyIntakeSchema]);

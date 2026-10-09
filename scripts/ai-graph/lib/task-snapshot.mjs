@@ -1,8 +1,10 @@
 import { hashObject } from './io.mjs';
+import { learningSnapshot } from './learning-view.mjs';
 
 const unique = (values) => [...new Set(values)];
 
 function executionSnapshot(state) {
+  if (state.continuation?.kind === 'learning-hold') return { state: 'idle', stopRequested: false };
   const stopRequested = state.stopRequested === true;
   if (state.activeOperation)
     return { state: stopRequested ? 'stopping' : 'running', stopRequested };
@@ -26,6 +28,7 @@ export function projectSnapshot(host, runId, verifySource) {
           'RUNTIME_DRIFT',
           'SKILL_DRIFT',
           'POLICY_DRIFT',
+          'CHECK_REGISTRY_DRIFT',
           'STALE_GRAPH_BINDING',
           'STALE_GRAPH_OWNER',
           'STALE_GRAPH_WORKTREE',
@@ -58,6 +61,9 @@ export function projectSnapshot(host, runId, verifySource) {
               'requestReplan',
               'openReceipt',
               'rerunCheck',
+              'openLearning',
+              'continueLearning',
+              'setLearningMode',
             ].map((name) => [name, { allowed: false, reason: 'Integrity не подтверждена' }]),
           ),
         };
@@ -70,8 +76,8 @@ export function projectSnapshot(host, runId, verifySource) {
           if (
             !(
               driftReason.startsWith('STALE_GRAPH_')
-                ? ['openReceipt']
-                : ['requestReplan', 'revisePlan', 'recover', 'stop', 'openReceipt']
+                ? ['openReceipt', 'openLearning']
+                : ['requestReplan', 'revisePlan', 'recover', 'stop', 'openReceipt', 'openLearning']
             ).includes(name)
           )
             collection[name] = { allowed: false, reason: driftReason };
@@ -154,7 +160,10 @@ export function projectSnapshot(host, runId, verifySource) {
     const delivery = host.delivery(state, plan, driftReason);
     const proof = host.taskProof(state, task, plan, driftReason);
     return {
-      schemaVersion: 2,
+      schemaVersion: state.schemaVersion,
+      ...(state.schemaVersion === 3 ? { continuation: state.continuation,
+        learning: learningSnapshot(host, state, task, plan, driftReason),
+        approvalExpiresAt: host.executionDeadline?.(state, plan) ?? null } : {}),
       runId,
       task: {
         id: task.id,

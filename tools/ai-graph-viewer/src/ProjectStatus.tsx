@@ -16,6 +16,13 @@ export function ProjectStatus({ project, snapshot, unavailable, locale, onSetup 
   const problem = unavailable || snapshot?.integrity.valid === false || snapshot?.runner?.ai.available === false;
   const ready = Boolean(project?.capabilities.intake.allowed) && !problem;
   const status = problem ? 'Нужна проверка' : !project ? 'Загружаем проект' : ready ? 'Можно создать задачу' : 'Нужна настройка';
+  const checks = project?.checks.map(check => {
+    if (typeof check === 'string') return check;
+    const title = check.title.trim() || check.id;
+    if (check.available) return title;
+    const reason = humanText(check.reason);
+    return `${title} — недоступна${reason ? `: ${reason}` : ''}`;
+  }).join('; ');
   return <>
     <button className="project-status-trigger" type="button" aria-label="Состояние проекта"
       aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)}>
@@ -31,7 +38,7 @@ export function ProjectStatus({ project, snapshot, unavailable, locale, onSetup 
         {!project && <p>Данные проекта еще не получены.</p>}
         {project && !project.capabilities.intake.allowed && <p>{humanText(project.capabilities.intake.reason) || 'Создание задач пока недоступно.'}</p>}
         {project && <dl className="fact-list"><dt>AI-инструмент</dt><dd>{project.ai.provider || 'Не настроен'}</dd>
-          <dt>Проверки проекта</dt><dd>{project.checks.join(', ') || 'Не настроены'}</dd></dl>}
+          <dt>Проверки проекта</dt><dd>{checks || 'Не настроены'}</dd></dl>}
         {unavailable ? <p role="status">Состояние выбранной задачи недоступно. Данные предыдущей проверки не подтверждают текущее состояние.</p>
           : snapshot && <section><h3>Выбранная задача</h3><RunHealth snapshot={snapshot} locale={locale} /></section>}
         <button className="button" type="button" onClick={() => { setOpen(false); onSetup(); }}>Настройки проекта</button>

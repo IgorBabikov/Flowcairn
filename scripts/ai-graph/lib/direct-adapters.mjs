@@ -11,6 +11,7 @@ import { inspectDirectChanges } from './direct-fingerprint.mjs';
 import { captureDirectSource, verifyDirectSource } from './direct-source.mjs';
 import { allocateDirectBinding, replaceDirectBinding, verifyDirectBinding, withDirectBindingFence } from './direct-binding.mjs';
 import { prepareToolchain, verifyToolchain } from './toolchain.mjs';
+import { checkProfileSummary } from './check-profile.mjs';
 
 /** The same WorkflowService controls direct projects; only its workspace boundary changes. */
 export function directAdapters(root, profile, base) {
@@ -39,9 +40,9 @@ export function directAdapters(root, profile, base) {
     const firstTask = !existsSync(path.join(projectRoot, '.ai-orchestrator', 'graph', 'state.json'));
     const bootstrap = { firstTask, required: false, changedPaths: [], untrackedCandidates: [], requiredUntracked: [],
       snapshotHash: hashObject({ source: snapshot.hash }) };
-    return { schemaVersion: 2, name: path.basename(projectRoot), sourceHash: snapshot.hash,
+    return { schemaVersion: 3, name: path.basename(projectRoot), sourceHash: snapshot.hash,
       contextHash: hashObject({ runtimeHash: base.identity(), sourceHash: snapshot.hash, contextPaths, scopeCandidates, profile, safeSourceHash: safeSource.hash }),
-      contextPaths, scopeCandidates, bootstrap, checks: profile.checks,
+      contextPaths, scopeCandidates, bootstrap, checkIds: profile.checks, ...checkProfileSummary(projectRoot, profile),
       ai: { provider: profile.ai.provider, model: profile.ai.model },
       capabilities: { intake: { allowed: scopeCandidates.length > 0, reason: scopeCandidates.length ? null : 'Не найдены файлы проекта для задачи' } } };
   };

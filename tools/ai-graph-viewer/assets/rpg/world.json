@@ -1,0 +1,532 @@
+{
+  "schemaVersion": 1,
+  "assetRevision": "d1-static-1",
+  "status": "static-assets-ready-animation-pending",
+  "assets": {
+    "world": {
+      "file": "world.png",
+      "sizePx": [
+        1536,
+        1024
+      ],
+      "sha256": "4c7792d89e3fd1c80ddc3ec1cd183ddbaee467e91601ede3122052ffa440cb4e",
+      "bytes": 4040761,
+      "alpha": false,
+      "anchorPx": [
+        0,
+        0
+      ]
+    },
+    "workshop-room": {
+      "file": "workshop-room.png",
+      "sizePx": [
+        1536,
+        1024
+      ],
+      "sha256": "07d104771b4d3db38e24441f0b7a9c5de2195df1babb0bfac0efdc6617d5edf6",
+      "bytes": 3481090,
+      "alpha": false,
+      "anchorPx": [
+        0,
+        0
+      ]
+    },
+    "archive-room": {
+      "file": "archive-room.png",
+      "sizePx": [
+        1536,
+        1024
+      ],
+      "sha256": "ae1035fa4992b9d87f79ed1e5cb3cc85ec7c915e224f62b3ef05e440a5cdffcc",
+      "bytes": 3370472,
+      "alpha": false,
+      "anchorPx": [
+        0,
+        0
+      ]
+    },
+    "hero-idle": {
+      "file": "hero-idle.png",
+      "sizePx": [
+        1254,
+        1254
+      ],
+      "sha256": "3ea12713d6ee84afd2425c847ccc02252d6f4b68a68bec0d3b937f54baf03f16",
+      "bytes": 652448,
+      "alpha": true,
+      "visibleBoundsPx": [
+        425,
+        101,
+        859,
+        1115
+      ],
+      "visibleBoundsAlphaThreshold": 16,
+      "frameCount": 1,
+      "animation": "static-idle",
+      "anchorPx": [
+        642,
+        1115
+      ],
+      "visibleHeightWorldPx": 90,
+      "direction": "NW",
+      "mirror": false
+    },
+    "mentor-idle": {
+      "file": "mentor-idle.png",
+      "sizePx": [
+        1254,
+        1254
+      ],
+      "sha256": "7b3bd6bf5482788ea032020e1a5b7b1e2f05f7ea5b417665a2b9bc5eca30972d",
+      "bytes": 711229,
+      "alpha": true,
+      "visibleBoundsPx": [
+        417,
+        117,
+        912,
+        1148
+      ],
+      "visibleBoundsAlphaThreshold": 16,
+      "frameCount": 1,
+      "animation": "static-idle",
+      "anchorPx": [
+        665,
+        1148
+      ],
+      "visibleHeightWorldPx": 96,
+      "direction": "SE",
+      "mirror": false
+    }
+  },
+  "rooms": {
+    "guild": {
+      "background": "world",
+      "returnNode": "guild-door",
+      "heroPositionPx": [
+        310,
+        447
+      ],
+      "overlay": "task-scroll",
+      "walkEnabled": false,
+      "heroVisibleHeightPx": 90
+    },
+    "workshop": {
+      "background": "workshop-room",
+      "returnNode": "workshop-door",
+      "heroPositionPx": [
+        455,
+        755
+      ],
+      "mentorPositionPx": [
+        365,
+        660
+      ],
+      "overlay": "lesson-book",
+      "walkEnabled": false,
+      "heroVisibleHeightPx": 160,
+      "mentorVisibleHeightPx": 168
+    },
+    "archive": {
+      "background": "archive-room",
+      "returnNode": "archive-door",
+      "heroPositionPx": [
+        460,
+        730
+      ],
+      "overlay": "archive-book",
+      "walkEnabled": false,
+      "heroVisibleHeightPx": 160
+    }
+  },
+  "rendering": {
+    "backgroundLayer": 0,
+    "shadowLayer": 10,
+    "characterLayer": 20,
+    "domHotspotLayer": 100,
+    "domOverlayLayer": 300,
+    "charactersSortBy": "foot-y",
+    "ambientAnimation": false,
+    "reducedMotion": "instant-navigation",
+    "initialAssets": [
+      "world",
+      "hero-idle"
+    ],
+    "lazyAssets": [
+      "workshop-room",
+      "archive-room",
+      "mentor-idle"
+    ]
+  },
+  "restrictions": [
+    "D1 contains one static direction per character; no walk animation or direction switching is provided.",
+    "Navigation and room transitions never execute runtime commands.",
+    "No path may pass behind baked buildings or through foliage, water, walls or bridge rails.",
+    "All text, state, forms, code, books and buttons are separate DOM elements."
+  ],
+  "projection": {
+    "kind": "isometric",
+    "coordinates": "image-pixels",
+    "transform": "identity"
+  },
+  "bounds": {
+    "x": 0,
+    "y": 0,
+    "width": 1536,
+    "height": 1024
+  },
+  "viewport": {
+    "fit": "contain",
+    "preserveAspect": true,
+    "matte": "#14241E"
+  },
+  "background": "world",
+  "spawn": {
+    "pointId": "spawn",
+    "direction": "NW"
+  },
+  "navigation": {
+    "edges": [
+      {
+        "from": "spawn",
+        "to": "south",
+        "radiusPx": 20
+      },
+      {
+        "from": "south",
+        "to": "plaza",
+        "radiusPx": 20
+      },
+      {
+        "from": "plaza",
+        "to": "junction",
+        "radiusPx": 20
+      },
+      {
+        "from": "junction",
+        "to": "guild-bend",
+        "radiusPx": 20
+      },
+      {
+        "from": "guild-bend",
+        "to": "guild-lane",
+        "radiusPx": 20
+      },
+      {
+        "from": "guild-lane",
+        "to": "guild-approach",
+        "radiusPx": 20
+      },
+      {
+        "from": "guild-approach",
+        "to": "guild-door",
+        "radiusPx": 20
+      },
+      {
+        "from": "junction",
+        "to": "workshop-lane",
+        "radiusPx": 20
+      },
+      {
+        "from": "workshop-lane",
+        "to": "workshop-approach",
+        "radiusPx": 20
+      },
+      {
+        "from": "workshop-approach",
+        "to": "workshop-door",
+        "radiusPx": 20
+      },
+      {
+        "from": "junction",
+        "to": "east-lane",
+        "radiusPx": 20
+      },
+      {
+        "from": "east-lane",
+        "to": "bridge-west",
+        "radiusPx": 14
+      },
+      {
+        "from": "bridge-west",
+        "to": "bridge-mid",
+        "radiusPx": 14
+      },
+      {
+        "from": "bridge-mid",
+        "to": "bridge-east",
+        "radiusPx": 14
+      },
+      {
+        "from": "bridge-east",
+        "to": "archive-approach",
+        "radiusPx": 14
+      },
+      {
+        "from": "archive-approach",
+        "to": "archive-door",
+        "radiusPx": 20
+      }
+    ],
+    "bidirectional": true,
+    "routeAlgorithm": "shortest-polyline",
+    "clickSnapTolerancePx": 28,
+    "speedPxPerSecond": 220,
+    "renderedWalkAnimationAvailable": false,
+    "outsideCorridor": "reject",
+    "interactionRadiusPx": 30,
+    "points": {
+      "spawn": [
+        768,
+        906
+      ],
+      "south": [
+        759,
+        782
+      ],
+      "plaza": [
+        727,
+        642
+      ],
+      "junction": [
+        731,
+        568
+      ],
+      "guild-bend": [
+        601,
+        517
+      ],
+      "guild-lane": [
+        504,
+        464
+      ],
+      "guild-approach": [
+        388,
+        437
+      ],
+      "guild-door": [
+        276,
+        399
+      ],
+      "workshop-lane": [
+        760,
+        503
+      ],
+      "workshop-approach": [
+        778,
+        448
+      ],
+      "workshop-door": [
+        784,
+        420
+      ],
+      "east-lane": [
+        865,
+        572
+      ],
+      "bridge-west": [
+        1000,
+        561
+      ],
+      "bridge-mid": [
+        1090,
+        537
+      ],
+      "bridge-east": [
+        1182,
+        528
+      ],
+      "archive-approach": [
+        1232,
+        499
+      ],
+      "archive-door": [
+        1290,
+        472
+      ]
+    }
+  },
+  "hotspots": [
+    {
+      "id": "guild",
+      "label": "Гильдия",
+      "destination": "guild",
+      "arrivalNode": "guild-door",
+      "polygonPx": [
+        [
+          40,
+          100
+        ],
+        [
+          184,
+          20
+        ],
+        [
+          356,
+          116
+        ],
+        [
+          389,
+          265
+        ],
+        [
+          374,
+          382
+        ],
+        [
+          274,
+          418
+        ],
+        [
+          92,
+          355
+        ]
+      ],
+      "labelAnchorPx": [
+        257,
+        253
+      ],
+      "scene": "world",
+      "action": "navigate"
+    },
+    {
+      "id": "workshop",
+      "label": "Мастерская",
+      "destination": "workshop",
+      "arrivalNode": "workshop-door",
+      "polygonPx": [
+        [
+          627,
+          128
+        ],
+        [
+          792,
+          45
+        ],
+        [
+          946,
+          173
+        ],
+        [
+          1030,
+          291
+        ],
+        [
+          979,
+          443
+        ],
+        [
+          822,
+          468
+        ],
+        [
+          637,
+          429
+        ]
+      ],
+      "labelAnchorPx": [
+        786,
+        280
+      ],
+      "scene": "world",
+      "action": "navigate"
+    },
+    {
+      "id": "archive",
+      "label": "Архив",
+      "destination": "archive",
+      "arrivalNode": "archive-door",
+      "polygonPx": [
+        [
+          1200,
+          73
+        ],
+        [
+          1369,
+          18
+        ],
+        [
+          1514,
+          127
+        ],
+        [
+          1491,
+          412
+        ],
+        [
+          1372,
+          485
+        ],
+        [
+          1263,
+          475
+        ],
+        [
+          1188,
+          308
+        ]
+      ],
+      "labelAnchorPx": [
+        1310,
+        326
+      ],
+      "scene": "world",
+      "action": "navigate"
+    },
+    {
+      "id": "mentor",
+      "label": "Наставник",
+      "scene": "workshop",
+      "action": "open-lesson",
+      "polygonPx": [
+        [
+          306,
+          485
+        ],
+        [
+          414,
+          485
+        ],
+        [
+          414,
+          673
+        ],
+        [
+          306,
+          673
+        ]
+      ],
+      "labelAnchorPx": [
+        365,
+        474
+      ],
+      "requiresWalk": false
+    }
+  ],
+  "bakedGeometry": {
+    "buildings": true,
+    "foregroundOcclusion": false,
+    "walkBehindBuildings": false
+  },
+  "uiAssets": {
+    "ui-codex": {
+      "file": "ui-codex.png",
+      "sizePx": [
+        1536,
+        1024
+      ],
+      "bytes": 2666432,
+      "sha256": "8716d1ac447a1bf15da7e868a4cde7bd63b129b96de8c9ab2c906cd38ef115cb",
+      "alpha": true
+    },
+    "ui-quest-scroll": {
+      "file": "ui-quest-scroll.png",
+      "sizePx": [
+        1024,
+        1536
+      ],
+      "bytes": 2666210,
+      "sha256": "be854c0d1a3f660f82f091af22d9fc5fa7369f663c557db865f774491d2803a4",
+      "alpha": true
+    }
+  }
+}

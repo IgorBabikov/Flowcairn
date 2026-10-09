@@ -13,7 +13,7 @@ import {
 import path from 'node:path';
 import { TextDecoder } from 'node:util';
 import { GraphError, canonicalJson, sha256 } from './io.mjs';
-import { isSensitivePath } from './source-policy.mjs';
+import { classifySource, isSensitivePath } from './source-policy.mjs';
 
 const GIT_EXECUTABLE = gitExecutable();
 const MAX_FILES = 20_000;
@@ -347,7 +347,7 @@ function scanWorkspace(root, outputPaths) {
       assertSafePath(relativePath, { allowControl: outputAncestor });
       if (!(outputAncestor && (relativePath === '.ai-orchestrator' || relativePath.startsWith('.ai-orchestrator/')))) assertNotSensitivePath(relativePath);
       const absolutePath = path.join(absoluteDirectory, name);
-      if (isExcluded(relativePath, outputPaths)) {
+      if (isExcluded(relativePath, outputPaths) || classifySource(relativePath).reason === 'dependency') {
         validateExcludedRoot(absolutePath, relativePath);
         continue;
       }

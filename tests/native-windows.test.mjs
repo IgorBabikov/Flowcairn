@@ -90,7 +90,7 @@ test('no-Git init runs native Node/npm registered check in original directory', 
   const f = fixture(t);
   const service = await WorkflowService.open({ root: f.root });
   try {
-    assert.equal(service.project().schemaVersion, 2);
+    assert.equal(service.project().schemaVersion, 3);
     const { schemaVersion: _schema, sourceHash: _source, ...taskInput } = contract(f.root, 'check-tests').task;
     const created = await service.create(taskInput, { runId: 'native-workflow', operationId: 'native-create', stage: 'planning' });
     assert.equal(created.runId, 'native-workflow');

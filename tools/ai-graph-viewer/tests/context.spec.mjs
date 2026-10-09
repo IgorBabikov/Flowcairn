@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
-import { mockApi, snapshot, allowed, allDenied, token, projectContext } from './fixtures.mjs';
+import { openDiagnostics, visitNewQuest, visitResult } from './ui-paths.mjs';
+import { mockApi, snapshot, allowed, allDenied, projectContext } from './fixtures.mjs';
 
 const missingPreview = {
   contextHash: projectContext.contextHash, previewHash: 'f'.repeat(64), scope: ['src'],
@@ -19,7 +20,7 @@ function stoppedTask() {
 }
 
 async function openClarification(page) {
-  await page.goto(`/#session=${token}`);
+  await visitResult(page);
   await page.getByRole('button', { name: 'Уточнить контекст', exact: true }).click();
 }
 
@@ -43,13 +44,13 @@ test('a protected reference can be acknowledged as a constraint without gaining 
 
 test('ordinary task starts in one submission without a scope chooser or preview request', async ({ page }) => {
   const fixture = await mockApi(page, snapshot(), { emptyUntilIntake: true });
-  await page.goto(`/#session=${token}`);
-  const form = page.locator('.task-composer form');
+  await visitNewQuest(page);
+  const form = page.locator('#quest-intake');
   await expect(form.locator('input, textarea, select')).toHaveCount(3);
-  await page.getByLabel('Заголовок задачи', { exact: true }).fill('Перенести словарь');
-  await page.getByLabel('Полное описание задачи', { exact: true }).fill('Перенести catalog.json в src.');
+  await page.getByLabel('Название', { exact: true }).fill('Перенести словарь');
+  await page.getByLabel('Что нужно сделать', { exact: true }).fill('Перенести catalog.json в src.');
   await page.getByLabel('Номер задачи', { exact: true }).fill('CONTEXT-1');
-  await page.getByRole('button', { name: 'Запустить', exact: true }).click();
+  await page.getByRole('button', { name: 'Начать анализ', exact: true }).click();
   await expect.poll(() => fixture.calls.filter(call => call.action === 'intake').length).toBe(1);
   expect(fixture.calls.filter(call => call.action === 'preview')).toHaveLength(0);
   expect(fixture.calls.find(call => call.action === 'intake').body.selection).toBeUndefined();
@@ -70,7 +71,8 @@ test('exceptional context correction keeps run/revision binding and requires rec
     await route.fulfill({ json: { result: { ...current, contextClarification: false, status: 'ready', revision: current.revision + 1 } } });
   });
   await openClarification(page);
-  await expect(page.getByRole('heading', { name: 'Уточнить контекст задачи' })).toBeFocused();
+  await expect(page.getByRole('heading', { name: 'Уточнить поручение', exact: true })).toBeFocused();
+  await expect(page.getByRole('region', { name: 'Уточнить контекст задачи', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Продолжить анализ' })).toBeDisabled();
   await page.getByLabel('Как использовать catalog.json').selectOption('existing');
   await page.getByLabel('Путь существующего файла', { exact: true }).fill('dictionaries/catalog.json');
@@ -102,8 +104,9 @@ test('canceling optional recovery discards a late preview without losing the tas
   });
   await openClarification(page);
   await expect.poll(() => started).toBe(true);
-  await page.getByRole('button', { name: 'Вернуться к задаче' }).click();
+  await page.getByRole('button', { name: 'Вернуться к плану', exact: true }).click();
   release();
+  await openDiagnostics(page, 'result');
   await expect(page.getByTestId('task-proof-status')).toHaveText('Нужно уточнение');
   await expect(page.locator('.task-context-picker')).toHaveCount(0);
   expect(fixture.calls.filter(call => call.action === 'replan')).toHaveLength(0);

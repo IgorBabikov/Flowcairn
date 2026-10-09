@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { GraphError } from './io.mjs';
+import { GraphError, now } from './io.mjs';
 import { AIAnalysisResultSchema, AIPlanningResultSchema, ReceiptSchema, assertJsonBounds } from './schemas.mjs';
 import { compileTaskProposal } from './planning.mjs';
 import { compilePlan, validatePlan } from './validator.mjs';
 import { buildTaskContract } from './task-contract.mjs';
 import { repairExecutionSteps } from './repair-decomposition.mjs';
 import { autonomyForNodes } from './autonomy-policy.mjs';
+import { singleExecutionStage } from './plan-checks.mjs';
 
 const fail = (code, message) => { throw new GraphError(code, message); };
 const unique = (values) => [...new Set(values)];
@@ -14,6 +15,9 @@ const unique = (values) => [...new Set(values)];
 export async function replanRun(host, { state, task, plan, request, digest, actor, policyGrant = undefined, discoveryChange = null, freshPlanningSource = false }) {
   const readPhase = (read) => host.withReadContext ? host.withReadContext(read) : read();
   const originalTask = task;
+  // Validate the successor format before any supersession/binding transition.
+  if (host.adapters.dataVersion === 3 && task.schemaVersion === 2) task = { ...task, schemaVersion: 3 };
+  if (task.schemaVersion === 3) task = { ...task, learningMode: state.learning?.mode ?? task.learningMode ?? 'after-stage' };
   const contextChange = discoveryChange ?? (request.contextSelection ? host.resolveContextSelection(task, request.contextSelection) : null);
   if (contextChange) task = { ...task, scope: contextChange.scope,
     contextNotes: contextChange.feedback, contextPaths: contextChange.contextPaths ?? originalTask.contextPaths };
@@ -27,6 +31,8 @@ export async function replanRun(host, { state, task, plan, request, digest, acto
     parentPlanHash: state.planHash,
     workflow: plan.workflow,
     provider: host.adapters.project?.ai.provider,
+    checks: host.adapters.checkRegistry?.(),
+    learningMode: state.learning?.mode ?? task.learningMode ?? 'after-stage',
     analysis: contextChange ? null : host.analysis(state, plan),
     ...(plan.stage === 'execution' && plan.taskContract ? { taskContract: plan.taskContract } : {}),
   }));
@@ -103,7 +109,7 @@ export async function replanRun(host, { state, task, plan, request, digest, acto
     if (nextContract && request.draft) nextContract = buildTaskContract(task, { previousContract: nextContract,
       steps: nextDraft.nodes.filter((node) => node.action.id === 'ai-implement').map((node) => ({ id: node.id, nodeId: node.id, paths: node.resources.writes })) });
     readPhase(() => validatePlan(
-      { ...compilePlan(task, context).plan, ...(plan.workflow === 'autonomous' ? { workflow: 'autonomous', autonomy: autonomyForNodes(nextDraft.nodes), stage: nextStage } : {}), ...(nextContract ? { taskContract: nextContract } : {}), nodes: nextDraft.nodes, skills: context.skills.filter((skill) => nextDraft.nodes.some((node) => node.skills.includes(skill.id))) },
+      { ...compilePlan(task, context).plan, ...(plan.workflow === 'autonomous' ? { workflow: 'autonomous', autonomy: autonomyForNodes(nextDraft.nodes), stage: nextStage } : {}), ...(nextContract ? { taskContract: nextContract } : {}), ...(task.schemaVersion === 3 ? { executionStages: nextStage === 'planning' ? null : singleExecutionStage(nextDraft.nodes, nextContract) } : {}), nodes: nextDraft.nodes, skills: context.skills.filter((skill) => nextDraft.nodes.some((node) => node.skills.includes(skill.id))) },
       task,
       context,
     ));
@@ -178,7 +184,18 @@ export async function replanRun(host, { state, task, plan, request, digest, acto
     fingerprint: fingerprint ? host.persistFingerprint(fingerprint) : null,
   });
   const prior = { digest, status: 'creating', resultRunId: newRunId, preparationHash };
+  let continuationUpdate = {};
+  if (state.schemaVersion === 3 && state.continuation.kind === 'learning-hold') {
+    if (policyGrant) fail('REPLAN_DENIED', 'Учебная пауза требует нового согласования плана.');
+    if (state.learning.eventIds.length >= 200) fail('OPERATION_LIMIT', 'Лимит управляющих операций исчерпан.');
+    const eventId = host.store.putObject('learning-events', { version: 1, runId: state.runId, planHash: state.planHash,
+      taskHash: state.taskHash, name: 'replan', request, actor, createdAt: now(), hold: state.continuation });
+    // Explicit supersession closes only this historical run; the successor starts at its approval gate.
+    continuationUpdate = { continuation: { kind: 'open' },
+      learning: { ...state.learning, eventIds: [...state.learning.eventIds, eventId] } };
+  }
   state = host.write(state, {
+    ...continuationUpdate,
     status: 'stale',
     finalDisposition: 'superseded',
     operations: { ...state.operations, [request.operationId]: prior },

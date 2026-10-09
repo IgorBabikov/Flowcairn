@@ -25,7 +25,7 @@ test('real viewer build is independent of cwd and preserves the running viewer a
   const other = path.join(root, 'other');
   mkdirSync(viewer);
   mkdirSync(other);
-  for (const file of ['build.mjs', 'index.html', 'package.json', 'src'])
+  for (const file of ['build.mjs', 'index.html', 'package.json', 'src', 'assets'])
     cpSync(path.join(source, file), path.join(viewer, file), { recursive: true });
   symlinkSync(path.resolve(source, '../../node_modules'), path.join(viewer, 'node_modules'), 'dir');
   const dist = path.join(viewer, 'dist');

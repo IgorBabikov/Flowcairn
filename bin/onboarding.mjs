@@ -3,7 +3,9 @@ import { existsSync } from 'node:fs';
 import { createInterface } from 'node:readline/promises';
 import { z } from 'zod';
 import { GraphError, hashObject, sha256 } from '../scripts/ai-graph/lib/io.mjs';
-import { ProjectProfileSchema, discoverProjectChecks, loadProjectProfile, projectProfileHash, hasOnboardingConsent, onboardingConsentHash, trustedLocalChecksHash } from '../scripts/ai-graph/lib/project.mjs';
+import { ProjectProfileSchema, ProjectProfileV1Schema, discoverProjectChecks, loadProjectProfile, projectProfileHash, hasOnboardingConsent, onboardingConsentHash, trustedLocalChecksHash } from '../scripts/ai-graph/lib/project.mjs';
+import { CheckProfileSchema, isGenericProfile, MISSING_CHECK_GUIDANCE } from '../scripts/ai-graph/lib/check-profile.mjs';
+import { readCheckProfile } from './project-files.mjs';
 import { defaultProvider } from '../scripts/ai-graph/lib/platform.mjs';
 import { acquireUninstallGuard } from '../scripts/ai-graph/lib/lifecycle.mjs';
 import { readIntegrationTarget, replaceIntegrationFile } from '../scripts/ai-graph/lib/integration.mjs';
@@ -20,15 +22,16 @@ import { validateDirectOutputPaths } from '../scripts/ai-graph/lib/direct-worksp
 const effort = z.enum(['low', 'medium', 'high', 'xhigh']);
 const SetupSchema = z.strictObject({
   profileHash: z.string().regex(/^[a-f0-9]{64}$/).nullable(),
-  provider: z.enum(['codex', 'claude', 'cursor']), model: ProjectProfileSchema.shape.ai.shape.model,
+  provider: z.enum(['codex', 'claude', 'cursor']), model: ProjectProfileV1Schema.shape.ai.shape.model,
   modelMode: z.enum(['provider', 'manual', 'auto']), reasoningEffort: effort,
   workspaceMode: z.enum(['direct', 'worktree']).optional(),
   providerPath: z.string().max(1024).optional(), providerVersion: z.string().max(160).optional(), providerManaged: z.boolean().optional(), codexPath: z.string().max(1024).optional(),
-  reviewModel: ProjectProfileSchema.shape.ai.shape.model.optional(), reviewReasoningEffort: effort.optional(),
+  reviewModel: ProjectProfileV1Schema.shape.ai.shape.model.optional(), reviewReasoningEffort: effort.optional(),
   testPolicy: z.enum(['keep', 'add']), coverage: z.boolean(), readConsent: z.boolean(),
   checkMode: z.enum(['none', 'trusted-local', 'hardened']).optional(),
-  checks: ProjectProfileSchema.shape.checks.optional(),
-  outputPaths: ProjectProfileSchema.shape.outputPaths.optional(),
+  checks: CheckProfileSchema.shape.requiredCheckIds.optional(),
+  checkProfile: CheckProfileSchema.optional(),
+  outputPaths: ProjectProfileV1Schema.shape.outputPaths.optional(),
 });
 const fail = (code, message) => { throw new GraphError(code, message); };
 
@@ -83,8 +86,9 @@ export function inspectOnboarding(root) {
       ...(profile?.ai.codexPath ? { codexPath: profile.ai.codexPath } : {}),
     },
     limitations: [
+      ...(profile?.version === 2 && !profile.checks.length ? [MISSING_CHECK_GUIDANCE] : []),
       'Codex: модель и усиление считываются из конфигурации CLI. Настройки активного чата VS Code не считываются. Можно выбрать модель вручную в Flowcairn.',
-      'Проверки запускают зарегистрированные scripts прямо в проекте с правами пользователя. Используйте доверенный код и зависимости.',
+      'Проверки запускают зарегистрированные команды прямо в проекте с правами пользователя. Используйте доверенный код и зависимости.',
       'Нужен Node.js 22 и официальный AI-клиент с собственной авторизацией. macOS, Linux и нативный Windows; Docker и WSL не требуются. На Windows используется системный .NET Framework compiler.',
       'Изменение настроек: закройте UI и выполните npx flowcairn setup. Старые планы сохранят прежний профиль и потребуют перепланирования.',
     ],
@@ -175,7 +179,7 @@ export async function collectOnboarding(root, options = {}, terminal = {}) {
   } finally { if (!terminal.prompt) prompt.close(); }
 }
 
-export function onboardingInput(options, profileHash) {
+export function onboardingInput(options, profileHash, root = process.cwd()) {
   return SetupSchema.parse({
     profileHash, provider: options.provider, model: options.model,
     modelMode: options['model-mode'] ?? 'manual', reasoningEffort: options['reasoning-effort'] ?? 'medium',
@@ -189,6 +193,7 @@ export function onboardingInput(options, profileHash) {
     testPolicy: options['test-policy'] ?? 'keep', coverage: options.coverage === true, readConsent: options['read-consent'] === true,
     ...(options['check-mode'] !== undefined ? { checkMode: options['check-mode'] } : {}),
     ...(options.checks !== undefined ? { checks: String(options.checks).split(',').map((item) => item.trim()).filter(Boolean) } : {}),
+    ...(options['check-profile'] !== undefined ? { checkProfile: readCheckProfile(root, options['check-profile']) } : {}),
     ...(options.outputs !== undefined ? { outputPaths: String(options.outputs).split(',').map(item => item.trim()).filter(Boolean) } : {}),
   });
 }
@@ -200,6 +205,7 @@ export async function migrateLegacyCheckMode(root, { dryRun = false } = {}) {
   let raw;
   try { raw = JSON.parse(profileBefore.bytes.toString('utf8')); }
   catch { fail('PROJECT_PROFILE_INVALID', '.flowcairn.json содержит некорректный JSON.'); }
+  if (raw.version !== 1) return { migrated: false, reason: 'VERSIONED_PROFILE' };
   if (Object.hasOwn(raw, 'checkMode')) return { migrated: false, reason: 'EXPLICIT_MODE' };
   if (!readIntegrationTarget(root, '.ai-orchestrator/flowcairn-install.json', 1024 * 1024))
     return { migrated: false, reason: 'INSTALLATION_MISSING' };
@@ -269,7 +275,17 @@ function configuredProfile(root, previous, value) {
   if (value.outputPaths !== undefined) validateDirectOutputPaths(value.outputPaths);
   const { model: _model, reviewModel: _review, modelMode: _mode, reasoningEffort: _effort, reviewReasoningEffort: _reviewEffort, provider: _provider, providerPath: _providerPath, providerVersion: _providerVersion, providerManaged: _providerManaged, codexPath: _codexPath, ...extraAi } = previous.ai;
   let checkSettings = {};
-  if (value.checkMode !== undefined || value.checks !== undefined) {
+  const generic = value.checkProfile !== undefined || isGenericProfile(previous);
+  if (generic) {
+    const checkProfile = value.checkProfile ?? previous.checkProfile;
+    const checkMode = value.checkMode ?? previous.checkMode;
+    const checks = value.checks ?? (checkMode === 'none' ? [] : value.checkProfile !== undefined ||
+      (value.checkMode !== undefined && value.checkMode !== previous.checkMode) ? checkProfile.requiredCheckIds : previous.checks);
+    if (checkMode === 'none' && checks.length) fail('CHECK_MODE', 'Выберите режим исполнения для настроенных проверок.');
+    if (checks.some((id) => !checkProfile.definitions.some((definition) => definition.id === id)))
+      fail('CHECK_NOT_REGISTERED', 'Выбранная проверка отсутствует в зарегистрированном профиле.');
+    checkSettings = { version: 2, checkMode, checks, checkProfile: { ...checkProfile, requiredCheckIds: checks } };
+  } else if (value.checkMode !== undefined || value.checks !== undefined) {
     const checkMode = value.checkMode ?? previous.checkMode;
     const manifest = readIntegrationTarget(root, 'package.json', 1024 * 1024);
     if (!manifest) fail('PACKAGE_JSON', 'Нужен package.json проекта.');
@@ -284,8 +300,12 @@ function configuredProfile(root, previous, value) {
     checkSettings = { checkMode, checks, checkScripts: Object.fromEntries(checks.map((id) => [id, available.checkScripts[id]])) };
   }
   const workspaceMode = value.workspaceMode ?? previous.workspaceMode ?? 'worktree';
-  return ProjectProfileSchema.parse({ ...previous,
-      ...(value.outputPaths !== undefined ? { outputPaths: value.outputPaths } : {}),
+  if (generic && workspaceMode !== 'direct')
+    fail('WORKSPACE_MODE', 'Профиль команд пока доступен в режиме direct. Явно выберите --workspace-mode direct.');
+  const { packageManager: _manager, checkScripts: _scripts, ...genericPrevious } = previous;
+  return ProjectProfileSchema.parse({ ...(generic ? genericPrevious : previous),
+      ...(value.outputPaths !== undefined ? { outputPaths: value.outputPaths }
+        : value.checkProfile !== undefined ? { outputPaths: [...new Set([...previous.outputPaths, ...value.checkProfile.definitions.flatMap((definition) => definition.outputPaths)])] } : {}),
       ...checkSettings,
       workspaceMode,
       ai: { ...extraAi, provider:value.provider, model:value.model, modelMode:value.modelMode, reasoningEffort:value.reasoningEffort,
@@ -299,8 +319,8 @@ function configuredProfile(root, previous, value) {
 }
 
 function sameProfileStructure(previous, next) {
-  const { ai: _previousAi, onboarding: _previousOnboarding, workspaceMode: _previousWorkspace, checkMode: _previousMode, checks: _previousChecks, checkScripts: _previousScripts, outputPaths: _previousOutputs, ...previousStructure } = previous;
-  const { ai: _nextAi, onboarding: _nextOnboarding, workspaceMode: _nextWorkspace, checkMode: _nextMode, checks: _nextChecks, checkScripts: _nextScripts, outputPaths: _nextOutputs, ...nextStructure } = next;
+  const { ai: _previousAi, onboarding: _previousOnboarding, workspaceMode: _previousWorkspace, checkMode: _previousMode, checks: _previousChecks, checkScripts: _previousScripts, checkProfile: _previousProfile, version: _previousVersion, packageManager: _previousManager, outputPaths: _previousOutputs, ...previousStructure } = previous;
+  const { ai: _nextAi, onboarding: _nextOnboarding, workspaceMode: _nextWorkspace, checkMode: _nextMode, checks: _nextChecks, checkScripts: _nextScripts, checkProfile: _nextProfile, version: _nextVersion, packageManager: _nextManager, outputPaths: _nextOutputs, ...nextStructure } = next;
   return hashObject(previousStructure) === hashObject(nextStructure);
 }
 
@@ -337,6 +357,7 @@ export async function saveOnboarding(root, input, { dryRun = false } = {}) {
     if (!sameProfileStructure(previous, profile))
       fail('PROFILE_MIGRATION_SCOPE', 'Настройка может менять только AI, проверки, каталоги результатов и onboarding; остальные структурные поля проекта сохранены.');
     const bytes = Buffer.from(JSON.stringify(profile,null,2)+'\n');
+    if (bytes.length > 32768) fail('PROJECT_PROFILE_TOO_LARGE', 'Итоговый профиль превышает 32 KiB. Сократите определения проверок.');
     let profileAfter, ownerAfter;
     try {
       // При частичной записи старое согласие перестает подходить новому профилю.
@@ -351,11 +372,11 @@ export async function saveOnboarding(root, input, { dryRun = false } = {}) {
           : {}),
       };
       ownerAfter = replaceIntegrationFile(root,'.ai-orchestrator/flowcairn-install.json',Buffer.from(JSON.stringify(nextOwner,null,2)+'\n'),ownerBefore,1024*1024);
-      const profileMigration = migrateProjectProfile(root, {
+      const profileMigration = existsSync(path.join(root, '.ai-orchestrator', 'state.json')) ? migrateProjectProfile(root, {
         fromProfileHash: value.profileHash,
         toProfileHash: projectProfileHash(root),
         verifyStoppedGraph,
-      });
+      }) : { migrated: false, reason: 'REGISTRY_MISSING' };
       return {created:false,root:path.resolve(root),profile,profileMigration,message:'Настройки сохранены. Запуск: npx flowcairn.'};
     } catch (error) {
       // Roll back only bytes still owned by this setup attempt; never replace a concurrent edit.

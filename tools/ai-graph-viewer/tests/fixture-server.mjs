@@ -12,6 +12,14 @@ const files = new Map([
   ['/fonts/Manrope-Cyrillic-Variable.woff2', ['fonts/Manrope-Cyrillic-Variable.woff2', 'font/woff2']],
   ['/fonts/Manrope-Latin-Variable.woff2', ['fonts/Manrope-Latin-Variable.woff2', 'font/woff2']],
   ['/fonts/OFL-Manrope.txt', ['fonts/OFL-Manrope.txt', 'text/plain; charset=utf-8']],
+  ['/assets/rpg/world.json', ['assets/rpg/world.json', 'application/json; charset=utf-8']],
+  ['/assets/rpg/world.png', ['assets/rpg/world.png', 'image/png']],
+  ['/assets/rpg/workshop-room.png', ['assets/rpg/workshop-room.png', 'image/png']],
+  ['/assets/rpg/archive-room.png', ['assets/rpg/archive-room.png', 'image/png']],
+  ['/assets/rpg/hero-idle.png', ['assets/rpg/hero-idle.png', 'image/png']],
+  ['/assets/rpg/mentor-idle.png', ['assets/rpg/mentor-idle.png', 'image/png']],
+  ['/assets/rpg/ui-codex.png', ['assets/rpg/ui-codex.png', 'image/png']],
+  ['/assets/rpg/ui-quest-scroll.png', ['assets/rpg/ui-quest-scroll.png', 'image/png']],
 ]);
 
 const server = createServer((request, response) => {

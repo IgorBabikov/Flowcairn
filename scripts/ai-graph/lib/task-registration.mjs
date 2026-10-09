@@ -6,7 +6,7 @@ import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, rea
 import path from 'node:path';
 import { GraphError, hashObject } from './io.mjs';
 import { loadProjectProfile, RUNTIME_ROOT } from './project.mjs';
-import { Id, TaskInputSchema } from './schemas.mjs';
+import { Id, TaskInputSchema, TaskInputV3Schema } from './schemas.mjs';
 import { WorkflowService, sanitizeText } from './service.mjs';
 import { ownedBootstrapFiles } from './bootstrap.mjs';
 import { boundedProcess } from './bounded-process.mjs';
@@ -122,17 +122,18 @@ export async function createTask(input, taskInput, options = {}) {
   const root = projectRoot(input),
     profile = loadProjectProfile(root),
     ownerId = owner(root);
-  let task = TaskInputSchema.parse(taskInput);
+  const taskSchema = profile.version === 2 || options.service?.adapters.dataVersion === 3 ? TaskInputV3Schema : TaskInputSchema;
+  let task = taskSchema.parse(taskInput);
   if (options.run !== undefined) Id.parse(options.run);
   if (options.operation !== undefined) Id.parse(options.operation);
   if (
     task.checks.some(
-      (check) => !CHECKS.includes(check) || !profile.checks.some((allowed) => allowed === check),
+      (check) => (profile.version === 1 && !CHECKS.includes(check)) || !profile.checks.some((allowed) => allowed === check),
     )
   )
     fail(
       'CHECK_UNSUPPORTED',
-      'Доступны только tests, typecheck, lint и build, включенные в профиль проекта.',
+      'Проверка должна быть включена в зарегистрированный профиль проекта.',
     );
   const stateFile = path.join(root, '.ai-orchestrator/state.json');
   const firstTask = !existsNoFollow(stateFile);
@@ -163,7 +164,7 @@ export async function createTask(input, taskInput, options = {}) {
     if (!canResumeBootstrap)
       fail('DIRTY_ROOT', 'В проекте есть незакоммиченные файлы. Сохраните изменения в Git; flowcairn не коммитит и не прячет их автоматически.');
     const untracked = git(root, ['ls-files', '--others', '--exclude-standard', '-z']).split('\0').filter(Boolean);
-    task = TaskInputSchema.parse({ ...task, includeUntracked: uniqueBootstrapPaths(task.includeUntracked, ownedBootstrapFiles(root), untracked) });
+    task = taskSchema.parse({ ...task, includeUntracked: uniqueBootstrapPaths(task.includeUntracked, ownedBootstrapFiles(root), untracked) });
     source = await service.adapters.capture(task);
     if (source.manifest.sourceHash !== existingState.bootstrapSourceHash)
       fail('DIRTY_ROOT', 'Исходники отличаются от исходного снимка незавершенной регистрации. Сохраните изменения в Git перед новой задачей.');
@@ -181,7 +182,7 @@ export async function createTask(input, taskInput, options = {}) {
         'DIRTY_ROOT',
         'Есть незакоммиченные изменения проекта. Проверьте git diff и сохраните их в Git либо добавьте --snapshot: это явно включает текущее состояние отслеживаемых файлов в локальный снимок первого графа. AI не запускается.',
       );
-    task = TaskInputSchema.parse({
+    task = taskSchema.parse({
       ...task,
       includeUntracked: [
         ...new Set([...task.includeUntracked, ...owned.filter((file) => untracked.includes(file))]),

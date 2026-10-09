@@ -1,26 +1,44 @@
 # Архитектура Flowcairn
 
-Flowcairn сохраняет контракт задачи и выводит доказанность из реальных проверок. Executor владеет состоянием и разрешениями. UI получает snapshot и capabilities; граф остается представлением исполнения.
+В Flowcairn три отдельные части: исполнение задачи, учебный материал и 2D-интерфейс. Executor владеет графом, состоянием, разрешениями и выводом о результате. Обучение использует сохраненные версии исходников. Мир получает snapshot и capabilities; персонаж, книга и навигация не управляют исполнением самостоятельно.
 
 ```mermaid
 flowchart TD
   Goal[Цель пользователя] --> Contract[Контракт и требования]
   Contract --> Plan[Неизменяемый план]
-  Plan --> Execution[Разрешенное исполнение]
-  Execution --> Verification[Реальные проверки и review]
+  Plan --> Before[Сохраненная версия до этапа]
+  Before --> Execution[Небольшой этап реализации]
+  Execution --> Verification[Проверки этапа]
   Verification --> Evidence[Receipts и artifacts]
-  Evidence --> Proof[Покрытие и актуальность]
+  Evidence --> Proof[Итоговое покрытие и актуальность]
   Proof -->|есть проблема| Repair[Ограниченное исправление]
   Repair --> Execution
   Proof -->|все требования подтверждены| Proven[PROVEN и сертификат]
-  Proof --> Cockpit[Экран задачи]
-  Plan --> Graph[Граф исполнения]
+  Verification --> Material[Код после этапа и материал]
+  Material --> More{Остались этапы?}
+  More -->|Да| Hold{Режим обучения}
+  More -->|Нет| Review[Итоговое review и handoff]
+  Review --> Proof
+  Hold -->|По этапам| Pause[Сохраненная пауза]
+  Pause -->|Явно продолжить| Before
+  Hold -->|После задачи| Before
+  Material --> Learning[Чтение и объяснение]
+  Proof --> World[2D-мир и рабочие предметы]
+  Plan --> World
+  Learning --> World
 ```
 
 ## Границы модулей
 
 | Область | Ответственность |
 | --- | --- |
+| `stage-plan.mjs`, `stage-execution.mjs` | Компилируют проверяемые этапы; сохраняют before до эффекта, связывают receipt, after и учебную паузу |
+| `check-profile.mjs`, `check-toolchain.mjs`, `check-command.mjs`, `check-execution.mjs`, `check-shell.mjs` | Регистрируют команды любого стека, отличают путь вызова от identity инструмента, повторно проверяют фактические входы перед запуском |
+| `learning-sources.mjs`, `learning-material.mjs`, `lesson-validation.mjs` | Хранят выбранные полные bytes, проверяют привязку материала и точные цитаты; не повышают PROVEN |
+| `learning-control.mjs`, `learning-view.mjs` | Управляют явным Continue/режимом/учебной отметкой и дают read-only проекцию текущих и исторических материалов |
+| `learning-jobs.mjs`, `learning-job-state.mjs`, `learning-job-adapter.mjs` | Используют тот же store/CAS/supervisor для ограниченных учебных вызовов; поздний ответ меняет только учебную ветку |
+| `learning-prompt.mjs`, `learning-provider.mjs`, `learning-runner.mjs` | Готовят только сохраненный материал, проверяют ограничения выбранного CLI, результат и безопасную очистку |
+| `src/rpg/**`, `src/learning/**` | Отображают мир, игровые поверхности и источник/объяснение; используют существующий клиентский controller |
 | `task-contract.mjs`, `planning.mjs`, `validator.mjs` | Сохраняют исходные обязательства, связывают требования с работой и разрешенными verifiers, компилируют и проверяют план |
 | `task-context.mjs`, `project-context-map.mjs`, `context-discovery.mjs` | Разрешают имена из естественной постановки, дают ограниченный индекс проекта и проверяют запросы дополнительного контекста до согласования реализации |
 | `result-classification.mjs` | Отличает смысловую неопределенность завершенного AI-ответа от неподтвержденного процесса по immutable receipt |
@@ -42,13 +60,26 @@ flowchart TD
 | `docker-checks.mjs`, `docker-stop-proof.mjs` | Legacy код для восстановления старых контейнерных receipts; новые checks сюда не направляются |
 | `orchestrator-*.mjs` | Отдельные границы registry/locks, Git, Graph leases, delivery, integration, inspection и source bootstrap Orchestrator |
 | `bin/installation.mjs`, `bin/project-files.mjs` | Установка и безопасные операции с проектом отделены от CLI dispatch |
-| `AppFrame.tsx`, `TaskOverview.tsx`, `TaskCockpit.tsx`, `ResourcePanel.tsx`, `ProjectStatus.tsx` | Стабильный каркас, основной экран задачи, требования, evidence и ресурсы; семантика PROVEN не вычисляется в React |
-| `WideTaskHeading.tsx`, `WideWorkList.tsx`, `WideTaskContext.tsx`, `use-viewport-query.ts`, `wide-workspace.css` | Адаптация от 1800 CSS px: общая шапка задачи, работы и контекст; данные берутся из snapshot/plan/proof, отдельного runtime нет |
-| `PlanDecision.tsx`, `task-presentation.ts` | Общие условия согласования и подписи состояния для обычной и широкой компоновки; обработчики действий остаются в App |
-| `ExecutionStatus.tsx`, `execution-presentation.ts`, `StatusLoader.tsx`, `TechnicalDetails.tsx` | Человекочитаемая проекция состояния исполнения, loaders и отделение пользовательского сообщения от диагностики |
-| `ExecutionGraph.tsx`, `ExecutionDetails.tsx`, `ExecutionInspector.tsx`, `ExecutionDialogs.tsx`, `ModalSurface.tsx`, `use-modal.ts` | Расширенное представление графа, выбранного узла, immutable receipts и управляющих диалогов |
+| `App.tsx`, `use-workflow-controller.tsx`, `WorkflowDialogs.tsx` | Общий контроллер чтения и явных команд, неизменные envelopes, gate/evidence dialogs; игровая навигация не создает второй executor |
+| `rpg/RpgShell.tsx`, `WorldCanvas.tsx`, `world-scene.ts` | 2D-мир, перемещение и входы в игровые предметы; только представление snapshot/capabilities |
+| `rpg/DiagnosticBook.tsx`, `DiagnosticNodes.tsx`, `ExecutionDetails.tsx` | Выбор этапа, разрешенные действия, требования, receipts, история и сравнение планов без ReactFlow |
+| `TaskOverview.tsx`, `TaskCockpit.tsx`, `ResourcePanel.tsx`, `task-presentation.ts` | Переиспользуемые панели результата, evidence, ручной приемки и известных затрат; семантика PROVEN остается на сервере |
+| `learning/LearningReader.tsx`, `SavedSourcePanel.tsx`, `LessonExplanation.tsx` | Сохраненный код, source-bound объяснение и границы полноты; чтение не запускает AI |
+| `learning/content-command.ts`, `use-learning-job.ts`, `use-bound-read.ts` | Явные учебные команды, ограниченное чтение статуса, защита от поздних ответов и скрытие данных при отзыве доступа |
+| `ExecutionStatus.tsx`, `execution-presentation.ts`, `StatusLoader.tsx`, `TechnicalDetails.tsx` | Подписи состояния исполнения, загрузки и причины ошибок |
 
-Модули выполняют конкретные обязанности; универсального plugin framework и второго хранилища состояния нет. Compiler, service и verifier используют один immutable contract. Разделение файлов не дает модулю новые права.
+
+Модули выполняют конкретные обязанности; универсального plugin framework и второго хранилища состояния нет. Compiler, service и verifier используют один immutable contract. Разделение файлов не дает модулю новые права. Новые планы и запуски используют V3, исторические V2 читаются без переписывания их объектов; старый исполнитель не продолжает V3.
+
+## Исполнение и обучение
+
+Каждый смысловой этап содержит реализацию, проверку области изменений и все обязательные зарегистрированные проверки. У последнего этапа сохраняется итоговое review/handoff. Промежуточные receipts остаются историческими; финальный PROVEN опирается на проверки итоговой версии, полное покрытие требований и отсутствие блокирующих замечаний.
+
+В режиме `after-stage` граница проверенного промежуточного этапа атомарно фиксирует завершенный receipt, материал и `learning-hold`, если впереди есть следующий этап. После последнего этапа выполняется review/handoff и сохраняется итоговый материал без учебной паузы. Следующая реализация не запускается после чтения книги или перезапуска процесса. `continue-learning` снимает только конкретную паузу после повторной проверки текущих прав и версии. В `after-task` те же границы сохраняют материалы без пауз; итоговый материал собирается по финальным bytes.
+
+Учебный вызов не является узлом реализации и не получает право применять patch. Его вход связан с material/method/provider и явной командой. GET не вызывает AI. Один активный вызов на запуск, конечные лимиты и отсутствие автоматического повторного inference после сбоя сохраняются отдельно от графа. Ошибка генерации не принимает и не отменяет выполненный код.
+
+Полная source capture и обучение имеют разные границы: небезопасный или изменившийся выбранный исходник блокирует зависимый эффект; известные ограничения размера и исключения дают честный неполный материал. Историческое чтение использует сохраненные bytes и текущую политику доступа, а не подставляет live-файл под старое объяснение.
 
 ## Контракт, evidence и вывод
 

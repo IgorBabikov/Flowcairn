@@ -1,7 +1,7 @@
 {
   "name": "flowcairn",
   "version": "0.4.4",
-  "description": "Сложные задачи: понятный план, выполнение и проверенный результат",
+  "description": "Выполнение задач и изучение своего кода в 2D-мире",
   "type": "module",
   "license": "MIT",
   "engines": {
@@ -34,7 +34,7 @@
     "CHANGELOG.md"
   ],
   "scripts": {
-    "test": "node --test scripts/ai-graph/*.test.mjs scripts/ai-orchestrator.test.mjs tools/ai-graph-viewer/*.test.mjs tests/*.test.mjs",
+    "test": "node --test scripts/ai-graph/*.test.mjs scripts/ai-orchestrator.test.mjs tools/ai-graph-viewer/*.test.mjs tests/*.test.mjs tools/ai-graph-viewer/src/learning/*.test.mjs tools/ai-graph-viewer/src/rpg/*.test.mjs",
     "test:runtime": "node --test scripts/ai-graph/*.test.mjs scripts/ai-orchestrator.test.mjs",
     "build": "node tools/ai-graph-viewer/build.mjs",
     "typecheck": "tsc -p scripts/ai-graph/tsconfig.json && tsc -p tools/ai-graph-viewer/tsconfig.json",
@@ -59,11 +59,11 @@
     "@types/node": "22.20.0",
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
-    "@xyflow/react": "12.11.6",
     "esbuild": "0.25.12",
     "eslint": "10.6.0",
     "eslint-plugin-react-hooks": "7.1.1",
     "globals": "17.7.0",
+    "pixi.js": "8.21.0",
     "react": "19.2.7",
     "react-dom": "19.2.7",
     "typescript": "5.9.3",
@@ -81,7 +81,7 @@
     "ai-workflow",
     "ai-coding",
     "workflow-orchestration",
-    "react-flow",
+    "code-learning",
     "developer-tools",
     "local-first",
     "agent-skills",

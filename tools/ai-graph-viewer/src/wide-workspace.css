@@ -113,10 +113,6 @@
 .wide-workspace .requirement-detail h3 { margin-top: 0; }
 .wide-workspace .requirements-list h3 { margin-top: 0; }
 .wide-workspace .requirement-choice { padding: 18px 12px; }
-.wide-workspace .graph-region { border: 0; border-radius: 0; height: 100%; display: flex; flex-direction: column; }
-.wide-workspace .graph-region .flow-wrap { flex: 1; min-height: 0; }
-.wide-workspace .graph-region .graph-header { padding: 24px 36px; }
-.wide-workspace .graph-region > .execution-status { margin: 20px 36px 0; }
 .wide-workspace .inspector-heading { padding: 22px 24px; }
 .wide-workspace .detail-scroll { padding: 24px; }
 .wide-workspace .composing .main-content { padding: 28px 36px; }

@@ -42,6 +42,12 @@ const OBJECT_KINDS = new Set([
   'receipts',
   'artifacts',
   'operations',
+  'learning-materials',
+  'learning-sources',
+  'learning-source-chunks',
+  'lessons',
+  'learning-events',
+  'learning-jobs',
 ]);
 const SENSITIVE_KEYS = new Set([
   'rawlog',

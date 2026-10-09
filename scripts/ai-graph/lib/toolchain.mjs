@@ -13,6 +13,7 @@ import {
 import path from 'node:path';
 import { GraphError, hashObject, sha256 } from './io.mjs';
 import { loadProjectProfile, packageManagerLock, validatePackageManagerProject } from './project.mjs';
+import { inspectProjectChecks } from './check-profile.mjs';
 
 const VERSION = 1;
 const HASH_PATTERN = /^[a-f0-9]{64}$/;
@@ -76,6 +77,7 @@ function directManifest(root) {
   const canonical = physicalDirectory(root, 'INVALID_TOOLCHAIN_ROOT', 'root');
   const profile = loadProjectProfile(canonical);
   if (profile.workspaceMode !== 'direct') fail('INVALID_TOOLCHAIN_WORKTREE', 'Прямой режим не выбран');
+  if (profile.version === 2) return { dependencyPaths: [], readRoots: [], hash: hashObject(inspectProjectChecks(canonical, profile)) };
   validatePackageManagerProject(canonical, profile.packageManager);
   const lockfile = path.join(canonical, packageManagerLock(profile.packageManager));
   const lock = existsNoFollow(lockfile) ? readFileSync(lockfile) : Buffer.alloc(0);

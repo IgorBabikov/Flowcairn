@@ -14,6 +14,21 @@ const context = { after: (callback) => cleanup.push(callback) };
 const secrets = [];
 let browser;
 const runningServers = [];
+
+// Keep this smoke independent of UI test fixtures and their synthetic API routes.
+async function openDiagnosticResult(page) {
+  await page.getByRole('navigation', { name: 'Игровое меню', exact: true })
+    .getByRole('button', { name: 'Настройки', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Служебные записи', exact: true })
+    .getByRole('button', { name: 'Книга диагностики', exact: true }).click();
+  const book = page.getByTestId('diagnostic-book');
+  await expect(book).toBeVisible();
+  const result = book.getByRole('tab', { name: 'Результат', exact: true });
+  await result.click();
+  await expect(result).toHaveAttribute('aria-selected', 'true');
+  await expect(book.getByRole('tabpanel', { name: 'Результат', exact: true })).toBeVisible();
+}
+
 async function openFixture(options) {
   const sample = await fixture(context, options);
   const token = randomBytes(32).toString('hex'); secrets.push(token);
@@ -23,18 +38,39 @@ async function openFixture(options) {
   assert.ok(address && typeof address !== 'string');
   const page = await browser.newPage({ viewport: { width: 1440, height: 1100 } });
   const url = `http://127.0.0.1:${address.port}/#session=${token}`;
-  const snapshot = await sample.run({ onPlan: options.example === 'password-reset' ? async () => {
+  const snapshot = await sample.run({ onPlan: options.example === 'password-reset' ? async (pending) => {
+    assert.equal(pending.status, 'waiting-for-human');
+    assert.equal(pending.phase, 'execution');
+    assert.equal(pending.integrity.valid, true);
+    const gate = pending.gates.find((item) => item.type === 'approve-plan');
+    assert.ok(gate);
+    assert.equal(gate.planHash, pending.planHash);
+    const implementation = pending.nodes.filter((node) => node.action.id === 'ai-implement');
+    assert.ok(implementation.length > 0);
+    assert.ok(implementation.every((node) => node.status === 'pending' && node.attempt === 0));
     await page.goto(url);
-    await expect(page.getByRole('region', { name: 'Задача и доказательства', exact: true })).toBeVisible();
+    await openDiagnosticResult(page);
+    const overview = page.getByRole('article', { name: 'Обзор задачи', exact: true });
+    await expect(overview).toBeVisible();
+    await expect(overview.getByRole('heading', { name: 'План работы', exact: true })).toBeVisible();
+    const approve = overview.getByRole('button', { name: 'Согласовать и начать выполнение', exact: true });
+    await expect(approve).toBeVisible();
+    await expect(approve).toBeEnabled();
+    assert.equal(pending.proof.status, 'UNPROVEN');
+    await expect(overview.getByTestId('task-proof-status')).toHaveText('План ожидает согласования');
+    await expect(page.locator('.completion-certificate')).toHaveCount(0);
+    assert.equal(sample.service.revision(pending.runId), pending.revision);
+    assert.deepEqual(sample.checkExitCodes(), []);
     await page.screenshot({ path: '/tmp/flowcairn-actual-plan.png', fullPage: true });
   } : undefined });
   await page.goto(url);
+  await openDiagnosticResult(page);
   await expect(page.getByRole('region', { name: 'Задача и доказательства', exact: true })).toBeVisible();
   return { sample, snapshot, page };
 }
 
 try {
-  await import('../../tools/ai-graph-viewer/build.mjs');
+  if (!process.argv.includes('--skip-build')) await import('../../tools/ai-graph-viewer/build.mjs');
   browser = await chromium.launch({ headless: true });
   const success = await openFixture({ example: 'password-reset' });
   const { sample, snapshot, page } = success;
@@ -79,7 +115,7 @@ try {
   await human.page.screenshot({ path: '/tmp/flowcairn-actual-cockpit-human.png', fullPage: true });
   await human.page.close();
   console.log(JSON.stringify({ passed: true, service: 'WorkflowService', transport: 'actual HTTP', browser: 'Chromium',
-    ai: 'deterministic injected outputs; no provider calls', checks: 'real node --test', scenarios: ['PROVEN', 'receipt drill-down', 'live source drift without revision', 'human acceptance through UI'],
+    ai: 'deterministic injected outputs; no provider calls', checks: 'real node --test', scenarios: ['plan awaiting approval before implementation', 'PROVEN', 'receipt drill-down', 'live source drift without revision', 'human acceptance through UI'],
     screenshot: '/tmp/flowcairn-actual-cockpit.png' }));
 } catch (error) {
   let message = error?.stack ?? String(error);

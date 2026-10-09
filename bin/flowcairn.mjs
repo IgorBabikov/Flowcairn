@@ -6,7 +6,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { explainError, GraphError } from '../scripts/ai-graph/lib/io.mjs';
 import { loadProjectProfile, RUNTIME_ROOT, packageManagerLock, validatePackageManagerProject } from '../scripts/ai-graph/lib/project.mjs';
-import { TaskInputSchema } from '../scripts/ai-graph/lib/schemas.mjs';
+import { inspectCheckProfile, MISSING_CHECK_GUIDANCE } from '../scripts/ai-graph/lib/check-profile.mjs';
+import { TaskInputSchema, TaskInputV3Schema } from '../scripts/ai-graph/lib/schemas.mjs';
 import { WorkflowService, sanitizeText } from '../scripts/ai-graph/lib/service.mjs';
 import { runCli } from '../scripts/ai-graph/cli.mjs';
 import { probeRunner, probeLocalChecks } from '../scripts/ai-graph/lib/runner.mjs';
@@ -45,6 +46,7 @@ const VALUE_OPTIONS = new Set([
   'context',
   'checks',
   'check-mode',
+  'check-profile',
   'outputs',
   'codex-path',
   'file',
@@ -138,7 +140,7 @@ export async function setupCommand(input, options = {}, terminal = {}) {
     'test-policy':current.values.testPolicy, coverage:current.values.coverage,
     ...selected,
   };
-  const result = await saveOnboarding(root, onboardingInput(resolved, current.profileHash), {dryRun:options['dry-run'] === true});
+  const result = await saveOnboarding(root, onboardingInput(resolved, current.profileHash, root), {dryRun:options['dry-run'] === true});
   if (selected.consent === true && !options['dry-run']) {
     const inspected = await instructionsCommand(root, 'inspect');
     await instructionsCommand(root, 'activate', {consent:true, fingerprint:inspected.instructions.fingerprint});
@@ -168,7 +170,12 @@ export async function doctorProject(input) {
   const checks = probeLocalChecks({ root });
   let manager;
   try {
-    manager = {
+    if (profile.version === 2) {
+      inspectCheckProfile(root, profile.checkProfile);
+      manager = { valid: profile.checkMode !== 'none' && profile.checks.length > 0, kind: 'registered-commands',
+        ...(!profile.checks.length ? { code: 'NO_VERIFIER', message: MISSING_CHECK_GUIDANCE } : {}),
+        boundary: 'Только статическая проверка выбранных команд. SDK и зависимости не устанавливаются; команды до согласования плана не запускаются.' };
+    } else manager = {
       valid: true,
       version: validatePackageManagerProject(root, profile.packageManager),
       lockfile: packageManagerLock(profile.packageManager),
@@ -185,9 +192,9 @@ export async function doctorProject(input) {
     ok: ai.ai.available && checks.available && manager.valid,
     root,
     node: process.versions.node,
-    branch: git(root, ['branch', '--show-current']),
+    branch: existsNoFollow(path.join(root, '.git')) ? git(root, ['branch', '--show-current']) : null,
     configuredBranch: profile.integrationBranch,
-    packageManager: profile.packageManager,
+    ...(profile.version === 1 ? { packageManager: profile.packageManager } : {}),
     manager,
     configuredChecks: profile.checks,
     assistants: inspectHarnesses(),
@@ -224,11 +231,12 @@ export async function handoff(input, runId) {
   };
 }
 
-const HELP = `Flowcairn — от задачи до проверенного результата\n\nБыстрый старт\n  npx flowcairn          начать настройку и открыть интерфейс\n  npx flowcairn setup    изменить модель и правила после закрытия интерфейса\n  npx flowcairn doctor   проверить подготовку проекта\n\nДополнительно\n  npx flowcairn uninstall        снять интеграцию, не удаляя исходники\n\nДля интеграции\n  init | ui | status | plan | events | receipt | artifact | handoff | orchestrator\n\nКод проекта не изменится, пока вы не согласуете план.\nДокументация: https://github.com/IgorBabikov/flowcairn\n`;
+const HELP = `Flowcairn — от задачи до проверенного результата\n\nБыстрый старт\n  npx flowcairn          начать настройку и открыть интерфейс\n  npx flowcairn setup    изменить модель и правила после закрытия интерфейса\n  npx flowcairn doctor   проверить подготовку проекта\n  npx flowcairn setup --check-profile checks.json   зарегистрировать команды проверок\n\nДополнительно\n  npx flowcairn uninstall        снять интеграцию, не удаляя исходники\n\nДля интеграции\n  init | ui | status | plan | events | receipt | artifact | handoff | orchestrator\n\nКод проекта не изменится, пока вы не согласуете план.\nПрофиль проверок: JSON внутри проекта; inputPaths закрепляют scripts/config/locks команды, не весь исходный код.\nNode.js 22 нужен Flowcairn; проект может использовать любой язык.\nДокументация: https://github.com/IgorBabikov/flowcairn\n`;
 
 export function printInitialization(result, { launching = false, output = process.stdout } = {}) {
   if (launching && !result.dryRun) {
     output.write('Проект настроен. Запускаем интерфейс…\n');
+    if (result.profile?.version === 2 && !result.profile.checks.length) output.write(`${MISSING_CHECK_GUIDANCE}\n`);
     return;
   }
   const summary = [
@@ -239,6 +247,7 @@ export function printInitialization(result, { launching = false, output = proces
     'Код проекта не изменится, пока вы не согласуете этот план.',
   ];
   if (result.dryRun) summary.push(`Будут созданы: ${result.changes.join(', ')}.`);
+  if (result.profile?.version === 2 && !result.profile.checks.length) summary.push(MISSING_CHECK_GUIDANCE);
   if (!result.dryRun) summary.push('Открыть интерфейс: npx flowcairn');
   printCard('Flowcairn', summary.map((line) => sanitizeText(line)), {
     output, author: result.created === true && !result.dryRun && !launching,
@@ -305,7 +314,8 @@ export async function main(tokens = process.argv.slice(2)) {
           includeUntracked: csv(options['include-untracked']),
         };
     if (options.file && options['include-untracked']) {
-      const parsed = TaskInputSchema.parse(input);
+      const taskSchema = loadProjectProfile(projectRoot(root)).version === 2 ? TaskInputV3Schema : TaskInputSchema;
+      const parsed = taskSchema.parse(input);
       input = {
         ...parsed,
         includeUntracked: [

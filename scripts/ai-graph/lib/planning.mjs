@@ -4,6 +4,7 @@ import { compilePlan, validatePlan } from './validator.mjs';
 import { resolveAction, pathAllowed, contextPathAllowed } from './registry.mjs';
 import { buildTaskContract } from './task-contract.mjs';
 import { autonomyForNodes } from './autonomy-policy.mjs';
+import { buildExecutionStages, planningStepLimit, stageScopeId, stageCheckId } from './stage-plan.mjs';
 
 const fail = (code, message) => { throw new GraphError(code, message); };
 const selected = (nodes, skills) => skills.filter((skill) => nodes.some((node) => node.skills.includes(skill.id)));
@@ -12,6 +13,7 @@ const externalProvider = (context) => ['claude', 'cursor'].includes(context.prov
 /** The staging graph has no write permission and is never an accepted implementation. */
 export function compilePlanningPlan(task, context) {
   const baseline = { ...compilePlan(task, context).plan,
+    ...(task.schemaVersion === 3 ? { executionStages: null } : {}),
     taskContract: buildTaskContract(task, { analysis: context.analysis, previousContract: context.taskContract }) };
   const consent = externalProvider(context) ? structuredClone(baseline.nodes.find((node) => node.action.id === 'human-provider-consent')) : null;
   if (context.workflow === 'autonomous') {
@@ -64,6 +66,11 @@ export function compileTaskProposal(task, proposalInput, context) {
     fail('PLANNING_UNCONFIRMED', 'AI не подтвердил выполнимый план');
   if (!proposal.steps.length || proposal.edits.length || proposal.moves.length || proposal.jsonTransfers.length || proposal.changedFiles.length)
     fail('PLANNING_CONTRACT', 'Planner должен предложить шаги без изменений файлов');
+  if (task.schemaVersion === 3 && !task.checks.length && proposal.steps.length > 1)
+    fail('STAGE_VERIFIER_REQUIRED', 'Для нескольких этапов нужна зарегистрированная исполнимая проверка.');
+  const maxSteps = planningStepLimit(task, context);
+  if (proposal.steps.length > maxSteps)
+    fail('PLANNING_NODE_BUDGET', `План допускает не более ${maxSteps} этапов с обязательными проверками в пределах 64 узлов.`);
   const byId = new Map(proposal.steps.map((step) => [step.id, step]));
   if (byId.size !== proposal.steps.length) fail('PLANNING_DUPLICATE', 'Planning step IDs повторяются');
   const active = new Set(), done = new Set(), ordered = [];
@@ -101,7 +108,7 @@ export function compileTaskProposal(task, proposalInput, context) {
     return [...step.paths, ...(step.readPaths ?? []), ...(context.repairReadPaths?.[step.id] ?? []),
       ...step.needs.flatMap((id) => readPathsFor(byId.get(id), visited))];
   };
-  for (const step of ordered) {
+  for (const [index, step] of ordered.entries()) {
     const node = structuredClone(template);
     Object.assign(node, { id: `step-${step.id}`, title: step.title, outcome: step.outcome,
       // Serial compiler fence supplements declared dependencies because AI nodes read shared context.
@@ -110,8 +117,18 @@ export function compileTaskProposal(task, proposalInput, context) {
     if (context.resolveSkills) node.skills = context.resolveSkills(node, task);
     if (context.resolveReadPaths) node.resources.reads = context.resolveReadPaths(node, task);
     nodes.push(node); previous = node.id;
+    if (task.schemaVersion === 3 && index < ordered.length - 1) {
+      for (const original of baseline.nodes.filter((candidate) => candidate.action.id === 'workspace-check' || candidate.action.id.startsWith('check-'))) {
+        const check = structuredClone(original);
+        check.id = check.action.id === 'workspace-check' ? stageScopeId(index) : stageCheckId(index, check.action.id.slice(6));
+        check.needs = [previous];
+        if (context.resolveSkills) check.skills = context.resolveSkills(check, task);
+        if (context.resolveReadPaths) check.resources.reads = context.resolveReadPaths(check, task);
+        nodes.push(check); previous = check.id;
+      }
+    }
   }
-  for (const original of baseline.nodes.filter((node) => !['human-approve', 'ai-analyze', 'ai-implement'].includes(node.action.id))) {
+  for (const original of baseline.nodes.filter((node) => !['human-provider-consent', 'human-approve', 'ai-analyze', 'ai-implement'].includes(node.action.id))) {
     const node = structuredClone(original);
     if (node.action.id === 'workspace-check') node.needs = [previous];
     nodes.push(node);
@@ -123,5 +140,5 @@ export function compileTaskProposal(task, proposalInput, context) {
   }
   const taskContract = buildTaskContract(task, { proposal: proposal.contractProposal, analysis: context.analysis,
     previousContract: context.taskContract, steps: ordered });
-  return validatePlan({ ...baseline, taskContract, stage: 'execution', ...(context.workflow === 'autonomous' ? { workflow: 'autonomous', autonomy: autonomyForNodes(executable) } : {}), nodes: executable, skills: selected(executable, context.skills) }, task, context);
+  return validatePlan({ ...baseline, taskContract, stage: 'execution', ...(baseline.schemaVersion === 3 ? { executionStages: buildExecutionStages(executable, taskContract) } : {}), ...(context.workflow === 'autonomous' ? { workflow: 'autonomous', autonomy: autonomyForNodes(executable) } : {}), nodes: executable, skills: selected(executable, context.skills) }, task, context);
 }

@@ -7,6 +7,8 @@ import { z } from 'zod';
 import { GraphError, hashObject } from './io.mjs';
 import { RelativePath } from './schemas.mjs';
 import { assertRuntimePlatform, assertProjectPlatform } from './platform.mjs';
+import { CheckProfileSchema, validateCheckProfile, isGenericProfile } from './check-profile.mjs';
+import { CheckIdSchema } from './check-schemas.mjs';
 
 export const RUNTIME_ROOT = realpathSync(
   path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..'),
@@ -71,7 +73,7 @@ const CHECK_SCRIPT_CANDIDATES = Object.freeze({
 });
 
 /** Trusted local configuration: fixed action names, never executable code or credentials. */
-export const ProjectProfileSchema = z.strictObject({
+export const ProjectProfileV1Schema = z.strictObject({
   version: z.literal(1),
   integrationBranch: branch,
   aiDenyGlobs: z.array(z.string().min(1).max(512)).max(128).optional(),
@@ -153,6 +155,19 @@ export const ProjectProfileSchema = z.strictObject({
   }),
 });
 
+export const ProjectProfileV2Schema = ProjectProfileV1Schema.omit({ packageManager: true, checkScripts: true }).extend({
+  version: z.literal(2), workspaceMode: z.literal('direct'),
+  checks: z.array(CheckIdSchema).max(6), checkProfile: CheckProfileSchema,
+}).superRefine((profile, ctx) => {
+  try {
+    validateCheckProfile(profile.checkProfile);
+    if (hashObject([...profile.checks].sort()) !== hashObject([...profile.checkProfile.requiredCheckIds].sort()) ||
+        profile.checkProfile.definitions.some((check) => check.outputPaths.some((output) => !profile.outputPaths.includes(output))))
+      throw new Error();
+  } catch { ctx.addIssue({ code: 'custom', message: 'Профиль не соответствует зарегистрированным проверкам и выходам.' }); }
+});
+export const ProjectProfileSchema = z.union([ProjectProfileV1Schema, ProjectProfileV2Schema]);
+
 export const PACKAGE_MANAGER_LOCKS = Object.freeze({ npm: 'package-lock.json', pnpm: 'pnpm-lock.yaml', yarn: 'yarn.lock' });
 
 export function packageManagerLock(manager) {
@@ -175,7 +190,8 @@ export function discoverProjectChecks(pkg) {
   const checkScripts = {};
   for (const id of PROJECT_CHECK_IDS) {
     const script = CHECK_SCRIPT_CANDIDATES[id].find((candidate) =>
-      typeof scripts?.[candidate] === 'string' && scripts[candidate].trim().length > 0,
+      typeof scripts?.[candidate] === 'string' && scripts[candidate].trim().length > 0 &&
+        !/^echo\s+["']?Error: no test specified["']?\s*&&\s*exit\s+1\s*;?$/i.test(scripts[candidate].trim()),
     );
     if (!script) continue;
     checks.push(id);
@@ -195,6 +211,7 @@ function checkIdFromAction(actionId) {
  * during init, and the current package manifest must still contain that script.
  */
 export function resolveProjectCheckScript(root, actionId, profile = loadProjectProfile(root)) {
+  if (profile.version !== 1) throw new GraphError('CHECK_ACTION_UNSUPPORTED', 'Профиль использует зарегистрированные argv-проверки.');
   const id = checkIdFromAction(actionId);
   if (!profile.checks.includes(id))
     throw new GraphError('CHECK_UNSUPPORTED', `Проверка ${id} не включена в профиль проекта.`);
@@ -303,7 +320,7 @@ export function projectContextPaths(root, profile = loadProjectProfile(root)) {
       ...['AGENTS.md', ...(profile.ai.provider === 'codex' ? ['AGENTS.override.md'] : []), 'AGENT.md',
         ...(profile.workspaceMode === 'direct' ? [] : ['README.md'])].filter((name) => existsSync(path.join(root, name))),
       ...profile.contextPaths,
-      ...profile.manifests.filter((file) => /(?:^|\/)package\.json$/.test(file)),
+      ...profile.manifests.filter((file) => isGenericProfile(profile) || /(?:^|\/)package\.json$/.test(file)),
     ]),
   ];
   return context.filter((file) => !(profile.ai.provider === 'codex' && path.posix.basename(file) === 'AGENTS.md' &&
@@ -317,6 +334,8 @@ export function onboardingConsentHash(root, profile) {
 
 /** A local script consent binds the exact registered names, not task prose. */
 export function trustedLocalChecksHash(root, profile) {
+  if (isGenericProfile(profile)) return hashObject({ root: realpathSync(root), mode: 'trusted-local-v2',
+    checkProfile: validateCheckProfile(profile.checkProfile), outputPaths: profile.outputPaths });
   return hashObject({
     root: realpathSync(root),
     mode: 'trusted-local',

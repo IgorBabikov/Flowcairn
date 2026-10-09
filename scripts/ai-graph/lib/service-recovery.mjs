@@ -1,4 +1,5 @@
 import { GraphError, hashObject, now } from './io.mjs';
+import { ReceiptSchema } from './schemas.mjs';
 
 const fail = (code, message) => { throw new GraphError(code, message); };
 
@@ -66,6 +67,34 @@ function terminationProof(processInfo, proof) {
   };
 }
 
+// A committed hold is already a verified boundary, never an opportunity to adopt loose receipts.
+function assertCommittedLearningHold(host, state, plan, fingerprint) {
+  const hold = state.continuation;
+  const stages = plan.executionStages?.stages ?? [];
+  const index = stages.findIndex((stage) => stage.id === hold.stageId);
+  const stage = stages[index];
+  const definition = plan.nodes.find((node) => node.id === stage?.boundaryNodeId);
+  const node = state.nodes[definition?.id];
+  const savedStage = state.learning.stages[hold.stageId];
+  if (state.status !== 'learning-hold' || state.stopRequested || state.stopResult || state.finalDisposition ||
+      state.failureReason || state.setupPending || index < 0 || index >= stages.length - 1 || !stage.checkNodeIds.length ||
+      !stage.checkNodeIds.includes(stage.boundaryNodeId) || !definition?.action.id.startsWith('check-') ||
+      Object.values(state.nodes).some((entry) => ['running', 'uncertain', 'failed', 'cancelled'].includes(entry.status)) ||
+      [...stage.implementationNodeIds, stage.scopeCheckNodeId, ...stage.checkNodeIds].some((id) => state.nodes[id]?.status !== 'passed') ||
+      node?.receipts.at(-1) !== hold.boundaryReceiptId || savedStage?.boundaryReceiptId !== hold.boundaryReceiptId ||
+      savedStage.materialHash !== hold.materialHash || fingerprint?.hash !== hold.resultHash || state.workspaceFingerprint?.hash !== hold.resultHash)
+    fail('LEARNING_HOLD_RECOVERY_UNSAFE', 'Сохраненная учебная пауза не подтверждена текущим состоянием и завершенной границей.');
+  const parsed = ReceiptSchema.safeParse(host.store.readObject('receipts', hold.boundaryReceiptId));
+  const receipt = parsed.success ? parsed.data : null;
+  if (!receipt || receipt.phase !== 'finished' || receipt.verdict !== 'pass' || receipt.exitCode !== 0 ||
+      receipt.termination?.stopped !== true || receipt.termination.uncertain !== false || !receipt.finishedAt ||
+      receipt.runId !== state.runId || receipt.planHash !== state.planHash || receipt.taskHash !== state.taskHash ||
+      receipt.sourceHash !== state.sourceHash || receipt.runtimeHash !== plan.runtimeHash || receipt.planVersion !== plan.version ||
+      receipt.nodeId !== definition.id || receipt.actionId !== definition.action.id || receipt.actionVersion !== definition.action.version ||
+      receipt.attempt !== node.attempts || receipt.beforeFingerprint !== hold.resultHash || receipt.afterFingerprint !== hold.resultHash)
+    fail('LEARNING_HOLD_RECOVERY_UNSAFE', 'Receipt сохраненной границы не доказывает успешную остановленную проверку этой версии.');
+}
+
 export async function recoverRun(host, { state, task, plan, request, digest, actor }) {
   const deadLock = host.store.inspectLock(state.runId);
   if (deadLock) {
@@ -83,6 +112,9 @@ export async function recoverRun(host, { state, task, plan, request, digest, act
     state = unlocked;
   }
   const displacedOperation = state.activeOperation;
+  const recoveringHold = state.schemaVersion === 3 && state.continuation.kind === 'learning-hold';
+  if (recoveringHold && displacedOperation && !host.orphan({ activeOperation: displacedOperation }))
+    fail('PROCESS_UNCERTAIN', 'Владелец учебной паузы еще активен');
   const recoveryOperation = {
     id: request.operationId,
     digest,
@@ -118,6 +150,8 @@ export async function recoverRun(host, { state, task, plan, request, digest, act
         op.resultRunId,
     );
     if (successor) {
+      if (recoveringHold)
+        fail('LEARNING_HOLD_RECOVERY_UNSAFE', 'Учебная пауза конфликтует с незавершенной передачей в другой запуск.');
       const [operationId, prior] = successor;
       const next =
         prior.status === 'creating'
@@ -164,7 +198,7 @@ export async function recoverRun(host, { state, task, plan, request, digest, act
     }
     if (
       displacedOperation &&
-      !uniqueProcesses.length &&
+      (recoveringHold || !uniqueProcesses.length) &&
       !host.orphan({ activeOperation: displacedOperation })
     )
       fail('PROCESS_UNCERTAIN', 'Владелец запуска еще активен');
@@ -179,6 +213,14 @@ export async function recoverRun(host, { state, task, plan, request, digest, act
       current.operations[request.operationId]?.status !== 'running'
     )
       fail('RECOVERY_SUPERSEDED', 'Recovery больше не владеет run');
+    if (recoveringHold || (current.schemaVersion === 3 && current.continuation.kind === 'learning-hold')) {
+      if (!recoveringHold || hashObject(current.continuation) !== hashObject(state.continuation))
+        fail('RECOVERY_SUPERSEDED', 'Учебная пауза изменилась во время восстановления');
+      assertCommittedLearningHold(host, current, plan, fingerprint);
+      host.write(current, { activeOperation: null,
+        operations: { ...current.operations, [request.operationId]: { digest, status: 'finished' } }, recovered: true });
+      return host.snapshot(state.runId);
+    }
     const nodes = structuredClone(current.nodes);
     for (const definition of plan.nodes)
       if (['running', 'uncertain'].includes(nodes[definition.id].status)) {
