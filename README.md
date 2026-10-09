@@ -12,7 +12,7 @@
 
 [Быстрый старт](#быстрый-старт) · [Как это работает](#как-это-работает) · [Документация](docs/README.md) · [Telegram автора](https://t.me/Babikov_build)
 
-<img src="https://raw.githubusercontent.com/IgorBabikov/Flowcairn/main/.github/media/flowcairn-world.jpg" width="960" alt="Интерфейс Flowcairn: Гильдия, Мастерская и Архив в изометрическом игровом мире" />
+<img src="https://raw.githubusercontent.com/IgorBabikov/Flowcairn/main/.github/media/flowcairn-frontend-world.jpg" width="960" alt="Интерфейс Flowcairn: Гильдия, Мастерская и Архив в изометрическом игровом мире" />
 
 <sub>Настоящий интерфейс на демонстрационных данных. На снимке показан тестовый проект, а не результат выполнения пользовательской задачи.</sub>
 
@@ -56,9 +56,9 @@ npx flowcairn
 
 В книге — сохраненный код, его изменения, объяснение выполнения и движения данных. Код доступен для чтения и копирования; писать его внутри Flowcairn не требуется. Подготовка AI-объяснения запускается отдельным действием, когда провайдер и разрешения позволяют это сделать.
 
-<img src="https://raw.githubusercontent.com/IgorBabikov/Flowcairn/main/.github/media/flowcairn-codebook.jpg" width="960" alt="Книга кода Flowcairn: пошаговое объяснение расчета на Python и соответствующий сохраненный исходник" />
+<img src="https://raw.githubusercontent.com/IgorBabikov/Flowcairn/main/.github/media/flowcairn-frontend-codebook.jpg" width="960" alt="Книга кода Flowcairn: разбор frontend-поиска товаров и JavaScript-код защиты от устаревших ответов" />
 
-*Демонстрационный разбор Python. Учебный текст подставлен для показа интерфейса; внешний AI при съемке не запускался.*
+*Демонстрационная frontend-задача: поиск товаров на JavaScript. Пользователь вводит «рюкзак», затем «термос»; разбор объясняет, почему поздний ответ первого запроса не меняет выдачу. Данные учебные, внешний AI при съемке не запускался.*
 
 Чтение не считается приемкой кода или доказательством освоенного навыка. [Как проверить пользу обучения](docs/LEARNING-PILOT.md).
 
