@@ -10,6 +10,22 @@ async function startTask(page) {
   await page.getByRole('button', { name: 'Начать анализ', exact: true }).click();
 }
 
+// Receipt of the POST is not UI acceptance. Hold its response to exercise the
+// busy guard, then wait for the accepted task before navigating away.
+async function acceptHeldIntake(page, release, description) {
+  const intake = page.getByRole('dialog', { name: 'Новое поручение', exact: true });
+  try {
+    await expect(intake.getByLabel('Что нужно сделать', { exact: true })).toBeDisabled();
+    await expect(intake.getByRole('button', { name: 'Закрыть свиток', exact: true })).toBeDisabled();
+    await page.keyboard.press('Escape');
+    await expect(intake).toBeVisible();
+    await expect(intake.getByLabel('Что нужно сделать', { exact: true })).toHaveValue(description);
+  } finally { release(); }
+  const accepted = page.getByRole('dialog', { name: 'План и результат', exact: true });
+  await expect(accepted.getByRole('heading', { name: 'Исправить поиск', exact: true })).toBeVisible();
+  await expect(page.locator('#quest-intake')).toHaveCount(0);
+}
+
 test('pending intake shows progress and a timeout preserves the same request for retry', async ({ page }) => {
   await mockApi(page, snapshot(), { emptyUntilIntake: true });
   let release;
@@ -112,6 +128,8 @@ test('loading status remains readable and has no spinner motion under reduced mo
 
 test('stale context requires a refresh and new request while preserving the task text', async ({page}) => {
   const options = { emptyUntilIntake: true, intakeError: {code:'STALE_CONTEXT', message:'Контекст изменился'} };
+  let releaseIntake;
+  options.intakeResponseGate = new Promise(resolve => { releaseIntake = resolve; });
   const fixture = await mockApi(page, snapshot(), options);
   await visitNewQuest(page);
   await page.getByLabel('Название', {exact:true}).fill('Исправить поиск');
@@ -125,6 +143,8 @@ test('stale context requires a refresh and new request while preserving the task
   await page.getByRole('button', {name:'Обновить контекст'}).click();
   await expect(page.getByLabel('Что нужно сделать', {exact:true})).toHaveValue('Исправить поиск');
   await startTask(page);
+  await expect.poll(() => fixture.calls.filter(call => call.action === 'intake').length).toBe(2);
+  await acceptHeldIntake(page, releaseIntake, 'Исправить поиск');
   await openSteps(page);
   await expect(stepPicker(page)).toBeVisible();
   await expect(stepDetails(page)).toBeVisible();
@@ -136,6 +156,8 @@ test('stale context requires a refresh and new request while preserving the task
 
 test('failed registration refreshes changed bootstrap metadata without hiding the original error', async ({ page }) => {
   const options = { emptyUntilIntake: true, projectContext };
+  let releaseIntake;
+  options.intakeResponseGate = new Promise(resolve => { releaseIntake = resolve; });
   const fixture = await mockApi(page, snapshot(), options);
   let first = true;
   await page.route('**/api/intake', async route => {
@@ -152,6 +174,8 @@ test('failed registration refreshes changed bootstrap metadata without hiding th
   await expect(page.locator('.error-banner')).toContainText('выбранные правила не помещаются в безопасный контекст');
   await expect(page.getByLabel('Что нужно сделать', { exact: true })).toHaveValue('Проверить пустой запрос');
   await startTask(page);
+  await expect.poll(() => fixture.calls.filter(call => call.action === 'intake').length).toBe(1);
+  await acceptHeldIntake(page, releaseIntake, 'Проверить пустой запрос');
   await openSteps(page);
   await expect(stepPicker(page)).toBeVisible();
   await expect(stepDetails(page)).toBeVisible();

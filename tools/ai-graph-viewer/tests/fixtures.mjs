@@ -293,6 +293,7 @@ export async function mockApi(page, initial = snapshot(), options = {}) {
       if (options.loseFirstCreateResponse && createAttempts === 1) {
         await route.abort('connectionreset'); return;
       }
+      if (options.intakeResponseGate) await options.intakeResponseGate;
       await route.fulfill({ status: 201, json: { result: current } }); return;
     }
     if (url.pathname === '/api/runs' && request.method() === 'GET') {
