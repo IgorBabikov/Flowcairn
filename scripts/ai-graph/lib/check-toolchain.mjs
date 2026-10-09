@@ -1,6 +1,6 @@
 import { closeSync, fstatSync, lstatSync, openSync, readFileSync, readdirSync, readlinkSync, realpathSync } from 'node:fs';
 import path from 'node:path';
-import { noFollowReadFlags } from './host-filesystem.mjs';
+import { noFollowReadFlags, lstatHostSync, crossStatIdentity } from './host-filesystem.mjs';
 import { GraphError, hashObject, sha256 } from './io.mjs';
 import { isSensitivePath, hasSecretContent } from './source-policy.mjs';
 
@@ -8,21 +8,40 @@ const fail = (code, message) => { throw new GraphError(code, message); };
 const identity = (s) => [s.dev, s.ino, s.mode, s.nlink, s.size, s.mtimeNs, s.ctimeNs].join(':');
 const within = (root, file) => file === root || file.startsWith(root + path.sep);
 
+function comparablePathStat(file, raw) {
+  // Node22.13.1 Windows may omit the path volume. The existing host bridge
+  // obtains it from a stable handle; zero is never an identity wildcard.
+  const stat = process.platform === 'win32' && raw.dev === 0n ? lstatHostSync(file, { bigint: true }) : raw;
+  if (identity({ ...stat, dev: raw.dev }) !== identity(raw))
+    fail('CHECK_INPUT_DRIFT', 'Вход проверки изменился до чтения.');
+  return stat;
+}
+
 /** Inspect bytes only. An executable --version is a command, never a discovery probe. */
 export function checkFileIdentity(file, { executable = false, opaque = false, maxBytes = 16 * 1024 * 1024 } = {}) {
   const before = lstatSync(file, { bigint: true });
-  if (!before.isFile() || before.isSymbolicLink() || (!executable && before.nlink !== 1n) || before.size > BigInt(maxBytes))
-    fail('CHECK_INPUT_UNSAFE', 'Инструмент или вход проверки должен быть ограниченным обычным файлом.');
+  if (before.isSymbolicLink())
+    fail('CHECK_INPUT_UNSAFE', 'Инструмент или вход проверки не может быть символической ссылкой.');
+  if (!before.isFile())
+    fail('CHECK_INPUT_UNSAFE', 'Инструмент или вход проверки должен быть обычным файлом.');
+  if (!executable && before.nlink !== 1n)
+    fail('CHECK_INPUT_UNSAFE', 'Вход проверки должен иметь ровно одну жесткую ссылку.');
+  if (before.size > BigInt(maxBytes))
+    fail('CHECK_INPUT_UNSAFE', `Размер инструмента или входа проверки превышает лимит: ${before.size} байт > ${maxBytes} байт.`);
   if (executable && process.platform !== 'win32' && (!(before.mode & 0o111n) || (before.mode & 0o002n) ||
       process.getuid?.() !== undefined && before.uid !== 0n && before.uid !== BigInt(process.getuid())))
     fail('CHECK_EXECUTABLE_UNSAFE', 'Инструмент проверки имеет небезопасные права или владельца.');
+  const comparable = comparablePathStat(file, before);
   const fd = openSync(file, noFollowReadFlags());
   try {
     const opened = fstatSync(fd, { bigint: true });
-    if (identity(opened) !== identity(before)) fail('CHECK_INPUT_DRIFT', 'Вход проверки изменился до чтения.');
+    if (crossStatIdentity(opened) !== crossStatIdentity(comparable)) fail('CHECK_INPUT_DRIFT', 'Вход проверки изменился до чтения.');
     const bytes = readFileSync(fd);
-    if (BigInt(bytes.length) !== before.size || identity(fstatSync(fd, { bigint: true })) !== identity(before) ||
-        identity(lstatSync(file, { bigint: true })) !== identity(before)) fail('CHECK_INPUT_DRIFT', 'Вход проверки изменился во время чтения.');
+    const after = fstatSync(fd, { bigint: true }), live = lstatSync(file, { bigint: true });
+    // Same-origin comparisons retain every raw device bit and timestamp.
+    if (BigInt(bytes.length) !== before.size || identity(after) !== identity(opened) || identity(live) !== identity(before) ||
+        crossStatIdentity(comparablePathStat(file, live)) !== crossStatIdentity(opened))
+      fail('CHECK_INPUT_DRIFT', 'Вход проверки изменился во время чтения.');
     if (!executable && !opaque && hasSecretContent(bytes.toString('utf8'))) fail('CHECK_INPUT_UNSAFE', 'Вход проверки исключен политикой секретов.');
     return { hash: sha256(bytes), bytes: bytes.length, mode: Number(before.mode & 0o777n) };
   } finally { closeSync(fd); }

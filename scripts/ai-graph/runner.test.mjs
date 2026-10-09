@@ -21,7 +21,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { inspectCodexInstallation, inspectProcess, probeRunner, runRegisteredAction, RUNNER_TESTING } from './lib/runner.mjs';
 import { buildPrompt } from './lib/codex.mjs';
 import { AIResultSchema } from './lib/schemas.mjs';
@@ -168,6 +168,7 @@ function supervisorFixture({
   timeoutMs = 5_000,
   maxOutputBytes = 8_192,
   actionId = 'check-graph-tests',
+  stdinFailure = null,
 }) {
   const directory = fixture();
   const ticket = path.join(directory, 'ticket.json');
@@ -183,7 +184,24 @@ function supervisorFixture({
     maxOutputBytes,
   };
   writeFileSync(ticket, `${JSON.stringify(initial)}\n`, { mode: 0o600, flag: 'wx' });
-  const child = spawn(NODE_BINARY, [SUPERVISOR_FILE, ticket], {
+  const preload = path.join(directory, 'closed-stdin.mjs');
+  if (stdinFailure) {
+    // Deterministically model an already-closed child pipe without timing sleeps.
+    // The action still really executes; only its stdin transport is replaced.
+    writeFileSync(preload, `import childProcess from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
+const spawn = childProcess.spawn;
+childProcess.spawn = (...args) => {
+  const child = spawn(...args);
+  child.stdin.end = () => {
+    child.stdin.destroy(${stdinFailure === 'error' ? "Object.assign(new Error('closed fixture pipe'), { code: 'EPIPE' })" : ''});
+    return child.stdin;
+  };
+  return child;
+};
+syncBuiltinESMExports();\n`);
+  }
+  const child = spawn(NODE_BINARY, [...(stdinFailure ? ['--import', pathToFileURL(preload).href] : []), SUPERVISOR_FILE, ticket], {
     cwd: directory,
     env: { PATH: '/usr/bin:/bin:/usr/sbin:/sbin' },
     detached: true,
@@ -295,6 +313,48 @@ for (const earlyExit of [0, 2]) test(`supervisor records early CLI exit ${earlyE
     assert.equal(final.exitCode, earlyExit || 1);
     assert.equal(final.failureReason, earlyExit ? 'NON_ZERO_EXIT' : 'INPUT_PIPE_CLOSED');
     assert.equal(JSON.parse(readFileSync(subject.ticket, 'utf8')).state, 'finished');
+  } finally { await closeSupervisor(subject); }
+});
+
+for (const stdinFailure of ['error', 'close']) {
+  for (const input of ['', 'required-input']) {
+    test(`supervisor distinguishes empty input from unflushed required input on stdin ${stdinFailure} (${input.length} bytes)`, async () => {
+      const command = { executable: NODE_BINARY, args: ['-e', 'process.stdout.write("check completed");'], cwd: fixture(), env: { PATH: '/usr/bin:/bin' } };
+      const subject = supervisorFixture({ command, stdinFailure });
+      try {
+        await subject.next('ready');
+        subject.child.stdin.write(`${JSON.stringify({ type: 'go', nonce: subject.nonce, command, input })}\n`);
+        const final = await subject.next('finished');
+        assert.equal(final.exitCode, input ? 1 : 0);
+        assert.equal(final.failureReason, input ? 'INPUT_PIPE_CLOSED' : null);
+        assert.equal(final.stdoutDigest, sha256('check completed'));
+        assert.equal(JSON.parse(readFileSync(subject.ticket, 'utf8')).state, 'finished');
+      } finally { await closeSupervisor(subject); }
+    });
+  }
+}
+
+test('supervisor accepts a fast successful check with empty input', async () => {
+  const command = { executable: NODE_BINARY, args: ['-e', 'process.stdout.write("checked");'], cwd: fixture(), env: { PATH: '/usr/bin:/bin' } };
+  const subject = supervisorFixture({ command });
+  try {
+    await subject.next('ready');
+    subject.child.stdin.write(`${JSON.stringify({ type: 'go', nonce: subject.nonce, command, input: '' })}\n`);
+    const final = await subject.next('finished');
+    assert.equal(final.exitCode, 0); assert.equal(final.failureReason, null);
+    assert.equal(final.stdoutDigest, sha256('checked'));
+  } finally { await closeSupervisor(subject); }
+});
+
+test('supervisor preserves early AI rejection even with empty input', async () => {
+  const command = { executable: NODE_BINARY, args: ['-e', 'process.stderr.write("startup rejected\\n");'], cwd: fixture(), env: { PATH: '/usr/bin:/bin' } };
+  const subject = supervisorFixture({ command, actionId: 'ai-analyze', stdinFailure: 'error' });
+  try {
+    await subject.next('ready');
+    subject.child.stdin.write(`${JSON.stringify({ type: 'go', nonce: subject.nonce, command, input: '' })}\n`);
+    const final = await subject.next('finished');
+    assert.equal(final.exitCode, 1); assert.equal(final.failureReason, 'INPUT_PIPE_CLOSED');
+    assert.equal(final.stdoutBytes, 0); assert.ok(final.stderrBytes > 0);
   } finally { await closeSupervisor(subject); }
 });
 
