@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
-import { allDenied, allowed, graphNode, implementationNode, mockApi, runSummary, snapshot, token } from './fixtures.mjs';
+import { book, openDiagnostics, selectRun, stepDetails, visitResult } from './ui-paths.mjs';
+import { allDenied, allowed, graphNode, implementationNode, mockApi, runSummary, snapshot } from './fixtures.mjs';
 
 const readBanner = page => page.locator('.error-banner').filter({ hasText: 'Не удалось обновить данные' });
 const running = () => ({ ...snapshot(), status: 'running', execution: { state: 'running', stopRequested: false },
@@ -15,16 +16,16 @@ test('a delayed initial read failure cannot replace a newer snapshot of the same
     // Hold later polls so they cannot hide the stale initial error by recovering again.
   });
   await page.route('**/plan', route => { heldPlan = route; });
-  await page.goto(`/#session=${token}`);
+  await visitResult(page);
   await expect.poll(() => Boolean(heldPlan)).toBe(true);
   await expect.poll(() => fixture.snapshotReads()).toBeGreaterThan(0);
-  await expect(page.locator('.run-row.active .status-mark')).not.toHaveClass(/status-uncertain/);
+  await expect(page.getByTestId('rpg-runtime-status')).not.toHaveText(/Результат неизвестен|Состояние недоступно/);
   const planResponse = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/plan'));
   await heldPlan.fallback();
   await planResponse;
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   await expect(readBanner(page)).toHaveCount(0);
-  await expect(page.locator('.run-row.active .status-mark')).not.toHaveClass(/status-uncertain/);
+  await expect(page.getByTestId('rpg-runtime-status')).not.toHaveText(/Результат неизвестен|Состояние недоступно/);
 });
 
 test('an old initial success cannot hide a newer failed snapshot while plan is loading', async ({ page }) => {
@@ -36,14 +37,18 @@ test('an old initial success cannot hide a newer failed snapshot while plan is l
     if (snapshotRequests === 2) return route.abort('connectionreset');
   });
   await page.route('**/plan', route => { heldPlan = route; });
-  await page.goto(`/#session=${token}`);
+  await visitResult(page);
   await expect(readBanner(page)).toBeVisible();
   const planResponse = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/plan'));
   await heldPlan.fallback();
   await planResponse;
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   await expect(readBanner(page)).toBeVisible();
-  await expect(page.getByTestId('main-content').locator('.task-overview')).toHaveCount(0);
+  await expect(book(page).locator('.task-overview')).toHaveCount(0);
+  await expect(book(page).getByRole('heading', { name: 'Готово к вашему ревью', exact: true })).toHaveCount(0);
+  await openDiagnostics(page, 'nodes');
+  await expect(stepDetails(page)).toHaveCount(0);
+  await expect(book(page).getByRole('button', { name: 'Запустить', exact: true })).toHaveCount(0);
 });
 
 test('failed snapshot GET has read-only copy and clears after the same resource recovers', async ({ page }) => {
@@ -55,7 +60,7 @@ test('failed snapshot GET has read-only copy and clears after the same resource 
     reads++;
     return recover ? route.fallback() : route.abort('connectionreset');
   });
-  await page.goto(`/#session=${token}`);
+  await visitResult(page);
   await expect(readBanner(page)).toBeVisible();
   await expect(page.getByText('Результат операции неизвестен', { exact: false })).toHaveCount(0);
   recover = true;
@@ -69,7 +74,7 @@ test('snapshot recovery cannot clear a failed project GET', async ({ page }) => 
   const fixture = await mockApi(page);
   let recoverProject = false;
   await page.route('**/api/project', route => recoverProject ? route.fallback() : route.abort('connectionreset'));
-  await page.goto(`/#session=${token}`);
+  await visitResult(page);
   await expect.poll(() => fixture.snapshotReads()).toBeGreaterThan(0);
   await expect(readBanner(page)).toBeVisible();
   const previous = fixture.snapshotReads();
@@ -85,8 +90,8 @@ test('successful GET does not dismiss an unknown POST outcome or allocate a new 
     nodes: [graphNode({ status: 'passed', capabilities: allDenied }), { ...implementationNode, capabilities: { ...allDenied, run: allowed } }],
     capabilities: { ...allDenied, run: allowed } };
   const fixture = await mockApi(page, current, { loseFirstRunResponse: true });
-  await page.goto(`/#session=${token}`);
-  await page.getByRole('button', { name: 'Запустить', exact: true }).first().click();
+  await visitResult(page);
+  await book(page).locator('.diagnostic-tools').getByRole('button', { name: 'Запустить', exact: true }).click();
   const unknown = page.locator('.error-banner').filter({ hasText: 'Результат операции неизвестен' });
   await expect(unknown).toBeVisible();
   const previous = fixture.snapshotReads();
@@ -106,8 +111,8 @@ test('a failed list GET after a confirmed POST recovers without replaying the co
   let failList = false;
   page.on('request', request => { if (request.url().endsWith('/control/run')) failList = true; });
   await page.route('**/api/runs', route => failList ? route.abort('connectionreset') : route.fallback());
-  await page.goto(`/#session=${token}`);
-  await page.getByRole('button', { name: 'Запустить', exact: true }).first().click();
+  await visitResult(page);
+  await book(page).locator('.diagnostic-tools').getByRole('button', { name: 'Запустить', exact: true }).click();
   await expect(readBanner(page)).toBeVisible();
   await expect(page.getByRole('button', { name: 'Повторить тот же запрос' })).toHaveCount(0);
   failList = false;
@@ -125,7 +130,7 @@ for (const [kind, status, code, message] of [
   await page.route('**/snapshot', route => reject
     ? route.fulfill({ status, json: { error: { code, message } } })
     : route.fallback());
-  await page.goto(`/#session=${token}`);
+  await visitResult(page);
   await expect(page.locator('.error-banner')).toContainText(message);
   reject = false;
   await expect.poll(() => fixture.snapshotReads()).toBeGreaterThan(0);
@@ -144,7 +149,7 @@ test('a late failed read of the old run cannot show a banner on the new run', as
     if (mode === 'hold') { mode = 'pass'; held = route; return; }
     return route.fallback();
   });
-  await page.goto(`/#session=${token}`);
+  await visitResult(page);
   await expect(page.getByRole('button', { name: 'Остановить', exact: true })).toBeVisible();
   mode = 'fail';
   await page.getByRole('button', { name: 'Остановить', exact: true }).click();
@@ -153,9 +158,8 @@ test('a late failed read of the old run cannot show a banner on the new run', as
   mode = 'hold';
   await stopError.getByRole('button', { name: 'Повторить загрузку' }).click();
   await expect.poll(() => Boolean(held)).toBe(true);
-  await page.locator('.desktop-run-rail .run-row').filter({ hasText: 'FORM-202' }).click();
-  await expect(page.locator('.desktop-run-rail .run-row.active')).toContainText('FORM-202');
-  await expect(page.getByTestId('main-content')).toContainText('Другая задача');
+  await selectRun(page, 'FORM-202');
+  await expect(book(page).locator('.diagnostic-heading p')).toHaveText('Другая задача');
   const failed = page.waitForEvent('requestfailed', request => request.url().endsWith('/run-demo/snapshot'));
   await held.abort('connectionreset');
   await failed;

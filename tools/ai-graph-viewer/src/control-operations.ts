@@ -1,5 +1,5 @@
 import type { api } from './api';
-import type { IntakeInput } from './contracts';
+import type { IntakeInput, GenerateLesson, AskLesson, SetLearningProgress } from './contracts';
 
 export type PendingControlOperation = {
   kind: 'control';
@@ -15,7 +15,17 @@ export type PendingCreateOperation = {
   operationId: string;
   input: IntakeInput;
 };
-export type PendingOperation = PendingControlOperation | PendingCreateOperation;
+type LearningOperationBase = { kind: 'learning'; key: string; operationId: string; runId: string };
+export type PendingLearningOperation = LearningOperationBase & (
+  | { action: 'generate-lesson'; request: GenerateLesson }
+  | { action: 'ask-lesson'; request: AskLesson }
+  | { action: 'set-progress'; request: SetLearningProgress }
+);
+export type LearningActivity = {
+  runId: string; jobId: string; materialHash: string; kind: 'lesson' | 'question';
+  question?: Pick<AskLesson, 'lessonHash' | 'anchor' | 'question'>;
+};
+export type PendingOperation = PendingControlOperation | PendingCreateOperation | PendingLearningOperation;
 export function operationId(prefix = 'ui'): string {
   return `${prefix}-${crypto.randomUUID()}`;
 }

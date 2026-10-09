@@ -25,6 +25,14 @@ export function initialNodes(plan) {
 export function reconcile(state, plan) {
   const next = structuredClone(state);
   if (next.finalDisposition || ['stale', 'uncertain', 'cancelled'].includes(next.status)) return next;
+  if (next.learning?.failure || next.continuation?.kind === 'learning-hold') {
+    next.status = next.learning?.failure ? 'failed' : 'learning-hold';
+    for (const node of Object.values(next.nodes)) if (node.status === 'ready') {
+      node.status = 'pending';
+      node.reason = next.learning?.failure?.reason ?? 'Ожидается явное продолжение после этапа';
+    }
+    return next;
+  }
   for (const definition of plan.nodes) {
     const node = next.nodes[definition.id];
     if (!['pending', 'ready', 'waiting-for-human'].includes(node.status)) continue;
@@ -34,7 +42,7 @@ export function reconcile(state, plan) {
       node.reason = `Ожидается ${blocked}: ${next.nodes[blocked].status}`;
       continue;
     }
-    if (resolveAction(definition.action.id).kind === 'gate') {
+    if (resolveAction(definition.action.id, 1, {}, plan.checks ?? null).kind === 'gate') {
       node.status = 'waiting-for-human';
       node.reason = 'Ожидается решение оператора';
       continue;
@@ -89,7 +97,7 @@ export function calculateCapabilities(
   const usable = integrity && !closed && !busy && !lock;
   // После подтвержденной отмены старый план закрыт; продолжение идет только
   // через отдельную версию плана, а не повтором прежней операции.
-  const executable = usable && state.status !== 'cancelled';
+  const executable = usable && state.status !== 'cancelled' && !state.learning?.failure && state.continuation?.kind !== 'learning-hold';
   const reason = !integrity
     ? 'Integrity не подтверждена'
     : closed
@@ -106,7 +114,7 @@ export function calculateCapabilities(
     const node = state.nodes[definition.id],
       action = historical
         ? { kind: definition.success.kind, retrySafe: false }
-        : resolveAction(definition.action.id);
+        : resolveAction(definition.action.id, 1, {}, plan.checks ?? null);
     const executionAvailable = definition.action.id.startsWith('ai-')
       ? runner.ai.available
       : definition.action.id.startsWith('check-')
@@ -197,7 +205,7 @@ export function calculateCapabilities(
               ((!semanticUncertainty && state.status === 'uncertain') || Boolean(lock?.recoverable)))),
         reason,
       ),
-      stop: capability(!closed && Boolean(state.activeOperation) && !orphan, reason),
+      stop: capability(!closed && state.continuation?.kind !== 'learning-hold' && Boolean(state.activeOperation) && !orphan, reason),
       requestReplan: capability(
         usable &&
           state.status !== 'running' &&

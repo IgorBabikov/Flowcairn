@@ -24,6 +24,8 @@ import { validateRequirementAcceptances } from './requirement-verification.mjs';
 import { acquireRuntimeLease } from './lifecycle.mjs';
 import {
   TaskInputSchema,
+  TaskInputV3Schema,
+  PendingBindingSchema,
   TaskSpecSchema,
   PlanningEnvelopeSchema,
   ControlRequestSchema,
@@ -40,13 +42,19 @@ import {
   Id,
 } from './schemas.mjs';
 import { compilePlan, validatePlan, assertPlanHash } from './validator.mjs';
-import { POLICY_HASH, REGISTRY_HASH, resolveAction, pathAllowed } from './registry.mjs';
+import { POLICY_HASH, REGISTRY_HASH, resolveAction, pathAllowed, overlaps } from './registry.mjs';
 import { initialNodes, reconcile, calculateCapabilities } from './state.mjs';
 import { buildHistoricalReviewEvidence, MAX_HISTORICAL_EXECUTIONS } from './review-evidence.mjs';
 import { ExternalConsentSchema, makeExternalConsent, providerToolchain } from './providers.mjs';
 import { safeReason } from './failure-reason.mjs';
 import { autonomyForNodes } from './autonomy-policy.mjs';
 import { canReplanRejectedImplementation } from './manual-continuation.mjs';
+import { singleExecutionStage } from './plan-checks.mjs';
+import { assertLearningState } from './stage-execution.mjs';
+import { learningCommand, learningCommands } from './learning-control.mjs';
+import { learningMaterial, learningSource, learningUnavailable, openLearningCapability } from './learning-view.mjs';
+import { LearningJobs } from './learning-jobs.mjs';
+import { readLearningJobs } from './learning-job-state.mjs';
 
 const fail = (code, message) => {
   throw new GraphError(code, message);
@@ -76,6 +84,8 @@ function processStartIdentity(pid) {
 
 function assertConfiguredChecks(task, profile, draft = null) {
   if (!profile) return; // Injected adapters are trusted host code, never public input.
+  if (profile.version === 2 && task.scope.some((scope) => profile.outputPaths.some((output) => overlaps(scope, output))))
+    fail('CHECK_OUTPUT_SCOPE', 'Область исходников перекрывает объявленный каталог результатов проверки');
   const requested = [...task.checks];
   if (Array.isArray(draft?.nodes)) {
     for (const node of draft.nodes) {
@@ -95,7 +105,7 @@ export class WorkflowService {
     return this.lifecycleRelease ? acquireRuntimeLease({ root: this.root, kind: 'viewer' }) : () => {};
   }
   close() {
-    if (this.pendingMutations || this.active.size || this.intakes.size || this.drives.size) return false;
+    if (this.pendingMutations || this.active.size || this.intakes.size || this.drives.size || this.learningJobs?.busy) return false;
     this.lifecycleRelease?.(); this.lifecycleRelease = null; this.closed = true;
     return true;
   }
@@ -154,12 +164,13 @@ export class WorkflowService {
     if (preview && product && body.selection && !preview.ready) fail('INTAKE_CONTEXT_REQUIRED', preview.issues.join('\n'));
     const initial = preview ? initialTaskContext(preview, project, product && Boolean(body.selection)) : null;
     const inferredScope = initial?.scope ?? unique([...project.scopeCandidates, ...untracked.filter((file) => file !== '.flowcairn.json').map((file) => file.includes('/') ? file.split('/')[0] : file)]);
-    const task = TaskInputSchema.parse({ id: `TASK-${suffix.toUpperCase()}`, goal: product ? body.title : body.prompt.slice(0, 4000),
+    const task = (this.adapters.dataVersion === 3 ? TaskInputV3Schema : TaskInputSchema).parse({ id: `TASK-${suffix.toUpperCase()}`, goal: product ? body.title : body.prompt.slice(0, 4000),
+      ...(this.adapters.dataVersion === 3 && product ? { learningMode: body.learningMode ?? 'after-stage' } : {}),
       ...(product ? { intakeKind: 'natural' } : {}),
       ...(product ? { taskNumber: body.taskNumber } : {}),
       instructions: product ? body.description : body.prompt, scope: product ? inferredScope : requestedScope ?? inferredScope,
       ...(initial ? { contextDiscovery: true, contextNotes: initial.notes } : {}),
-      contextPaths: project.contextPaths, includeUntracked: untracked, acceptance: [product ? body.description.slice(0, 4000) : body.prompt.slice(0, 4000)], checks: project.checks });
+      contextPaths: project.contextPaths, includeUntracked: untracked, acceptance: [product ? body.description.slice(0, 4000) : body.prompt.slice(0, 4000)], checks: project.checkIds ?? project.checks });
     if (task.scope.some((file) => !pathAllowed(file, task))) fail('INTAKE_SCOPE', 'Недопустимый scope');
     const pending = this.intakes.get(runId);
     if (pending) {
@@ -216,7 +227,7 @@ export class WorkflowService {
     return previous;
   }
 
-  #executionHistory(state) {
+  #executionHistory(state, includeManual = false) {
     const previous = [];
     let runId = state.supersedesRunId;
     const visited = new Set([state.runId]);
@@ -225,7 +236,7 @@ export class WorkflowService {
         fail('EXECUTION_HISTORY', 'Цепочка предыдущих execution-версий повреждена');
       visited.add(runId);
       const source = this.#read(runId, { current: false, verifySource: false, verifyBinding: false });
-      if (source.plan.workflow === 'autonomous' && source.plan.stage === 'execution') {
+      if ((includeManual || source.plan.workflow === 'autonomous') && source.plan.stage === 'execution') {
         const implementations = source.plan.nodes.filter((node) => node.action.id === 'ai-implement');
         if (implementations.some((node) => source.state.nodes[node.id].attempts > 0)) {
           previous.unshift(source);
@@ -260,6 +271,10 @@ export class WorkflowService {
     });
   }
   #analysis(state, plan) { return this.#proofService().analysis(state, plan); }
+  #currentCheckRegistry() {
+    try { return this.adapters.checkRegistry?.(); }
+    catch (error) { fail('CHECK_REGISTRY_DRIFT', error instanceof GraphError ? error.message : 'Инструмент или объявленные входы проверки недоступны'); }
+  }
   #taskProof(state, task, plan, driftReason = null) {
     return this.#proofService().taskProof(state, task, plan, driftReason);
   }
@@ -408,7 +423,7 @@ export class WorkflowService {
   #resumeReadyWork() {
     for (const runId of this.store.listRunIds()) {
       const raw = this.store.readRun(runId);
-      if (raw.schemaVersion !== 2 || raw.finalDisposition || raw.activeOperation || raw.setupPending || raw.stopRequested ||
+      if (![2,3].includes(raw.schemaVersion) || raw.learning?.failure || raw.continuation?.kind === 'learning-hold' || raw.finalDisposition || raw.activeOperation || raw.setupPending || raw.stopRequested ||
           !['ready','passed'].includes(raw.status)) continue;
       try {
         const { state, plan } = this.#read(runId);
@@ -432,7 +447,7 @@ export class WorkflowService {
     // Предел относится ко всему управляющему проходу, даже если адаптер вернул неожиданный state.
     for (let turn = 0; turn < 12; turn++) {
       const { state, task, plan } = this.#read(runId);
-      if (state.stopRequested || state.activeOperation || state.finalDisposition || plan.workflow !== 'autonomous') return;
+      if ((state.schemaVersion === 3 && (state.learning.failure || state.continuation.kind === 'learning-hold')) || state.stopRequested || state.activeOperation || state.finalDisposition || plan.workflow !== 'autonomous') return;
       const caps = this.#caps(state, plan);
       const request = { operationId: `auto-${randomUUID()}`, expectedRevision: state.revision, planHash: state.planHash };
       if (this.#executionDeadline(state, plan) !== null && Date.now() >= this.#executionDeadline(state, plan)) {
@@ -529,6 +544,7 @@ export class WorkflowService {
         hashObject(invariant(task)) !== hashObject(invariant(origin.task)) ||
         hashObject(writes(plan)) !== hashObject(writes(origin.plan)) ||
         plan.runtimeHash !== origin.plan.runtimeHash || plan.contextHash !== origin.plan.contextHash ||
+        plan.checkRegistryHash !== origin.plan.checkRegistryHash ||
         hashObject(plan.autonomy) !== hashObject(origin.plan.autonomy))
       fail('POLICY_GRANT', 'Исправление не соответствует явно согласованному плану');
     const permissions = unique(plan.nodes.flatMap((node) => node.permissions)).sort();
@@ -563,6 +579,7 @@ export class WorkflowService {
     });
     if (!analysisArtifact) fail('ANALYSIS_REQUIRED', 'Нет сохраненного анализа для уточнения');
     const { schemaVersion: _, sourceHash: __, ...input } = task;
+    if (state.schemaVersion === 3) input.learningMode = state.learning.mode;
     input.planningFeedback = [...(task.planningFeedback ?? []), request.feedback];
     const newRunId = `run-${randomUUID()}`;
     const preparationHash = this.store.putObject('operations', {
@@ -588,6 +605,7 @@ export class WorkflowService {
     try {
       const service = new WorkflowService(resolved, adapters ?? (await defaultAdapters(resolved)));
       service.lifecycleRelease = release;
+      await service.learningJobs.reconcileInterrupted();
       service.#resumeReadyWork();
       return service;
     } catch (error) { release?.(); throw error; }
@@ -606,6 +624,11 @@ export class WorkflowService {
     this.ownerStart = this.adapters.ownerIdentity
       ? this.adapters.ownerIdentity(process.pid)
       : processStartIdentity(process.pid);
+    this.learningJobs = new LearningJobs({ ...this.#learningHost(), root: this.root, ownerStart: this.ownerStart,
+      runner: () => this.adapters.learningRunner,
+      write: this.#write.bind(this), snapshot: this.snapshot.bind(this), orphan: this.#orphan.bind(this), safeReason,
+      inspectProcess: (metadata) => this.adapters.inspectProcess?.(metadata) ?? { stopped: false, uncertain: true },
+    });
   }
 
   async create(input, options = {}) {
@@ -641,11 +664,13 @@ export class WorkflowService {
     assertJsonBounds(input);
     Id.parse(runId);
     Id.parse(operationId);
-    const parsedInput = TaskInputSchema.parse(input);
+    const dataVersion = this.adapters.dataVersion === 3 ? 3 : 2;
+    const inputSchema = dataVersion === 3 ? TaskInputV3Schema : TaskInputSchema;
+    const parsedInput = inputSchema.parse(input);
     const profile = this.adapters.project;
     if (draft) assertJsonBounds(draft);
     assertConfiguredChecks(parsedInput, profile, draft);
-    const taskInput = TaskInputSchema.parse({
+    const taskInput = inputSchema.parse({
       ...parsedInput,
       checks: unique([...parsedInput.checks, ...(profile?.checks ?? [])]),
       contextPaths: unique([
@@ -683,7 +708,7 @@ export class WorkflowService {
     const sourceHash = source.manifest.sourceHash;
     if (expectedSourceHash && sourceHash !== expectedSourceHash)
       fail('STALE_CONTEXT', 'Снимок изменился после выбора файлов. Подтвердите актуальную область задачи.');
-    const task = TaskSpecSchema.parse({ ...taskInput, schemaVersion: 2, sourceHash });
+    const task = TaskSpecSchema.parse({ ...taskInput, schemaVersion: dataVersion, sourceHash });
     const taskHash = this.store.putObject('tasks', task);
     const plan = this.#withReadContext(() => {
       const context = {
@@ -697,6 +722,8 @@ export class WorkflowService {
         workflow,
         analysisArtifact,
         taskContract,
+        checks: this.adapters.checkRegistry?.(),
+        learningMode: task.schemaVersion === 3 ? task.learningMode ?? 'after-stage' : 'after-stage',
         provider: this.adapters.project?.ai.provider,
       };
       if (workflow === 'autonomous' && stage === 'planning' && !this.#hasReadConsent())
@@ -707,11 +734,13 @@ export class WorkflowService {
       proposal.taskContract = taskContract ?? proposal.taskContract ?? buildTaskContract(task, {
         steps: proposal.nodes.filter((node) => node.action.id === 'ai-implement').map((node) => ({ id: node.id, nodeId: node.id, paths: node.resources.writes })),
       });
+      if (proposal.schemaVersion === 3 && proposal.stage !== 'planning') proposal.executionStages = singleExecutionStage(proposal.nodes, proposal.taskContract);
       return validatePlan(proposal, task, context).plan;
     });
     const planHash = this.store.putObject('plans', plan);
     const envelope = PlanningEnvelopeSchema.parse({
-      schemaVersion: 2,
+      schemaVersion: dataVersion,
+      ...(dataVersion === 3 ? { checkRegistryHash: plan.checkRegistryHash } : {}),
       taskHash,
       sourceHash,
       runtimeHash: plan.runtimeHash,
@@ -729,7 +758,9 @@ export class WorkflowService {
     const envelopeHash = this.store.putObject('envelopes', envelope);
     const state = reconcile(
       {
-        schemaVersion: 2,
+        schemaVersion: dataVersion,
+        ...(dataVersion === 3 ? { continuation: { kind: 'open' }, learning: { version: 1,
+          mode: plan.learning.initialMode, stages: {}, eventIds: [], jobs: {}, progress: {} } } : {}),
         runId,
         taskHash,
         planHash,
@@ -774,7 +805,7 @@ export class WorkflowService {
 
   #read(runId, { current = true, verifySource = true, verifyBinding = true } = {}) {
     const raw = this.store.readRun(runId);
-    if (raw.schemaVersion !== 2)
+    if (![2,3].includes(raw.schemaVersion))
       fail('LEGACY_RUN', 'Legacy run доступен только как сохраненное evidence');
     const parsed = RunStateSchema.safeParse(raw);
     if (!parsed.success) fail('STATE_SCHEMA', 'Run state не соответствует строгой schema');
@@ -786,7 +817,7 @@ export class WorkflowService {
       plan,
       task,
       current
-        ? { runtimeHash: this.adapters.identity(), skills: this.adapters.skills(task), resolveSkills: this.adapters.resolveSkills, resolveReadPaths: this.adapters.resolveReadPaths, contextHash: this.adapters.contextHash?.(task), provider: this.adapters.project?.ai.provider }
+        ? { runtimeHash: this.adapters.identity(), skills: this.adapters.skills(task), resolveSkills: this.adapters.resolveSkills, resolveReadPaths: this.adapters.resolveReadPaths, contextHash: this.adapters.contextHash?.(task), provider: this.adapters.project?.ai.provider, checks: this.#currentCheckRegistry() }
         : { mode: 'historical' },
     );
     if (current) this.#withReadContext(validateCurrentPlan);
@@ -795,7 +826,8 @@ export class WorkflowService {
       this.store.readObject('envelopes', state.envelopeHash),
     );
     const expectedEnvelope = {
-      schemaVersion: 2,
+      schemaVersion: state.schemaVersion,
+      ...(state.schemaVersion === 3 ? { checkRegistryHash: plan.checkRegistryHash } : {}),
       taskHash: state.taskHash,
       sourceHash: state.sourceHash,
       runtimeHash: plan.runtimeHash,
@@ -956,7 +988,7 @@ export class WorkflowService {
           : null;
         if (
           node.status !== 'failed' ||
-          (current && !resolveAction(definition.action.id).retrySafe) ||
+          (current && !resolveAction(definition.action.id, 1, {}, plan.checks ?? null).retrySafe) ||
           last?.phase !== 'finished' ||
           last.verdict !== 'fail' ||
           !last.termination?.stopped ||
@@ -980,6 +1012,8 @@ export class WorkflowService {
       for (const hash of node.artifacts) this.#artifact(hash);
     }
     validateRequirementAcceptances({ state, task, plan, readReceipt: (hash) => this.store.readObject('receipts', hash) });
+    assertLearningState(this.store, state, plan);
+    readLearningJobs(this.store, state);
     if (current && verifyBinding && state.binding && !state.finalDisposition)
       this.adapters.verifyBinding(state.binding);
     return { state, task, plan };
@@ -1051,6 +1085,23 @@ export class WorkflowService {
             collection[name] = { allowed: false, reason: readiness.reason };
     }
     const deadline = this.#executionDeadline(state, plan);
+    if (state.schemaVersion === 3) {
+      const held = state.continuation.kind === 'learning-hold';
+      const quiescent = !state.activeOperation && !state.setupPending && !lock &&
+        !Object.values(state.operations).some((op) => ['running', 'creating'].includes(op.status));
+      const usable = quiescent && !state.finalDisposition && !state.stopRequested && !state.learning.failure &&
+        !['stale', 'uncertain', 'cancelled'].includes(state.status) && !Object.values(state.nodes).some((node) => ['running', 'uncertain', 'failed'].includes(node.status));
+      const rights = plan.nodes.every((node) => node.permissions.every((permission) => state.permissions.includes(permission)));
+      const canContinue = usable && held && rights && (deadline === null || Date.now() < deadline);
+      capabilities.run.continueLearning = { allowed: canContinue, reason: canContinue ? null : 'Нужна актуальная пауза, действующие права и срок выполнения.' };
+      const mode = quiescent && !state.finalDisposition && !['stale', 'uncertain', 'cancelled'].includes(state.status);
+      capabilities.run.setLearningMode = { allowed: mode, reason: mode ? null : 'Режим меняется только без активной или неопределенной операции.' };
+      capabilities.run.openLearning = openLearningCapability(this.#learningHost(), state);
+    }
+    if (plan.schemaVersion === 3 && plan.stage === 'execution' && !plan.executionStages.finalCheckNodeIds.length) {
+      for (const collection of [capabilities.run, ...Object.values(capabilities.nodes)])
+        for (const key of ['run','retry','rerunCheck','approve','accept']) collection[key] = { allowed: false, reason: 'Нет зарегистрированной обязательной проверки этапа' };
+    }
     if (deadline !== null && Date.now() >= deadline) {
       for (const collection of [capabilities.run, ...Object.values(capabilities.nodes)])
         for (const key of ['run','retry','rerunCheck']) collection[key] = { allowed: false, reason: 'Истек срок согласованного автономного выполнения' };
@@ -1095,6 +1146,8 @@ export class WorkflowService {
 
   #snapshot(runId, verifySource) {
     return projectSnapshot({ adapters: this.adapters, sanitizeText, safeReason,
+      store: this.store, executionHistory: this.#executionHistory.bind(this),
+      learningProjection: (state, materialHash) => this.learningJobs.projection(state, materialHash),
       artifactMetadata: this.#artifactMetadata.bind(this),
       caps: this.#caps.bind(this),
       challenge: this.#challenge.bind(this),
@@ -1103,13 +1156,26 @@ export class WorkflowService {
       taskProof: this.#taskProof.bind(this),
       contextClarification: this.#contextClarification.bind(this),
       resultKind: (node) => resultKind(node, (id) => this.store.readObject('receipts', id)),
-      workflowProgress: this.#workflowProgress.bind(this)
+      workflowProgress: this.#workflowProgress.bind(this),
+      executionDeadline: this.#executionDeadline.bind(this)
     }, runId, verifySource);
   }
 
   #withReadContext(read) {
     return this.adapters.withReadContext ? this.adapters.withReadContext(read) : read();
   }
+
+  #learningHost() {
+    return { store: this.store, adapters: this.adapters, read: this.#read.bind(this),
+      executionHistory: (state) => this.#executionHistory(state, true),
+      learningProjection: (state, materialHash) => this.learningJobs?.projection(state, materialHash),
+      learningCapability: (state, materialHash, kind) => this.learningJobs?.capability(state, materialHash, kind),
+    };
+  }
+  learningMaterial(runId, hash) { return learningMaterial(this.#learningHost(), runId, hash); }
+  learningSource(runId, hash, sourceId, options) { return learningSource(this.#learningHost(), runId, hash, sourceId, options); }
+  learningUnavailable(runId, kind, id) { return learningUnavailable(this.#learningHost(), runId, kind, id); }
+  learningObject(runId, kind, id) { return this.learningJobs.readObject(runId, kind, id); }
 
   // SSE carries only persisted revision hints. It never evaluates execution permission.
   revision(runId) {
@@ -1126,7 +1192,8 @@ export class WorkflowService {
     let context = null,
       contextError = null;
     try {
-      context = { runtimeHash: this.adapters.identity(), resolveSkills: this.adapters.resolveSkills, resolveReadPaths: this.adapters.resolveReadPaths };
+      context = { runtimeHash: this.adapters.identity(), resolveSkills: this.adapters.resolveSkills, resolveReadPaths: this.adapters.resolveReadPaths,
+        checks: this.#currentCheckRegistry() };
     } catch (error) {
       contextError = error;
     }
@@ -1327,6 +1394,12 @@ export class WorkflowService {
   async #command(runId, name, input, { actor = 'local-operator' } = {}, scheduleContinuation = true) {
     this.#assertOpen();
     assertJsonBounds(input);
+    if (['generate-lesson', 'ask-lesson'].includes(name)) return this.learningJobs.start(runId, name, input, actor);
+    if (Object.hasOwn(learningCommands, name)) return learningCommand({ ...this.#learningHost(),
+      snapshot: this.snapshot.bind(this), caps: this.#caps.bind(this), write: this.#write.bind(this),
+      schedule: this.#schedule.bind(this), assertWorkspace: this.#assertWorkspace.bind(this),
+      executionDeadline: this.#executionDeadline.bind(this), learningMaterial: this.learningMaterial.bind(this),
+    }, runId, name, input, actor);
     const request = ControlRequestSchema.parse(input);
     if (request.contextSelection && name !== 'replan') fail('INVALID_CONTROL', 'Уточнение контекста допустимо только для новой версии плана');
     if (!['run', 'retry', 'rerun-check', 'gate', 'recover', 'stop', 'replan', 'revise-plan', 'verify-requirement'].includes(name))
@@ -1527,7 +1600,7 @@ export class WorkflowService {
       }
       while (true) {
         state = this.store.readRun(runId);
-        if (state.stopRequested || controller.signal.aborted) break;
+        if ((state.schemaVersion === 3 && (state.learning.failure || state.continuation.kind === 'learning-hold')) || state.stopRequested || controller.signal.aborted) break;
         this.#read(runId);
         const ready = plan.nodes.find(
           (n) => state.nodes[n.id].status === 'ready' && (!definition || n.id === definition.id),
@@ -1559,9 +1632,17 @@ export class WorkflowService {
       state = this.store.readRun(runId);
       if (state.activeOperation?.id !== operation.id || state.finalDisposition)
         return this.snapshot(runId);
+      if (state.schemaVersion === 3 && state.continuation.kind === 'learning-hold') {
+        // The boundary CAS can have committed before its caller observed an I/O error.
+        // Adopt only linked validated state, then finish this live owner's bookkeeping.
+        const committed = this.#read(runId, { current: false }).state;
+        this.#write(committed, { activeOperation: null,
+          operations: { ...committed.operations, [request.operationId]: { digest, status: 'finished' } } });
+        return this.snapshot(runId);
+      }
       const pending =
         error instanceof GraphError && error.details?.binding
-          ? RunStateSchema.shape.pendingBinding.safeParse(error.details.binding)
+          ? PendingBindingSchema.safeParse(error.details.binding)
           : null;
       const nodes = structuredClone(state.nodes);
       for (const node of Object.values(nodes))
@@ -1607,6 +1688,8 @@ export class WorkflowService {
       current.taskHash !== executionState.taskHash ||
       current.sourceHash !== executionState.sourceHash ||
       current.finalDisposition ||
+      current.learning?.failure ||
+      current.continuation?.kind === 'learning-hold' ||
       current.activeOperation?.id !== expected.id ||
       current.activeOperation.digest !== expected.digest ||
       current.activeOperation.nodeId !== definition.id ||
@@ -1637,6 +1720,7 @@ export class WorkflowService {
       resolveReadPaths: this.adapters.resolveReadPaths,
       contextHash: this.adapters.contextHash?.(task),
       provider: this.adapters.project?.ai.provider,
+          checks: this.adapters.checkRegistry?.(),
         });
         if (hashObject(current.binding) !== hashObject(executionState.binding))
           fail('EXECUTION_FENCED', 'Binding операции был заменен');
@@ -1692,6 +1776,8 @@ export class WorkflowService {
     };
   }
   async #replan({ state, task, plan, request, digest, actor, caps, policyGrant = undefined, discoveryChange = null }) {
+    if (policyGrant && state.continuation?.kind === 'learning-hold')
+      fail('REPLAN_DENIED', 'Замена плана из учебной паузы требует нового явного согласования.');
     if (
       state.activeOperation ||
       Object.values(state.nodes).some((node) => node.status === 'running') ||

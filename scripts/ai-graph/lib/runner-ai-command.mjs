@@ -19,6 +19,7 @@ import { codexModelSettings } from './codex-settings.mjs';
 import { measurePromptContext } from './bounded-context.mjs';
 import { fitPromptBudget } from './prompt-budget.mjs';
 import { fingerprintDirectWorkspace } from './direct-workspace.mjs';
+import { planningStepLimit } from './stage-plan.mjs';
 
 // Prepared commands contain the bounded input and exact sandbox policy; process ownership stays in runner.
 export const EXTERNAL_WORKER_FILE = fileURLToPath(new URL('./external-worker.mjs', import.meta.url));
@@ -127,7 +128,7 @@ function strictProviderSchema(value) {
 }
 
 // Формат подтверждения Skills задается доверенным узлом, а не свободным текстом модели.
-export function aiResponseSchema(node, plan) {
+export function aiResponseSchema(node, plan, task = null) {
   const schema = z.toJSONSchema(node.action.id === 'ai-review' ? AIReviewResultSchema : node.action.id === 'ai-plan' ? AIPlanningResultSchema : node.action.id === 'ai-analyze' && plan?.workflow === 'autonomous' ? AIAnalysisResultSchema : AIResultSchema);
   if (schema.properties?.skillsUsed && node.skills?.length) {
     schema.properties.skillsUsed = { type: 'array', items: { type: 'string', enum: [...node.skills] }, minItems: node.skills.length, maxItems: node.skills.length };
@@ -139,6 +140,10 @@ export function aiResponseSchema(node, plan) {
     }
   }
   if (node.action.id === 'ai-plan' && typeof schema.properties?.plan === 'object') schema.properties.plan.maxItems = 0;
+  if (node.action.id === 'ai-plan' && typeof schema.properties?.steps === 'object')
+    schema.properties.steps.maxItems = planningStepLimit(task ?? {
+      schemaVersion: plan?.schemaVersion, checks: plan?.checks?.definitions.map((check) => check.id) ?? [],
+    }, plan);
   const edits = schema.properties?.edits;
   if (node.action.id === 'ai-implement' && node.resources?.writes?.length && typeof edits === 'object' && edits !== null && typeof edits.items === 'object' && !Array.isArray(edits.items) && typeof edits.items.properties?.path === 'object') {
     const scopes = node.resources.writes.map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\/$/, ''));
@@ -172,7 +177,7 @@ export function makeAiCommand({
     if (reviewBundle) assertSafeText(reviewBundle.content);
     createExclusiveFile(
       schemaFile,
-      `${JSON.stringify(aiResponseSchema(node, plan))}\n`,
+      `${JSON.stringify(aiResponseSchema(node, plan, task))}\n`,
     );
     createExclusiveFile(resultFile, '');
     reviewFile = reviewBundle ? createReviewEvidenceFile(outputPath, reviewBundle) : null;
@@ -328,7 +333,7 @@ export function makeExternalCommand({ worktree, node, task, plan, skills, priorE
     if (reviewBundle) assertSafeText(reviewBundle.content);
     reviewFile = reviewBundle ? createReviewEvidenceFile(outputPath, reviewBundle) : null;
     if (reviewFile) verifyReviewEvidenceFile(reviewFile);
-    const schema = aiResponseSchema(node, plan);
+    const schema = aiResponseSchema(node, plan, task);
     const skillInstructions = renderSkillInstructions(skills);
 
     const preparedPrompt = fitPromptBudget({ task, node, priorEvidence, maxBytes: MAX_EXTERNAL_PROMPT_BYTES,

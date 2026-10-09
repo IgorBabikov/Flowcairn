@@ -1,0 +1,58 @@
+.game-overlay--diagnostics { right:28px; top:130px; width:min(1080px,calc(100vw - 56px)); height:min(720px,calc(100dvh - 150px)); }
+.diagnostic-book { position:relative; width:100%; height:100%; filter:drop-shadow(0 12px 18px #0008); }
+.diagnostic-book > .game-close { top:7%; right:3%; color:#f3e3c3; background:#26372b; border:1px solid #ad8249; border-radius:50%; }
+.diagnostic-paper { position:absolute; inset:14% 10% 17% 9%; padding:4px 12px 16px 2px; overflow:auto; scrollbar-width:thin; scrollbar-color:#8e7145 transparent; overscroll-behavior:contain; color:#302719;
+  --text:#302719; --muted:#675236; --surface:#f2e4c7; --soft:#e6d3af; --border:#bda77d; --plum-strong:#52372c; --accent:#24483d; --danger:#8c2b25; }
+.diagnostic-heading h2 { margin:0 0 8px; font:28px/1.2 Georgia,serif; }
+.diagnostic-heading p { margin:0 0 12px; font-size:16px; overflow-wrap:anywhere; }
+.diagnostic-tools { display:flex; align-items:center; flex-wrap:wrap; gap:8px 16px; margin-bottom:12px; }
+.diagnostic-tools > span { font-size:13px; }
+.diagnostic-book fieldset { border:0; padding:0; margin:0; min-width:0; }
+.diagnostic-chapters { display:flex; flex-wrap:wrap; gap:6px 18px; margin:12px 0 16px; border-bottom:1px solid #9d8052; }
+.diagnostic-chapters button { min-height:44px; border:0; border-bottom:3px solid transparent; background:none; color:inherit; font:600 16px var(--font-sans); padding:8px 0; cursor:pointer; }
+.diagnostic-chapters button[aria-selected=true] { border-bottom-color:#24483d; color:#24483d; }
+.diagnostic-version { margin:12px 0; }
+.diagnostic-version summary { min-height:36px; cursor:pointer; }
+.diagnostic-node-picker { display:flex; gap:16px; flex-wrap:wrap; align-items:end; margin:12px 0; }
+.diagnostic-node-picker label { flex:1 1 260px; display:grid; gap:8px; }
+.diagnostic-book select { width:100%; min-height:44px; background:#faedcf; color:#302719; border:1px solid #947449; font:15px var(--font-sans); }
+.diagnostic-book :is(code,dd,li,p,h2,h3,h4) { overflow-wrap:anywhere; }
+.diagnostic-book pre { max-width:100%; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; background:#f8edd7; color:#302719; padding:12px; font:14px/1.55 ui-monospace,SFMono-Regular,monospace; user-select:text; }
+.diagnostic-book :is(.task-overview,.task-heading,.task-cockpit,.workflow-panel,.task-progress,.context-recovery,.task-next-action,.proof-summary,.requirements-panel,.requirement-card,.resource-panel) { background:transparent; box-shadow:none; border-radius:0; }
+.diagnostic-book .task-overview { border:0; }
+.diagnostic-book :is(.task-heading,.task-content-primary > .task-next-action,.task-content-primary > .context-recovery,.workflow-panel.embedded) { padding:12px 0; }
+.diagnostic-book .task-heading h2 { font:22px/1.3 Georgia,serif; }
+.diagnostic-book .task-heading-line { flex-wrap:wrap; }
+.diagnostic-book .task-content-layout { display:block; }
+.diagnostic-book :is(.task-progress,.execution-status,.task-cockpit) { margin:12px 0; }
+.diagnostic-book :is(.detail-heading h2,.plan-panel h2,.evidence-list h2) { font:24px/1.3 Georgia,serif; }
+.diagnostic-book .detail-actions { flex-wrap:wrap; }
+.diagnostic-book :is(.fact-list,dl) { min-width:0; }
+.diagnostic-book .rpg-runtime-notices { position:static; }
+.diagnostic-book.art-unavailable { background:#f2e4c7; border:2px solid #947449; }
+.diagnostic-book.art-unavailable .diagnostic-paper { inset:60px 28px 28px; }
+[data-dark] .diagnostic-paper { background:#23352c; color:#f2e3c4; --text:#f2e3c4; --muted:#cbbb98; --faint:#cbbb98; --surface:#23352c; --soft:#334c3c; --border:#8f7954; --plum-strong:#e4c58b; padding:14px; }
+[data-dark] .diagnostic-chapters button[aria-selected=true] { color:#e4c58b; border-bottom-color:#e4c58b; }
+@media (max-width:1000px) {
+  .game-overlay--diagnostics { top:140px; right:20px; width:calc(100vw - 40px); height:calc(100dvh - 160px); overflow:auto; overscroll-behavior:contain; }
+  .diagnostic-book { min-height:100%; height:auto; padding:52px 26px 26px; background:#f2e4c7; border:1px solid #947449; filter:none; }
+  .diagnostic-book > .working-object-art { display:none; }
+  .diagnostic-book > .game-close { top:5px; right:5px; }
+  .diagnostic-paper { position:relative; inset:auto; overflow:visible; padding:0; }
+  .diagnostic-book .cockpit-layout { display:block; }
+}
+@media (max-width:600px) {
+  .game-overlay--diagnostics { top:150px; left:12px; right:12px; width:auto; height:calc(100dvh - 164px); }
+  .diagnostic-book { padding:52px 18px 20px; }
+  .diagnostic-heading h2 { font-size:24px; }
+  .diagnostic-chapters { gap:4px 14px; }
+  .diagnostic-chapters button { font-size:14px; }
+  .diagnostic-book .fact-list { grid-template-columns:1fr; }
+  .diagnostic-book .fact-list dd { margin-bottom:8px; }
+}
+/* A single writing sheet keeps long diagnostic text clear of the binding. */
+.diagnostic-paper { background:#f2e4c7; padding:14px; }
+.diagnostic-book .task-heading :is(h2,.task-number) { display:none; }
+.diagnostic-book .task-heading { padding-top:0; }
+@media (max-width:1000px) { .diagnostic-paper { padding:0; } }
+.diagnostic-book .error-banner .technical-details { color:inherit; --muted:#f4dfc0; --text:#f4dfc0; }

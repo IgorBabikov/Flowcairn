@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { book, openDiagnostics, openJournal, selectStep, stepDetails, stepPicker, visitResult } from './ui-paths.mjs';
 import { allDenied, hash, mockApi, snapshot, token } from './fixtures.mjs';
 
 // Synthetic browser data: runtime semantics are covered by task-proof integration tests.
@@ -24,15 +25,15 @@ function taskWithProof() {
   return state;
 }
 
-test('task cockpit leads to requirement evidence and advanced graph', async ({ page }) => {
-  await mockApi(page, taskWithProof()); await page.goto(`/#session=${token}`);
+test('task cockpit leads from the world to requirement evidence and diagnostic steps', async ({ page }) => {
+  await mockApi(page, taskWithProof()); await visitResult(page);
   await expect(page.getByRole('region', { name: 'Задача и доказательства' })).toBeVisible();
-  await expect(page.locator('.detail-panel')).toHaveCount(0);
-  await expect(page.locator('.detail-scroll')).toHaveCount(0);
+  await expect(book(page).locator('#diagnostic-tab-result')).toHaveAttribute('aria-selected', 'true');
+  await expect(stepPicker(page)).toHaveCount(0);
   await expect(page.getByTestId('task-proof-status')).toHaveText('Результат подтвержден');
   await expect(page.getByText('PROVEN', { exact: true })).toHaveCount(0);
   await expect(page.getByTestId('requirement-coverage')).toContainText('1 из 1');
-  await expect(page.locator('.graph-region')).toHaveCount(0);
+  await expect(page.getByRole('tabpanel', { name: 'Результат', exact: true })).toBeVisible();
   await expect(page.getByText('Отчет о выполнении', { exact: true })).toBeVisible();
   const requirement = page.getByRole('region', { name: 'Доказательство требования', exact: true });
   await expect(requirement).toContainText('Пустое поле не отправляет заявку');
@@ -43,12 +44,11 @@ test('task cockpit leads to requirement evidence and advanced graph', async ({ p
   await requirement.getByRole('button', { name: 'Результат 1', exact: true }).click();
   await expect(page.getByRole('dialog')).toContainText('<script>attack()</script>');
   await page.getByRole('button', { name: 'Закрыть', exact: true }).click();
-  await page.getByRole('button', { name: 'Граф', exact: true }).click();
-  await page.getByRole('button', { name: 'Детали исполнения', exact: true }).click();
-  await expect(page.locator('.graph-node').first()).toBeVisible();
-  await expect(page.locator('.detail-panel')).toHaveCount(1);
-  await expect(page.locator('.detail-scroll')).toHaveCount(1);
-  await page.getByRole('button', { name: 'Задача', exact: true }).click();
+  await selectStep(page, 'implement');
+  await expect(stepPicker(page)).toBeVisible();
+  await expect(stepDetails(page)).toHaveCount(1);
+  await expect(stepDetails(page)).toHaveAttribute('data-node-id', 'implement');
+  await openDiagnostics(page, 'result');
   await expect(page.getByTestId('task-proof-status')).toHaveText('Результат подтвержден');
 });
 
@@ -61,7 +61,7 @@ test('long requirement stays readable at wide and mobile widths', async ({ page 
   for (const width of [3440, 390]) {
     await page.setViewportSize({ width, height: 900 });
     await mockApi(page, state);
-    await page.goto(`/#session=${token}`);
+    await visitResult(page);
     const requirement = page.getByRole('region', { name: 'Доказательство требования' });
     await expect(page.locator('.requirements-layout.is-long')).toBeVisible();
     await expect(page.locator('.completion-certificate')).not.toHaveAttribute('open', '');
@@ -89,7 +89,7 @@ test('execution failure with proof shows the real runtime cause above requiremen
   state.proof.requirements[0].status = 'blocked';
   state.proof.blockers = ['Исполнение находится в состоянии failed'];
   await mockApi(page, state);
-  await page.goto(`/#session=${token}`);
+  await visitResult(page);
   await expect(page.getByTestId('task-proof-status')).toHaveText('AI-исполнитель завершился с ошибкой');
   await expect(page.locator('.task-cockpit .workflow-problem')).toContainText('ненулевым кодом');
   await expect(page.locator('.task-cockpit .workflow-problem .technical-details')).not.toHaveAttribute('open', '');
@@ -106,7 +106,7 @@ test('ongoing work keeps outstanding verification available without presenting i
   state.proof.requirements[0].status = 'blocked';
   state.proof.blockers = ['Обязательная проверка check-tests не подтверждена на текущем результате',
     'R1: Не подтверждено выполнение всей связанной работы'];
-  await mockApi(page, state); await page.goto(`/#session=${token}`);
+  await mockApi(page, state); await visitResult(page);
   await expect(page.locator('.task-progress')).toBeVisible();
   await expect(page.locator('.task-progress h3')).toContainText('Внесение изменений');
   await expect(page.locator('.cockpit-current')).toHaveCount(0);
@@ -121,67 +121,69 @@ test('ongoing work keeps outstanding verification available without presenting i
   await expect(page.getByTestId('requirement-coverage')).toContainText('0 из 1');
 });
 
-test('mobile run rail opens as a modal and restores focus', async ({ page }, testInfo) => {
+test('mobile journal opens as a modal and restores focus', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await mockApi(page, taskWithProof());
   await page.goto(`/#session=${token}`);
-
-  const opener = page.getByRole('button', { name: 'Показать запуски', exact: true });
+  const opener = page.getByRole('navigation', { name: 'Игровое меню' }).getByRole('button', { name: 'Журнал', exact: true });
   await expect(opener).toBeVisible();
-  await expect(page.locator('.desktop-run-rail')).toBeHidden();
-  await opener.click();
-  const dialog = page.getByRole('dialog', { name: 'Запуски', exact: true });
+  const dialog = await openJournal(page);
   await expect(dialog).toBeVisible();
-  expect(await dialog.evaluate((element) => element.matches(':modal'))).toBe(true);
-  await page.screenshot({ path: testInfo.outputPath('mobile-runs-drawer.png') });
+  expect(await dialog.evaluate(element => element.matches(':modal'))).toBe(true);
+  await expect(dialog.locator('.journal-entry')).toHaveCount(1);
+  await page.screenshot({ path: testInfo.outputPath('mobile-quest-journal.png') });
   await page.keyboard.press('Escape');
-  await expect(dialog).toHaveCount(0);
+  await expect(dialog).toBeHidden();
   await expect(opener).toBeFocused();
 });
 
-test('mobile run modal closes when viewport becomes desktop', async ({ page }) => {
+test('journal remains closable when viewport becomes desktop', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await mockApi(page, taskWithProof());
   await page.goto(`/#session=${token}`);
-  await page.getByRole('button', { name: 'Показать запуски', exact: true }).click();
-  await expect(page.getByRole('dialog', { name: 'Запуски', exact: true })).toBeVisible();
-
+  const dialog = await openJournal(page);
+  await expect(dialog).toBeVisible();
   await page.setViewportSize({ width: 1366, height: 768 });
-
-  await expect(page.locator('dialog.mobile-runs-dialog')).toHaveCount(0);
-  await expect(page.locator('.desktop-run-rail')).toBeVisible();
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Закрыть журнал', exact: true })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole('navigation', { name: 'Игровое меню' })).toBeVisible();
 });
 
-test('compact graph details open as a closable dialog', async ({ page }) => {
+test('compact diagnostic steps open as a closable dialog', async ({ page }) => {
   await page.setViewportSize({ width: 1024, height: 768 });
   await mockApi(page, taskWithProof());
-  await page.goto(`/#session=${token}`);
-  await page.getByRole('button', { name: 'Граф', exact: true }).click();
-  await page.getByRole('button', { name: 'Детали исполнения', exact: true }).click();
-
-  const details = page.getByRole('dialog', { name: 'Детали исполнения', exact: true });
+  await visitResult(page);
+  await selectStep(page, 'implement');
+  const details = page.getByRole('dialog', { name: 'Книга диагностики', exact: true });
   await expect(details).toBeVisible();
-  await details.getByRole('button', { name: 'Закрыть детали', exact: true }).click();
-  await expect(details).toHaveCount(0);
+  expect(await details.evaluate(element => element.matches(':modal'))).toBe(true);
+  await expect(stepDetails(page)).toHaveAttribute('data-node-id', 'implement');
+  await details.getByRole('button', { name: 'Закрыть книгу диагностики', exact: true }).click();
+  await expect(details).toBeHidden();
 });
 
 test('reports and English navigation use readable labels while API status stays unchanged', async ({ page }) => {
   const state = taskWithProof();
-  const fixture = await mockApi(page, state); await page.goto(`/#session=${token}`);
+  const fixture = await mockApi(page, state); await visitResult(page);
   await page.getByRole('region', { name: 'Доказательство требования', exact: true }).getByRole('button', { name: 'Открыть отчет проверки' }).click();
   await expect(page.getByRole('dialog').getByRole('heading', { name: /^Отчет проверки / })).toBeVisible();
   await page.getByRole('button', { name: 'Закрыть', exact: true }).click();
   const legacy = fixture.current(); legacy.workflow = null; legacy.revision += 1;
   await page.getByRole('button', { name: 'На английском', exact: true }).click();
-  await expect(page.locator('.run-row em')).toHaveText('Result confirmed');
-  await page.getByRole('button', { name: 'Граф', exact: true }).click();
-  await page.getByRole('button', { name: 'Детали исполнения', exact: true }).click();
-  await expect(page.getByRole('tab', { name: 'Check results', exact: true })).toBeVisible();
+  await expect(book(page).getByRole('tab', { name: 'Result', exact: true })).toBeVisible();
+  await book(page).getByRole('tab', { name: 'Steps', exact: true }).click();
+  await stepPicker(page).selectOption('implement');
+  await expect(stepDetails(page).locator('.status-chip')).toHaveText('Passed');
+  await book(page).getByRole('tab', { name: 'Evidence', exact: true }).click();
+  await expect(page.getByRole('tabpanel', { name: 'Evidence', exact: true })).toBeVisible();
+  await expect(stepPicker(page)).toHaveAccessibleName('Selected step');
   expect(state.proof.status).toBe('PROVEN');
 });
 
 test('stale evidence revokes visible completion after a committed revision', async ({ page }) => {
-  const fixture = await mockApi(page, taskWithProof()); await page.goto(`/#session=${token}`);
+  const fixture = await mockApi(page, taskWithProof()); await visitResult(page);
   await expect(page.getByTestId('task-proof-status')).toHaveText('Результат подтвержден');
   const current = fixture.current(); current.revision += 1; current.proof.status = 'STALE'; current.proof.coverage.proven = 0;
   current.proof.requirements[0].status = 'stale'; current.proof.requirements[0].reason = 'После проверки изменена форма.';
@@ -200,7 +202,7 @@ test('stale blockers name the check and requirement for a person', async ({ page
     'Обязательная проверка check-tests не подтверждена на текущем результате',
     'R1: Нужна актуальная успешная проверка требования',
   ];
-  await mockApi(page, state); await page.goto(`/#session=${token}`);
+  await mockApi(page, state); await visitResult(page);
   const blockers = page.locator('.proof-blockers');
   await expect(blockers).toContainText('Тесты нужно повторить для текущего состояния файлов.');
   await expect(blockers).toContainText('Форма отклоняет пустой адрес: Нужна актуальная успешная проверка требования');
@@ -220,21 +222,21 @@ test('pending checks are shown as not started instead of needing a rerun', async
   ];
   state.proof.blockers = checks.map(([id]) => `Обязательная проверка ${id} не подтверждена на текущем результате`);
   state.nodes.push(...checks.map(([id, title]) => ({ ...state.nodes[0], id, title, status: 'pending', action: { id } })));
-  await mockApi(page, state); await page.goto(`/#session=${token}`);
+  await mockApi(page, state); await visitResult(page);
   const blockers = page.locator('.proof-blockers');
   for (const [, title] of checks) await expect(blockers).toContainText(`${title} еще не запускалась.`);
   await expect(blockers).not.toContainText('нужно повторить');
 });
 
 test('a failed live snapshot hides previous proof until fresh confirmation returns', async ({ page }) => {
-  await mockApi(page, taskWithProof()); await page.goto(`/#session=${token}`);
+  await mockApi(page, taskWithProof()); await visitResult(page);
   await expect(page.getByTestId('task-proof-status')).toHaveText('Результат подтвержден');
   await page.route('**/snapshot', route => route.fulfill({ status: 500, json: { error: { code: 'INTEGRITY', message: 'Evidence lineage is unavailable' } } }));
   await expect(page.getByRole('heading', { name: 'Актуальность результата не подтверждена' })).toBeVisible();
   await expect(page.getByTestId('task-proof-status')).toHaveText('Состояние недоступно');
   await expect(page.locator('.completion-certificate')).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'Готово к вашему ревью' })).toHaveCount(0);
-  await expect(page.locator('.run-row em')).toHaveText('Состояние недоступно');
+  await expect(page.getByTestId('rpg-runtime-status')).toHaveText('Состояние недоступно');
   await page.unroute('**/snapshot');
   await expect(page.getByTestId('task-proof-status')).toHaveText('Результат подтвержден');
 });
@@ -243,7 +245,7 @@ test('workflow check summary loses its green pass when proof becomes stale or un
   const state = taskWithProof();
   state.nodes[1].receiptIds = [hash('b')];
   state.nodes[1].checks = [{ id: 'form-validation', passed: true, exitCode: 0, durationMs: 10, summary: 'Проверено', inputHash: hash('a') }];
-  const fixture = await mockApi(page, state); await page.goto(`/#session=${token}`);
+  const fixture = await mockApi(page, state); await visitResult(page);
   const evidence = page.getByRole('region', { name: 'Доказательство требования', exact: true });
   await expect(evidence).toContainText('Проверка пройдена');
   await expect(evidence).toContainText('Актуально');
@@ -261,7 +263,7 @@ test('incomplete coverage and unavailable verification are never completion', as
   const state = taskWithProof(); state.proof.status = 'UNPROVEN'; state.proof.coverage.required = 2; state.proof.certificate = null;
   state.proof.requirements.push({ ...state.proof.requirements[0], id: 'R2', title: 'Письмо доставляется получателю', status: 'unproven', reason: 'Проверка доставки недоступна.', evidenceIds: [], verification: { method: 'human', checkIds: [], criterion: 'Получатель подтвердил получение письма', paths: [] } });
   state.proof.blockers = ['Требование «Письмо доставляется получателю» еще не доказано.'];
-  await mockApi(page, state); await page.goto(`/#session=${token}`);
+  await mockApi(page, state); await visitResult(page);
   await expect(page.getByTestId('task-proof-status')).toHaveText('Результат пока не подтвержден');
   await expect(page.getByTestId('requirement-coverage')).toContainText('1 из 2');
   await expect(page.getByRole('region', { name: 'Доказательство требования', exact: true })).toContainText('Проверка доставки недоступна.');
@@ -277,7 +279,7 @@ test('human acceptance binds the explicit decision to revision and result', asyn
   state.proof.acceptance = { allowed: true, reason: null, challenge: 'accept-current-result' };
   const fixture = await mockApi(page, state); let request;
   await page.route('**/control/verify-requirement', async route => { request = route.request().postDataJSON(); const next = fixture.current(); next.revision += 1; next.proof.acceptance.allowed = false; await route.fulfill({ json: { result: next } }); });
-  await page.goto(`/#session=${token}`);
+  await visitResult(page);
   await page.getByRole('button', { name: 'Результат для личной приемки', exact: true }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
   await page.getByRole('button', { name: 'Закрыть', exact: true }).click();
@@ -292,7 +294,7 @@ test('human acceptance binds the explicit decision to revision and result', asyn
 
 test('resource gaps stay unknown and findings explain repair', async ({ page }) => {
   const state = taskWithProof(); state.proof.findings = [{ id: 'F1', title: 'Ошибка валидации найдена и исправлена', status: 'resolved', blocking: true, requirementIds: ['R1'], repairNodeIds: ['implement'] }];
-  await mockApi(page, state); await page.goto(`/#session=${token}`);
+  await mockApi(page, state); await visitResult(page);
   await page.getByRole('button', { name: 'Ресурсы', exact: true }).click();
   const resources = page.getByRole('region', { name: 'Расход ресурсов' });
   await expect(resources).toContainText('Нет данных');
@@ -307,7 +309,7 @@ test('planning without a contract stays readable and source review cannot be acc
   const state = taskWithProof(); state.proof.status = 'BLOCKED'; state.proof.certificate = null; state.proof.contract = null;
   state.proof.requirements = []; state.proof.evidence = []; state.proof.coverage = { required: 0, proven: 0 };
   state.proof.blockers = ['Контракт требований еще не сформирован']; state.proof.usage.contextBytes = null;
-  const fixture = await mockApi(page, state); await page.goto(`/#session=${token}`);
+  const fixture = await mockApi(page, state); await visitResult(page);
   await expect(page.getByRole('region', { name: 'Задача и доказательства' })).toContainText('Требования еще не сформированы');
   const next = fixture.current(); next.revision += 1; next.proof.requirements = taskWithProof().proof.requirements;
   next.proof.requirements[0].status = 'unproven'; next.proof.requirements[0].verification.method = 'source-review';
@@ -320,7 +322,7 @@ test('cockpit remains readable on desktop and mobile', async ({ page }, testInfo
   await mockApi(page, taskWithProof());
   await page.emulateMedia({ reducedMotion: 'reduce' });
   for (const [name, width, height] of [['desktop', 1440, 1000], ['mobile', 390, 844]]) {
-    await page.setViewportSize({ width, height }); await page.goto(`/#session=${token}`);
+    await page.setViewportSize({ width, height }); await visitResult(page);
     await expect(page.getByTestId('task-proof-status')).toHaveText('Результат подтвержден');
     await page.screenshot({ path: testInfo.outputPath(`cockpit-${name}.png`), fullPage: true });
     const overflow = await page.evaluate(() => [...document.querySelectorAll('body *')].filter(element => {
@@ -338,7 +340,7 @@ test('planning placeholder does not repeat the entire ticket as a requirement', 
   state.proof.requirements[0].status = 'blocked';
   state.proof.status = 'BLOCKED'; state.proof.certificate = null;
   state.nodes[0].status = 'failed'; state.nodes[0].reason = 'RUNNER_CONTROL_CLOSED';
-  await mockApi(page, state); await page.goto(`/#session=${token}`);
+  await mockApi(page, state); await visitResult(page);
   await expect(page.getByRole('heading', { name: 'Требования еще формируются' })).toBeVisible();
   await expect(page.locator('.requirement-choice')).toHaveCount(0);
   await expect(page.locator('.task-cockpit')).not.toContainText(state.task.description);
@@ -360,7 +362,7 @@ test('task tab shows the active planning stage and only counts known execution s
   ];
   state.activeNodeId = 'analyze';
   await page.setViewportSize({ width: 3440, height: 900 });
-  const fixture = await mockApi(page, state); await page.goto(`/#session=${token}`);
+  const fixture = await mockApi(page, state); await visitResult(page);
   await expect(page.getByRole('heading', { name: 'Требования еще формируются' })).toBeVisible();
   await expect(page.locator('.task-progress h3')).toHaveText('Сейчас: Анализ задачи и проекта');
   await expect(page.locator('.task-progress-track')).not.toHaveAttribute('aria-valuenow');
@@ -393,7 +395,7 @@ test('provisional proof does not hide the permitted start of analysis', async ({
   state.proof.status = 'BLOCKED'; state.proof.certificate = null; state.proof.coverage.proven = 0;
   state.proof.requirements[0].status = 'blocked';
   const fixture = await mockApi(page, state);
-  await page.goto(`/#session=${token}`);
+  await visitResult(page);
   const start = page.getByRole('button', { name: 'Начать анализ', exact: true });
   await expect(start).toBeEnabled();
   await start.click();
@@ -409,7 +411,7 @@ test('requirement proof does not hide the unapproved execution plan', async ({ p
   state.proof.coverage.proven = 0;
   state.proof.requirements.forEach(requirement => { requirement.status = 'unproven'; });
   const fixture = await mockApi(page, state);
-  await page.goto(`/#session=${token}`);
+  await visitResult(page);
   const approve = page.getByRole('button', { name: 'Согласовать и начать выполнение', exact: true });
   await expect(approve).toBeEnabled();
   await approve.click();
@@ -424,7 +426,7 @@ test('uncertain runtime failure with proof keeps the permitted replan accessible
   state.capabilities = { ...allDenied, requestReplan: { allowed: true, reason: null } };
   state.proof.status = 'BLOCKED'; state.proof.certificate = null;
   const fixture = await mockApi(page, state);
-  await page.goto(`/#session=${token}`);
+  await visitResult(page);
   await expect(page.locator('.task-cockpit .workflow-problem')).toBeVisible();
   await page.getByRole('button', { name: 'Повторить с новым планом', exact: true }).click();
   expect(fixture.calls.filter(call => call.action === 'replan')).toHaveLength(1);

@@ -1,11 +1,12 @@
-import { useState } from 'react';
 import type { ApiError, Capability, TaskFields } from './contracts';
 import { humanText, runtimeProblem } from './presentation';
 import { StatusLoader } from './StatusLoader';
 import { TechnicalDetails } from './TechnicalDetails';
 
 /** Форма передает задачу; настройки и права определяет сервис. */
-export function TaskComposer({ capability, busy, pending, error, onSubmit, onRetry, onClose }: {
+export function TaskComposer({ capability, busy, pending, error, onSubmit, onRetry, onClose, fields, onFieldsChange }: {
+  fields: TaskFields;
+  onFieldsChange: (fields: TaskFields) => void;
   capability: Capability | null;
   busy: boolean;
   pending: boolean;
@@ -14,9 +15,10 @@ export function TaskComposer({ capability, busy, pending, error, onSubmit, onRet
   onRetry: () => void;
   onClose?: (() => void) | undefined;
 }) {
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [taskNumber, setTaskNumber] = useState('');
+  const { title, description, taskNumber } = fields;
+  const setTitle = (title: string) => onFieldsChange({ ...fields, title });
+  const setDescription = (description: string) => onFieldsChange({ ...fields, description });
+  const setTaskNumber = (taskNumber: string) => onFieldsChange({ ...fields, taskNumber });
   const valid = title.trim().length > 0 && description.trim().length >= 3 && taskNumber.trim().length > 0;
   const allowed = capability?.allowed === true;
   const problem = error ? runtimeProblem(`${error.code}: ${error.message}`) : null;

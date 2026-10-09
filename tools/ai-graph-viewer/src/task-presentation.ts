@@ -24,6 +24,10 @@ export function taskStatusLabel(snapshot: Snapshot, execution: ExecutionPresenta
       ? failure?.title ?? 'Ошибка выполнения'
     : snapshot.status === 'uncertain' && snapshot.resolutionKind === 'semantic'
       ? 'Нужно уточнение'
+    : snapshot.status === 'learning-hold'
+      ? 'Учебная пауза — следующий этап ждет решения'
+    : (!snapshot.proof || snapshot.proof.status === 'UNPROVEN') && snapshot.gates.some(gate => gate.type === 'approve-plan' && gate.planHash === snapshot.planHash)
+      ? 'План ожидает согласования'
     : snapshot.proof
       ? proofLabels[snapshot.proof.status]
       : execution.kind === 'idle'

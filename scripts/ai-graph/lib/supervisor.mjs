@@ -338,11 +338,14 @@ export async function supervise(ticketPath) {
         }
       }
       if (process.platform === 'win32' && terminatingReason && !windowsStopVerified) return;
+      // Empty stdin carries no required bytes; a fast successful check may close
+      // the pipe before end('') flushes without losing any command input.
+      const inputIncomplete = message.input.length > 0 && inputClosed;
       const earlyAiExit = code === 0 && initial.actionId?.startsWith('ai-') && stdoutBytes === 0 && stderrBytes > 0;
       finish(
-        (inputClosed || earlyAiExit) && code === 0 ? 1 : code,
+        (inputIncomplete || earlyAiExit) && code === 0 ? 1 : code,
         signal,
-        terminatingReason ?? (code === 0 ? inputClosed || earlyAiExit ? 'INPUT_PIPE_CLOSED' : null : classifyAiFailure(diagnostic.toString('utf8'), stderrDiagnostic.toString('utf8'))),
+        terminatingReason ?? (code === 0 ? inputIncomplete || earlyAiExit ? 'INPUT_PIPE_CLOSED' : null : classifyAiFailure(diagnostic.toString('utf8'), stderrDiagnostic.toString('utf8'))),
       );
     });
     action.stdin.end(message.input);

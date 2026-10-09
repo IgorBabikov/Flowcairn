@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { book, openDiagnostics, stepPicker, stepDetails, selectStep } from './ui-paths.mjs';
 import { mkdir } from 'node:fs/promises';
 import { graphNode, implementationNode, snapshot, mockApi, allDenied, token } from './fixtures.mjs';
 
@@ -44,181 +45,80 @@ async function capture(page, name) {
   await mkdir('output/playwright', { recursive: true });
   await page.screenshot({ path: `output/playwright/${name}.png`, fullPage: true });
 }
-async function openGraph(page) {
-  await page.getByRole('button', { name: 'Граф', exact: true }).click();
-  await page.getByRole('button', { name: 'Детали исполнения', exact: true }).click();
-  const closeDetails = page.getByRole('button', { name: 'Закрыть детали', exact: true });
-  if (await closeDetails.isVisible()) await closeDetails.click();
+// G6 exposes backend states in the selected step and picker; graph animation no longer conveys truth.
+async function expectState(page, status) {
+  await expect(stepDetails(page).locator('.status-chip')).toHaveText(labels[status]);
+  await expect(stepDetails(page).locator('.status-chip')).toHaveClass(new RegExp(`status-${status}(?: |$)`));
+  await expect(stepPicker(page).locator('option:checked')).toContainText(labels[status]);
+  await expect(stepPicker(page)).toHaveValue('implement');
 }
-
-async function expectExecutionBorderContained(node) {
-  const geometry = await node.evaluate((element) => {
-    const card = element.getBoundingClientRect();
-    const svg = element.querySelector('.execution-border');
-    const track = svg?.querySelector('rect');
-    if (!svg || !track) return null;
-    const border = svg.getBoundingClientRect();
-    const line = track.getBoundingClientRect();
-    const svgStyle = getComputedStyle(svg);
-    const trackStyle = getComputedStyle(track);
-    return {
-      card: { left: card.left, top: card.top, right: card.right, bottom: card.bottom },
-      border: { left: border.left, top: border.top, right: border.right, bottom: border.bottom },
-      line: { left: line.left, top: line.top, right: line.right, bottom: line.bottom },
-      overflow: svgStyle.overflow,
-      filter: trackStyle.filter,
-      vectorEffect: trackStyle.vectorEffect,
-    };
+async function contrast(page) {
+  return stepDetails(page).evaluate(element => {
+    const rgb = value => (value.match(/[\d.]+/g) ?? []).slice(0, 3).map(Number);
+    const luminance = value => rgb(value).map(channel => channel / 255).map(channel => channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4).reduce((sum, channel, index) => sum + channel * [0.2126, 0.7152, 0.0722][index], 0);
+    return [...element.querySelectorAll('h2, .status-chip, dt, dd')].map(text => {
+      let surface = text;
+      while (surface.parentElement && getComputedStyle(surface).backgroundColor === 'rgba(0, 0, 0, 0)') surface = surface.parentElement;
+      const front = luminance(getComputedStyle(text).color), back = luminance(getComputedStyle(surface).backgroundColor);
+      return (Math.max(front, back) + .05) / (Math.min(front, back) + .05);
+    });
   });
-  expect(geometry).not.toBeNull();
-  expect(geometry.overflow).toBe('hidden');
-  expect(geometry.filter).toBe('none');
-  expect(geometry.vectorEffect).toBe('non-scaling-stroke');
-  expect(geometry.border.left).toBeGreaterThanOrEqual(geometry.card.left);
-  expect(geometry.border.top).toBeGreaterThanOrEqual(geometry.card.top);
-  expect(geometry.border.right).toBeLessThanOrEqual(geometry.card.right);
-  expect(geometry.border.bottom).toBeLessThanOrEqual(geometry.card.bottom);
-  expect(geometry.border.left - geometry.card.left).toBeLessThanOrEqual(2.1);
-  expect(geometry.border.top - geometry.card.top).toBeLessThanOrEqual(2.1);
-  expect(geometry.card.right - geometry.border.right).toBeLessThanOrEqual(2.1);
-  expect(geometry.card.bottom - geometry.border.bottom).toBeLessThanOrEqual(2.1);
-  expect(geometry.line.left).toBeGreaterThanOrEqual(geometry.border.left);
-  expect(geometry.line.top).toBeGreaterThanOrEqual(geometry.border.top);
-  expect(geometry.line.right).toBeLessThanOrEqual(geometry.border.right);
-  expect(geometry.line.bottom).toBeLessThanOrEqual(geometry.border.bottom);
 }
 
-test('native nodes follow backend transitions and only passed incoming dependencies animate', async ({
-  page,
-}) => {
-  const errors = [];
-  page.on('pageerror', (error) => errors.push(error.message));
+test('diagnostic states follow every backend transition and preserve dependency facts', async ({ page }) => {
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.setViewportSize({ width: 1440, height: 1000 });
-  const fixture = await mockApi(page, executionSnapshot());
-  await page.goto(`/#session=${token}`);
-  await openGraph(page);
-  const node = page.locator('.react-flow__node-operator[data-id="implement"] .graph-node');
-  await expect(node).toContainText('Готов к запуску');
-  await expect(page.locator('.dependency-active')).toHaveCount(0);
-  await node.focus();
-  await page.keyboard.press('Enter');
-  await expect(page.locator('.node-details h2')).toHaveText('Внесение изменений');
-  expect(await node.evaluate((el) => getComputedStyle(el).outlineStyle)).toBe('solid');
-
-  const paths = new Set();
-  for (const [status, label] of Object.entries(labels)) {
-    const next = fixture.current();
-    next.revision += 1;
-    next.nodes[1].status = status;
+  const fixture = await mockApi(page, executionSnapshot()); await page.goto(`/#session=${token}`); await selectStep(page, 'implement');
+  await expectState(page, 'ready'); await stepPicker(page).focus(); await expect(stepPicker(page)).toBeFocused();
+  const stateClasses = new Set();
+  for (const [status] of Object.entries(labels)) {
+    const next = fixture.current(); next.revision++; next.nodes[1].status = status;
     next.nodes[1].reason = status === 'failed' ? 'Ожидается verify-tests: failed' : null;
-    await expect(node).toHaveClass(new RegExp(`status-${status}(?: |$)`));
-    await expect(node.locator('.node-status')).toHaveText(label);
-    await expect(node).toHaveAttribute('aria-label', `Внесение изменений: ${label}`);
-    paths.add(await node.locator('.status-icon path').getAttribute('d'));
-    await expect(page.locator('.dependency-active')).toHaveCount(status === 'running' ? 1 : 0);
+    await expectState(page, status); stateClasses.add(await stepDetails(page).locator('.status-chip').getAttribute('class'));
+    await expect(stepDetails(page).locator('.fact-list')).toContainText('approve-plan, verify-tests');
     if (status === 'running') {
-      await expect(page.locator('.react-flow__edge[data-id="pending-to-work"]')).not.toHaveClass(
-        /animated/,
-      );
-      const snake = node.locator('.execution-border rect');
-      expect(await snake.evaluate((el) => getComputedStyle(el).animationName)).toBe(
-        'execution-snake',
-      );
-      await expectExecutionBorderContained(node);
-      const initialSnakePosition = await snake.evaluate((el) => getComputedStyle(el).strokeDashoffset);
-      await expect
-        .poll(
-          () => snake.evaluate((el) => getComputedStyle(el).strokeDashoffset),
-          { timeout: 500 },
-        )
-        .not.toBe(initialSnakePosition);
-      await page.getByRole('button', { name: 'Весь граф', exact: true }).click();
+      await expect(stepPicker(page).locator('option[value="approve-plan"]')).toContainText('Завершен');
+      await expect(stepPicker(page).locator('option[value="verify-tests"]')).toContainText('В очереди');
       await capture(page, 'execution-desktop-light-running');
-      await page.getByRole('button', { name: 'Сменить тему' }).click();
-      const darkContrast = await page.locator('.graph-node').evaluateAll((nodes) => {
-        const rgb = (value) => (value.match(/[\d.]+/g) ?? []).slice(0, 3).map(Number);
-        const luminance = (value) => rgb(value)
-          .map(channel => channel / 255)
-          .map(channel => channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4)
-          .reduce((sum, channel, index) => sum + channel * [0.2126, 0.7152, 0.0722][index], 0);
-        const ratio = (foreground, background) => {
-          const front = luminance(foreground), back = luminance(background);
-          return (Math.max(front, back) + 0.05) / (Math.min(front, back) + 0.05);
-        };
-        return nodes.flatMap(node => {
-          const background = getComputedStyle(node).backgroundColor;
-          return [node.querySelector('strong'), node.querySelector('.node-status'), node.querySelector('.node-hint')]
-            .filter(Boolean)
-            .map(text => ratio(getComputedStyle(text).color, background));
-        });
-      });
-      expect(Math.min(...darkContrast)).toBeGreaterThanOrEqual(4.5);
+      await book(page).getByRole('button', { name: 'Сменить тему', exact: true }).click();
+      expect(Math.min(...await contrast(page))).toBeGreaterThanOrEqual(4.5);
       await capture(page, 'execution-desktop-dark-running');
-      await page.getByRole('button', { name: 'Сменить тему' }).click();
+      await book(page).getByRole('button', { name: 'Сменить тему', exact: true }).click();
     }
-    if (status === 'failed')
-      await expect(page.locator('.runtime-reason')).toContainText(
-        'Ожидается этап verify-tests: ошибка',
-      );
-    if (status !== 'running')
-      expect(await node.evaluate((el) => getComputedStyle(el, '::before').animationName)).toBe(
-        'none',
-      );
+    if (status === 'failed') await expect(stepDetails(page).locator('.runtime-reason')).toContainText('Ожидается этап verify-tests: ошибка');
+    else await expect(stepDetails(page).locator('.runtime-reason')).toHaveCount(0);
+    if (status !== 'running') {
+      await expect(stepDetails(page).locator('.status-chip')).not.toHaveClass(/status-running/);
+      expect(await stepDetails(page).locator('.status-chip').evaluate(el => getComputedStyle(el).animationName)).toBe('none');
+    }
   }
-  expect(paths.size).toBe(9); // waiting is an alias for waiting-for-human.
-  expect(errors).toEqual([]);
+  expect(stateClasses.size).toBe(Object.keys(labels).length); expect(errors).toEqual([]);
 });
 
-test('ready active ID remains static across polling and predecessor changes revoke animation', async ({
-  page,
-}) => {
-  const fixture = await mockApi(page, executionSnapshot());
-  await page.goto(`/#session=${token}`);
-  await openGraph(page);
-  const node = page.locator('[data-id="implement"] .graph-node');
-  await expect(node).toContainText('Готов к запуску');
-  const reads = fixture.snapshotReads();
-  await expect.poll(() => fixture.snapshotReads()).toBeGreaterThan(reads);
-  await expect(page.locator('.dependency-active')).toHaveCount(0);
-  await expect(node).toHaveClass(/status-ready/);
-  fixture.current().nodes[1].status = 'running';
-  fixture.current().revision += 1;
-  await expect(page.locator('.dependency-active')).toHaveCount(1);
-  fixture.current().nodes[0].status = 'uncertain';
-  fixture.current().revision += 1;
-  await expect(page.locator('.dependency-active')).toHaveCount(0);
+test('ready active ID stays ready across polling and uncertain predecessor remains explicit', async ({ page }) => {
+  const fixture = await mockApi(page, executionSnapshot()); await page.goto(`/#session=${token}`); await selectStep(page, 'implement');
+  await expectState(page, 'ready'); const reads = fixture.snapshotReads();
+  await expect.poll(() => fixture.snapshotReads()).toBeGreaterThan(reads); await expectState(page, 'ready');
+  fixture.current().nodes[1].status = 'running'; fixture.current().revision++; await expectState(page, 'running');
+  fixture.current().nodes[0].status = 'uncertain'; fixture.current().revision++;
+  await expect(stepPicker(page).locator('option[value="approve-plan"]')).toContainText('Результат неизвестен');
+  await expectState(page, 'running');
+  await selectStep(page, 'approve-plan'); await expect(stepDetails(page).locator('.status-chip')).toHaveText('Результат неизвестен');
+  await expect(stepDetails(page).getByRole('button', { name: 'Запустить', exact: true })).toHaveCount(0);
 });
 
 for (const dark of [false, true]) {
-  test(`mobile ${dark ? 'dark' : 'light'} reduced-motion preserves visible execution state`, async ({
-    page,
-  }) => {
-    await page.setViewportSize({ width: 390, height: 844 });
-    await page.emulateMedia({ reducedMotion: 'reduce' });
-    await mockApi(page, executionSnapshot('running'));
-    await page.goto(`/#session=${token}`);
-    await openGraph(page);
-    if (dark) await page.getByRole('button', { name: 'Сменить тему' }).click();
-    const node = page.locator('[data-id="implement"] .graph-node');
-    await expect(node).toContainText('Выполняется');
-    await expect(page.locator('.dependency-active')).toHaveCount(1);
-    const motion = await node.evaluate((el) => ({
-      glow: getComputedStyle(el.querySelector('.execution-border rect')).animationName,
-      border: getComputedStyle(el).borderTopStyle,
-      color: getComputedStyle(el).borderTopColor,
-    }));
-    expect(motion.glow).toBe('none');
-    expect(motion.border).toBe('solid');
-    expect(motion.color).not.toBe('rgba(0, 0, 0, 0)');
-    await expectExecutionBorderContained(node);
-    expect(
-      await page
-        .locator('.dependency-active path.react-flow__edge-path')
-        .evaluate((el) => getComputedStyle(el).animationName),
-    ).toBe('none');
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
-      true,
-    );
+  test(`mobile ${dark ? 'dark' : 'light'} reduced-motion preserves visible execution state`, async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 }); await page.emulateMedia({ reducedMotion: 'reduce' });
+    await mockApi(page, executionSnapshot('running')); await page.goto(`/#session=${token}`); await openDiagnostics(page, 'nodes');
+    if (dark) await book(page).getByRole('button', { name: 'Сменить тему', exact: true }).click();
+    await selectStep(page, 'implement'); await expectState(page, 'running');
+    await expect(stepDetails(page).locator('.fact-list')).toContainText('approve-plan, verify-tests');
+    const chip = stepDetails(page).locator('.status-chip'); await chip.scrollIntoViewIfNeeded();
+    expect(await chip.evaluate(el => getComputedStyle(el).animationName)).toBe('none');
+    await expect(chip).toBeInViewport();
+    expect(await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches)).toBe(true);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await capture(page, `execution-mobile-${dark ? 'dark' : 'light'}-reduced-motion`);
   });
 }

@@ -72,7 +72,7 @@ const reasons: Record<string, string> = {
   PROVIDER_AUTH_REQUIRED: 'AI-клиент не авторизован. Войдите в выбранный CLI и повторите запуск.',
   CODEX_MODEL_SETTINGS_REQUIRED: 'Модель и усиление CLI не определены. Задайте их в настройках flowcairn или конфигурации Codex CLI.',
   CODEX_AUTH_REQUIRED: 'Codex не авторизован. Выполните codex login и повторите запуск.',
-  CHECK_LOCAL_BINDING_REQUIRED: 'Настройки локальных проверок изменились. Повторите setup, чтобы привязать актуальные scripts.',
+  CHECK_LOCAL_BINDING_REQUIRED: 'Настройки локальных проверок изменились. Повторите setup, чтобы привязать актуальные команды проверок.',
   CANCELLED_BY_USER: 'Выполнение остановлено пользователем',
   PROJECT_PROFILE_INVALID: 'Настройки проекта не прошли проверку',
   analysis: 'Анализ задачи',
@@ -178,7 +178,7 @@ const runtimeProblems: Record<string, RuntimeProblem> = {
   },
   CHECK_LOCAL_BINDING_REQUIRED: {
     title: 'Настройки проверок изменились',
-    summary: 'Список или команды scripts больше не совпадают с сохраненной привязкой проекта.',
+    summary: 'Список или команды проверок больше не совпадают с сохраненной привязкой проекта.',
     action: 'Закройте Flowcairn и выполните npx flowcairn setup, затем повторите задачу.',
   },
   READ_UNAVAILABLE: {
@@ -302,6 +302,7 @@ const hints: Record<RunStatus, [string, string]> = {
   passed: ['Сервер подтвердил результат', 'Service confirmed the result'],
   failed: ['Причина ошибки — в деталях', 'See details for the failure reason'],
   cancelled: ['Выполнение остановлено пользователем', 'Execution was cancelled by the user'],
+  'learning-hold': ['Учебная пауза: следующий этап ждет решения', 'Learning pause: the next stage awaits a decision'],
   waiting: ['Продолжение ждет решения', 'Continuation needs a decision'],
   'waiting-for-human': ['Нужно решение человека', 'A human decision is required'],
   uncertain: ['Перед повтором проверьте результат', 'Inspect the result before retrying'],
@@ -319,6 +320,7 @@ const paths: Record<RunStatus, string> = {
   passed: 'M5 12l5 5L20 6',
   failed: 'M6 6l12 12 M18 6L6 18',
   cancelled: 'M7 7h10v10H7z',
+  'learning-hold': 'M8 5v14 M16 5v14',
   waiting: 'M8 5v14 M16 5v14',
   'waiting-for-human': 'M8 5v14 M16 5v14',
   uncertain: 'M9 8a3 3 0 1 1 5 2c-2 1-2 2-2 4 M12 18v1',

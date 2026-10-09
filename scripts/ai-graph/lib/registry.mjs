@@ -62,8 +62,11 @@ export const POLICY = Object.freeze({
 });
 export const POLICY_HASH = hashObject(POLICY);
 
-export function resolveAction(id, version = 1, inputs = {}) {
-  const action = registry.get(id);
+export function resolveAction(id, version = 1, inputs = {}, checks = null) {
+  const projectCheck = typeof id === 'string' && id.startsWith('check-') && checks?.definitions?.find((check) => `check-${check.id}` === id);
+  const action = projectCheck ? registry.get(id) ?? definition(id, 'checks', ['workspace.output.write'], [], ['test-report'], true) : registry.get(id);
+  if (checks && typeof id === 'string' && id.startsWith('check-') && !projectCheck)
+    throw new GraphError('UNKNOWN_ACTION', 'Проверка отсутствует в registry согласованного плана.');
   if (!action || action.version !== version)
     throw new GraphError('UNKNOWN_ACTION', `Неизвестное действие: ${String(id).slice(0, 80)}`);
   const result = action.inputSchema.safeParse(inputs);
@@ -76,6 +79,7 @@ export function resolveAction(id, version = 1, inputs = {}) {
 }
 
 export function requiredChecks(task) {
+  if (task.schemaVersion === 3) return [...task.checks];
   const checks = new Set(task.checks);
   return ['shared-build', 'graph-tests', 'typecheck', 'lint', 'tests', 'build'].filter((id) =>
     checks.has(id),

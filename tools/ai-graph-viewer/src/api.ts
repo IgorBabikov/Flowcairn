@@ -2,6 +2,8 @@ import type {
   ApiError,
   Artifact,
   ControlRequest,
+  ContinueLearning,
+  SetLearningMode,
   GraphPlan,
   HistoryEvent,
   Receipt,
@@ -15,6 +17,7 @@ import type {
   PreviewInput,
 } from './contracts';
 import { isSnapshot } from './contracts';
+import { createLearningApi } from './learning/learning-api';
 
 const SESSION_KEY = 'flowcairn.graph.session';
 let cachedSessionToken: string | null | undefined;
@@ -113,6 +116,7 @@ async function requestJson<T>(url: string, init: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
+  ...createLearningApi(requestJson),
   async previewIntake(input: PreviewInput): Promise<IntakePreview> {
     const body = await requestJson<IntakePreview>('/api/intake/preview', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
@@ -150,10 +154,14 @@ export const api = {
   },
   async project(): Promise<ProjectContext> {
     const body = await requestJson<ProjectContext>('/api/project');
-    if (!body || body.schemaVersion !== 2 || typeof body.name !== 'string' ||
+    const validChecks = Array.isArray(body?.checks) && body.checks.every(check => body.schemaVersion === 2
+      ? typeof check === 'string'
+      : check && typeof check === 'object' && typeof check.id === 'string' && typeof check.title === 'string' &&
+        typeof check.purpose === 'string' && typeof check.available === 'boolean' &&
+        (check.reason === null || typeof check.reason === 'string') && typeof check.profileHash === 'string');
+    if (!body || ![2, 3].includes(body.schemaVersion) || typeof body.name !== 'string' ||
         typeof body.contextHash !== 'string' || !Array.isArray(body.contextPaths) ||
-        !body.contextPaths.every(path => typeof path === 'string') || !Array.isArray(body.checks) ||
-        !body.checks.every(check => typeof check === 'string') || !Array.isArray(body.scopeCandidates) ||
+        !body.contextPaths.every(path => typeof path === 'string') || !validChecks || !Array.isArray(body.scopeCandidates) ||
         !body.scopeCandidates.every(path => typeof path === 'string') || !body.ai ||
         typeof body.capabilities?.intake?.allowed !== 'boolean') {
       throw { code: 'INVALID_PROJECT', message: 'Не удалось прочитать контекст проекта. Обновите страницу.', retryable: true } satisfies ApiError;
@@ -179,8 +187,8 @@ export const api = {
     }
     return body.result;
   },
-  async snapshot(runId: string): Promise<Snapshot> {
-    const body = await requestJson<unknown>(snapshotResource(runId));
+  async snapshot(runId: string, signal?: AbortSignal): Promise<Snapshot> {
+    const body = await requestJson<unknown>(snapshotResource(runId), signal ? { signal } : {});
     if (!isSnapshot(body)) {
       throw {
         code: 'INVALID_SNAPSHOT',
@@ -205,7 +213,7 @@ export const api = {
   artifact(runId: string, hash: string): Promise<Artifact> {
     return requestJson(`/api/runs/${encodeURIComponent(runId)}/artifacts/${hash}`);
   },
-  async control(runId: string, action: string, request: ControlRequest): Promise<Snapshot> {
+  async control(runId: string, action: string, request: ControlRequest | ContinueLearning | SetLearningMode): Promise<Snapshot> {
     const body = await requestJson<{ result: Snapshot }>(
       `/api/runs/${encodeURIComponent(runId)}/control/${action}`,
       {

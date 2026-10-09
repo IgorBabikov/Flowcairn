@@ -35,7 +35,10 @@ import {
   verifyReviewEvidenceFile,
 } from './review-evidence.mjs';
 import { verifyToolchain } from './toolchain.mjs';
-import { hasTrustedLocalChecksBinding, loadProjectProfile, resolveProjectCheckScript, RUNTIME_ROOT } from './project.mjs';
+import { hasTrustedLocalChecksBinding, loadProjectProfile, resolveProjectCheckScript, validatePackageManagerProject, RUNTIME_ROOT } from './project.mjs';
+import { isGenericProfile, inspectProjectChecks, assertCheckRegistry } from './check-profile.mjs';
+import { makeRegisteredCheckCommand } from './check-command.mjs';
+import { checkExecutionHash } from './check-execution.mjs';
 import { providerToolchain } from './providers.mjs';
 import { codexModelSettings } from './codex-settings.mjs';
 import { managedProviderExecutable } from './managed-runtime.mjs';
@@ -498,8 +501,9 @@ function localCheckToolchain(profile) {
   return Object.freeze({ node: NODE_BINARY, entry, digest: sha256(canonicalJson(identity)), identity });
 }
 
-function makeLocalCheckCommand({ root, worktree, node, profile, toolchain, dependencyToolchain, outputPath }) {
-  const script = resolveProjectCheckScript(root, node.action.id, profile);
+function makeLocalCheckCommand({ worktree, node, profile, toolchain, dependencyToolchain, outputPath }) {
+  validatePackageManagerProject(worktree, profile.packageManager);
+  const script = resolveProjectCheckScript(worktree, node.action.id, profile);
   return {
     command: {
       executable: toolchain.node,
@@ -536,6 +540,11 @@ export function probeLocalChecks({ root }) {
       return { available: false, reason: profile.checkMode === 'local' ? 'LOCAL_CHECK_RECONFIGURATION_REQUIRED' : 'CHECKS_NOT_ENABLED', mode: 'trusted-local' };
     if (!hasTrustedLocalChecksBinding(root, profile))
       return { available: false, reason: 'CHECK_LOCAL_BINDING_REQUIRED', mode: 'trusted-local' };
+    if (isGenericProfile(profile)) {
+      if (!profile.checks.length) return { available: false, reason: 'CHECKS_NOT_ENABLED', mode: 'local' };
+      inspectProjectChecks(root, profile);
+      return { available: true, reason: null, mode: 'local' };
+    }
     localCheckToolchain(profile);
     for (const id of profile.checks) resolveProjectCheckScript(root, `check-${id}`, profile);
     return { available: true, reason: null, mode: 'local' };
@@ -726,7 +735,7 @@ function executionMetadata(prepared, output, usage = null) {
   });
 }
 
-async function stoppedPreflightResult({ supervisor, ticketFile, prepared, error, processMetadata = null }) {
+async function stoppedPreflightResult({ supervisor, ticketFile, error, processMetadata = null, preferError = false }) {
   // До отправки GO результат можно безопасно классифицировать как известный
   // preflight failure, если группа supervisor действительно остановлена.
   supervisor?.stdin.destroy();
@@ -738,13 +747,12 @@ async function stoppedPreflightResult({ supervisor, ticketFile, prepared, error,
     output: null,
     stopped,
     uncertain: !stopped,
-    failureReason: typeof ticket?.failureReason === 'string'
+    failureReason: !preferError && typeof ticket?.failureReason === 'string'
       ? ticket.failureReason
       : errorReason(error, 'START_NOT_ACKNOWLEDGED'),
-    durationMs: 0,
+    durationMs: 0, signal: null, timedOut: false, outputLimit: false, usage: null,
     ...(processMetadata ? { process: processMetadata } : {}),
     execution: {
-      ...executionMetadata(prepared, null),
       kind: 'preflight',
       processStarted: false,
       stage: 'supervisor-start',
@@ -770,86 +778,58 @@ function parseAiOutput(file) {
   return output;
 }
 
-export async function runRegisteredAction({
-  root,
-  worktree,
-  node,
-  task,
-  plan,
-  skills,
-  priorEvidence = null,
-  reviewEvidence = null,
-  toolchain: toolchainManifest,
-  outputDirectory,
-  signal,
-  onStart,
-  providerConsent = null,
-}) {
-  const action = resolveAction(node?.action?.id, node?.action?.version, node?.action?.inputs);
-  if (!action.id.startsWith('ai-') && !action.id.startsWith('check-')) {
-    fail('RUNNER_ACTION_UNSUPPORTED', `Runner не исполняет action ${action.id}`);
-  }
+/** Execute a trusted prepared command through the existing durable supervisor.
+ * This host-only seam grants no provider permission and never parses or removes output files.
+ * onStart commits process ownership before GO; beforeGo rechecks the caller's current authority.
+ * @param {{root:string,actionId:string,command:{executable:string,args:string[],cwd:string,env:Record<string,string>},
+ * input:string,timeoutMs:number,maxOutputBytes:number,signal?:AbortSignal,onStart:(metadata:any)=>unknown,
+ * beforeGo?:(identity:{commandHash:string,inputHash:string})=>unknown}} options
+ */
+export async function runPreparedProcess({ root, actionId, command, input, timeoutMs, maxOutputBytes,
+  signal = undefined, onStart, beforeGo = (_hashes) => {} }) {
   if (typeof onStart !== 'function') fail('RUNNER_START_CALLBACK_REQUIRED', 'onStart обязателен');
-  const input = parseInputs({ node, task, plan, skills, priorEvidence, reviewEvidence });
-  const profile = loadProjectProfile(root);
-  const localCheck = ['check-typecheck', 'check-lint', 'check-tests', 'check-build'].includes(action.id);
-  if (localCheck && !hasTrustedLocalChecksBinding(root, profile))
-    fail('CHECK_LOCAL_BINDING_REQUIRED', 'trusted-local требует актуальную привязку exact scripts текущего профиля.');
-  const allocation = validateAllocation(root, worktree, outputDirectory, localCheck ? 'local' : profile.ai.provider,
-    profile.workspaceMode === 'direct');
-  if (action.id.startsWith('check-') && !localCheck)
-    fail('RUNNER_CHECK_CONTAINMENT_UNAVAILABLE', 'Незарегистрированная project-проверка не исполняется локально.');
-  const toolchain = localCheck ? localCheckToolchain(profile) : runnerToolchain(profile);
-  const dependencyToolchain = verifyToolchain({
-    root: allocation.rootPath,
-    worktree: allocation.worktreePath,
-    manifest: toolchainManifest,
-  });
-  const prepare = localCheck
-    ? makeLocalCheckCommand
-    : ['claude', 'cursor'].includes(profile.ai.provider) ? makeExternalCommand : makeAiCommand;
-  const prepared = prepare({
-    ...input,
-    root: allocation.rootPath,
-    profile,
-    worktree: allocation.worktreePath,
-    outputPath: allocation.outputPath,
-    toolchain,
-    dependencyToolchain,
-    providerConsent,
-    projectInstructions: localCheck ? null : buildProjectInstructionContext({
-      projectRoot: allocation.rootPath, node: input.node, task: input.task, profile,
-      expectedMetadata: input.priorEvidence?.instructionMetadata ?? [],
-    }),
-  });
-  let supervisor;
+  if (typeof beforeGo !== 'function') fail('RUNNER_BEFORE_GO_REQUIRED', 'beforeGo должен быть функцией');
+  if (typeof actionId !== 'string' || !/^[a-zA-Z][a-zA-Z0-9_-]{0,79}$/.test(actionId) ||
+      !Number.isInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 1800000 ||
+      !Number.isInteger(maxOutputBytes) || maxOutputBytes < 1024 || maxOutputBytes > 30 * 1024 * 1024)
+    fail('RUNNER_CONTROL_INVALID', 'Неверные ограничения подготовленного процесса');
+  if (!validCommand(command)) fail('RUNNER_CONTROL_INVALID', 'Неверная подготовленная команда');
+  // Callbacks cannot mutate the reserved command through caller-owned references.
+  command = structuredClone(command);
+  const rootPath = realDirectory(root, 'RUNNER_ROOT_INVALID');
+  const graphRoot = assertPrivateDirectory(path.join(rootPath, '.ai-orchestrator', 'graph'), 'RUNNER_STORAGE_INVALID');
+  assertNoSymlinkAncestors(rootPath, graphRoot, 'RUNNER_STORAGE_INVALID');
+  const tickets = assertPrivateDirectory(path.join(graphRoot, 'runner-tickets'), 'RUNNER_TICKETS_INVALID');
+  assertNoSymlinkAncestors(graphRoot, tickets, 'RUNNER_TICKETS_INVALID');
+  const storage = { rootPath, tickets };
+  let supervisor, ticketFile, processMetadata = null, dispatched = false;
   try {
-    if (!validCommand(prepared.command) || typeof prepared.input !== 'string' ||
-        Buffer.byteLength(prepared.input) > MAX_CONTROL_INPUT_BYTES)
+    if (!validCommand(command) || typeof input !== 'string' ||
+        Buffer.byteLength(input) > MAX_CONTROL_INPUT_BYTES)
       fail('RUNNER_CONTROL_INVALID', 'AI-команда не помещается в ограниченный протокол запуска');
     const controlBytes = Buffer.byteLength(JSON.stringify({
-      type: 'go', nonce: '0'.repeat(64), command: prepared.command, input: prepared.input,
+      type: 'go', nonce: '0'.repeat(64), command, input,
     })) + 1;
     if (controlBytes > MAX_CONTROL_BYTES)
       fail('RUNNER_CONTROL_LIMIT', 'AI-команда и контекст превышают лимит протокола запуска');
     const nonce = randomBytes(32).toString('hex');
-    const commandHash = sha256(canonicalJson(prepared.command));
-    const ticketFile = path.join(allocation.tickets, `${randomUUID()}.json`);
+    const commandHash = sha256(canonicalJson(command));
+    ticketFile = path.join(storage.tickets, `${randomUUID()}.json`);
     const ticket = {
       version: 1,
       state: 'reserved',
-      actionId: action.id,
+      actionId,
       createdAt: new Date().toISOString(),
       nonceHash: sha256(nonce),
       commandHash,
-      timeoutMs: input.task.limits.timeoutMs,
-      maxOutputBytes: prepared.maxOutputBytes,
+      timeoutMs,
+      maxOutputBytes,
     };
     writeTicket(ticketFile, ticket, true);
     const ticketHash = ticketReservationHash(ticket);
 
-    supervisor = spawn(toolchain.node, [SUPERVISOR_FILE, ticketFile], {
-      cwd: allocation.rootPath,
+    supervisor = spawn(NODE_BINARY, [SUPERVISOR_FILE, ticketFile], {
+      cwd: storage.rootPath,
       env: safeEnvironment(),
       detached: true,
       shell: false,
@@ -863,7 +843,7 @@ export async function runRegisteredAction({
         timeoutMessage: 'Supervisor не подтвердил готовность к запуску',
       });
     } catch (error) {
-      return await stoppedPreflightResult({ supervisor, ticketFile, prepared, error });
+      return await stoppedPreflightResult({ supervisor, ticketFile, error });
     }
     if (
       ready.pid !== supervisor.pid ||
@@ -874,7 +854,6 @@ export async function runRegisteredAction({
       return await stoppedPreflightResult({
         supervisor,
         ticketFile,
-        prepared,
         error: new GraphError('RUNNER_SUPERVISOR_IDENTITY', 'Supervisor identity не совпала'),
       });
     }
@@ -883,8 +862,8 @@ export async function runRegisteredAction({
         fail('RUNNER_SUPERVISOR_IDENTITY', 'Windows process identity отсутствует.');
       windowsSupervisors.set(supervisor.pid, { identity: ready.processIdentity, ticketFile, nonceHash: ticket.nonceHash, commandHash });
     }
-    const ticketRelative = path.relative(allocation.rootPath, ticketFile).split(path.sep).join('/');
-    const processMetadata = Object.freeze({
+    const ticketRelative = path.relative(storage.rootPath, ticketFile).split(path.sep).join('/');
+    processMetadata = Object.freeze({
       version: 1,
       ticket: ticketRelative,
       supervisorPid: supervisor.pid,
@@ -903,24 +882,20 @@ export async function runRegisteredAction({
     });
     try {
       const callbackResult = onStart(processMetadata);
-      if (callbackResult && typeof callbackResult.then === 'function')
+      if (callbackResult && (typeof callbackResult === 'object' || typeof callbackResult === 'function') &&
+          'then' in callbackResult && typeof callbackResult.then === 'function')
         fail('RUNNER_START_CALLBACK_ASYNC', 'onStart должен синхронно сохранить durable state');
     } catch (error) {
-      return await stoppedPreflightResult({ supervisor, ticketFile, prepared, error, processMetadata });
+      return await stoppedPreflightResult({ supervisor, ticketFile, error, processMetadata, preferError: true });
     }
 
     try {
-      if (prepared.reviewFile) verifyReviewEvidenceFile(prepared.reviewFile);
+      const checked = beforeGo({ commandHash, inputHash: sha256(input) });
+      if (checked && (typeof checked === 'object' || typeof checked === 'function') &&
+          'then' in checked && typeof checked.then === 'function')
+        fail('RUNNER_BEFORE_GO_ASYNC', 'beforeGo должен синхронно проверить право запуска');
     } catch (error) {
-      supervisor.stdin.destroy();
-      const stopped = await stopGroup(supervisor.pid);
-      return {
-        exitCode: 1,
-        output: null,
-        stopped,
-        uncertain: !stopped,
-        failureReason: errorReason(error, 'REVIEW_EVIDENCE_INVALID'),
-      };
+      return await stoppedPreflightResult({ supervisor, ticketFile, error, processMetadata, preferError: true });
     }
     const started = Date.now();
     supervisor.stdout.resume();
@@ -930,7 +905,7 @@ export async function runRegisteredAction({
       'finished',
       // GO transport/startup can wait behind synchronous project validation.
       // The supervisor independently enforces the action's unchanged timeout.
-      input.task.limits.timeoutMs + SUPERVISOR_READY_TIMEOUT_MS + STOP_GRACE_MS + 2_000,
+      timeoutMs + SUPERVISOR_READY_TIMEOUT_MS + STOP_GRACE_MS + 2_000,
       {
         child: supervisor,
         timeoutCode: 'RUNNER_RESULT_TIMEOUT',
@@ -947,8 +922,9 @@ export async function runRegisteredAction({
       supervisor.stdin.destroy();
     } else {
       signal?.addEventListener('abort', abort, { once: true });
+      dispatched = true;
       supervisor.stdin.write(
-        `${JSON.stringify({ type: 'go', nonce, command: prepared.command, input: prepared.input })}\n`,
+        `${JSON.stringify({ type: 'go', nonce, command, input })}\n`,
       );
     }
 
@@ -970,63 +946,146 @@ export async function runRegisteredAction({
     // identity-checked durable ticket is authoritative after the process group stops.
     if (!final && stopped) {
       try {
-        const replay = inspectProcess({ root: allocation.rootPath, process: processMetadata });
+        const replay = inspectProcess({ root: storage.rootPath, process: processMetadata });
         if (replay.stopped && replay.result) {
           final = replay.result;
           controlFailure = null;
         }
       } catch { /* Keep the original control failure when durable proof is unavailable. */ }
     }
-    const durationMs = Date.now() - started;
-    let output = final
-      ? {
-          stdoutDigest: final.stdoutDigest,
-          stderrDigest: final.stderrDigest,
-          stdoutBytes: final.stdoutBytes,
-          stderrBytes: final.stderrBytes,
-        }
-      : null;
-    if (action.id.startsWith('ai-') && final?.exitCode === 0 && !final.failureReason) {
-      try {
-        if (prepared.reviewFile) verifyReviewEvidenceFile(prepared.reviewFile);
-        output = parseAiOutput(prepared.resultFile);
-        if (
-          prepared.reviewFile &&
-          AIReviewResultSchema.parse(output).reviewEvidenceHash !== prepared.reviewFile.hash
-        )
-          fail('REVIEW_EVIDENCE_MISMATCH', 'Review output не совпадает с evidence');
-      } catch (error) {
-        controlFailure = error;
-        output = null;
-      }
-    }
-    try {
-      if (prepared.reviewFile) verifyReviewEvidenceFile(prepared.reviewFile);
-    } catch (error) {
-      controlFailure = error;
-      output = null;
-    }
     const outcome = runnerOutcome({ final, controlFailure, controlTimedOut, aborted });
-    const uncertain = !stopped;
     return {
       ...outcome,
-      output,
-      stopped,
-      uncertain,
-      durationMs,
-      process: processMetadata,
-      execution: executionMetadata(prepared, output, final?.usage ?? null),
+      signal: final?.signal ?? null,
+      output: final ? { stdoutDigest: final.stdoutDigest, stderrDigest: final.stderrDigest,
+        stdoutBytes: final.stdoutBytes, stderrBytes: final.stderrBytes } : null,
+      stopped, uncertain: !stopped, durationMs: Date.now() - started,
+      process: processMetadata, usage: final?.usage ?? null,
     };
+  } catch (error) {
+    if (!supervisor) throw error;
+    if (!dispatched) return await stoppedPreflightResult({ supervisor, ticketFile, error, processMetadata });
+    supervisor.stdin.destroy();
+    const stopped = await stopGroup(supervisor.pid);
+    return { exitCode: 1, output: null, stopped, uncertain: !stopped, timedOut: false,
+      outputLimit: false, signal: null, failureReason: errorReason(error, 'RUNNER_PROCESS_FAILED'),
+      durationMs: 0, process: processMetadata, usage: null };
   } finally {
-    // The parent FD is always released; files remain while descendant termination is unknown.
+    // Process ownership ends here. The caller retains ownership of its prepared files.
     let stopped = !supervisor?.pid;
     try {
       if (supervisor) supervisor.stdin.destroy();
       if (!stopped) stopped = await stopGroup(supervisor.pid);
     } finally {
-      cleanupPrepared(prepared, stopped);
       if (stopped && supervisor?.pid) windowsSupervisors.delete(supervisor.pid);
     }
+  }
+}
+
+export async function runRegisteredAction({
+  root,
+  worktree,
+  node,
+  task,
+  plan,
+  skills,
+  priorEvidence = null,
+  reviewEvidence = null,
+  toolchain: toolchainManifest,
+  outputDirectory,
+  signal,
+  onStart,
+  providerConsent = null,
+}) {
+  // Keep the public registry-first refusal without using caller-owned objects after parsing.
+  assertJsonBounds(node); assertJsonBounds(plan);
+  resolveAction(node?.action?.id, node?.action?.version, node?.action?.inputs, plan?.checks ?? null);
+  if (typeof onStart !== 'function') fail('RUNNER_START_CALLBACK_REQUIRED', 'onStart обязателен');
+  const input = parseInputs({ node, task, plan, skills, priorEvidence, reviewEvidence });
+  const action = resolveAction(input.node.action.id, input.node.action.version, input.node.action.inputs,
+    input.plan.schemaVersion === 3 ? input.plan.checks : null);
+  if (!action.id.startsWith('ai-') && !action.id.startsWith('check-')) {
+    fail('RUNNER_ACTION_UNSUPPORTED', `Runner не исполняет action ${action.id}`);
+  }
+  const profile = loadProjectProfile(root);
+  const genericCheck = isGenericProfile(profile) && action.id.startsWith('check-');
+  const localCheck = genericCheck || ['check-typecheck', 'check-lint', 'check-tests', 'check-build'].includes(action.id);
+  if (localCheck && !hasTrustedLocalChecksBinding(root, profile))
+    fail('CHECK_LOCAL_BINDING_REQUIRED', 'trusted-local требует актуальную привязку exact scripts текущего профиля.');
+  const allocation = validateAllocation(root, worktree, outputDirectory, localCheck ? 'local' : profile.ai.provider,
+    profile.workspaceMode === 'direct');
+  if (action.id.startsWith('check-') && !localCheck)
+    fail('RUNNER_CHECK_CONTAINMENT_UNAVAILABLE', 'Незарегистрированная project-проверка не исполняется локально.');
+  if (input.plan.schemaVersion === 3) assertCheckRegistry(root, profile, input.plan.checks);
+  const toolchain = genericCheck ? { node: NODE_BINARY } : localCheck ? localCheckToolchain(profile) : runnerToolchain(profile);
+  const dependencyToolchain = verifyToolchain({
+    root: allocation.rootPath,
+    worktree: allocation.worktreePath,
+    manifest: toolchainManifest,
+  });
+  const prepare = genericCheck ? makeRegisteredCheckCommand : localCheck
+    ? makeLocalCheckCommand
+    : ['claude', 'cursor'].includes(profile.ai.provider) ? makeExternalCommand : makeAiCommand;
+  const prepared = prepare({
+    ...input,
+    root: allocation.rootPath,
+    profile,
+    worktree: allocation.worktreePath,
+    outputPath: allocation.outputPath,
+    toolchain,
+    dependencyToolchain,
+    providerConsent,
+    projectInstructions: localCheck ? null : buildProjectInstructionContext({
+      projectRoot: allocation.rootPath, node: input.node, task: input.task, profile,
+      expectedMetadata: input.priorEvidence?.instructionMetadata ?? [],
+    }),
+  });
+  const executionCheckHash = localCheck ? checkExecutionHash({ root: allocation.rootPath, worktree: allocation.worktreePath,
+    profile, node: input.node, plan: input.plan, command: prepared.command }) : null;
+  let completion = null, startObserved = false;
+  try {
+    completion = await runPreparedProcess({ root: allocation.rootPath, actionId: action.id,
+      command: prepared.command, input: prepared.input,
+      timeoutMs: Math.min(input.task.limits.timeoutMs, prepared.timeoutMs ?? input.task.limits.timeoutMs),
+      maxOutputBytes: prepared.maxOutputBytes, signal,
+      onStart: (metadata) => { startObserved = true; return onStart(metadata); },
+      beforeGo: ({ commandHash }) => {
+        if (prepared.reviewFile) verifyReviewEvidenceFile(prepared.reviewFile);
+        if (localCheck) {
+          const currentProfile = loadProjectProfile(root);
+          if (!hasTrustedLocalChecksBinding(root, currentProfile)) fail('CHECK_LOCAL_BINDING_REQUIRED', 'Разрешение проверки изменилось до запуска.');
+          if (input.plan.schemaVersion === 3) assertCheckRegistry(root, currentProfile, input.plan.checks);
+          const currentAllocation = validateAllocation(root, worktree, outputDirectory, 'local', currentProfile.workspaceMode === 'direct');
+          const currentDependencies = verifyToolchain({ root: currentAllocation.rootPath, worktree: currentAllocation.worktreePath, manifest: toolchainManifest });
+          const currentCommand = (genericCheck ? makeRegisteredCheckCommand : makeLocalCheckCommand)({ ...input,
+            root: currentAllocation.rootPath, worktree: currentAllocation.worktreePath, profile: currentProfile,
+            outputPath: currentAllocation.outputPath, dependencyToolchain: currentDependencies,
+            toolchain: genericCheck ? { node: NODE_BINARY } : localCheckToolchain(currentProfile) }).command;
+          const currentHash = checkExecutionHash({ root: currentAllocation.rootPath, worktree: currentAllocation.worktreePath,
+            profile: currentProfile, node: input.node, plan: input.plan, command: currentCommand });
+          if (currentHash !== executionCheckHash || sha256(canonicalJson(currentCommand)) !== commandHash)
+            fail('CHECK_REGISTRY_DRIFT', 'Команда или каталог проверки изменились после reservation.');
+        }
+      },
+    });
+    let output = completion.output, failureReason = completion.failureReason, exitCode = completion.exitCode;
+    if (action.id.startsWith('ai-') && exitCode === 0 && !failureReason) {
+      try {
+        if (prepared.reviewFile) verifyReviewEvidenceFile(prepared.reviewFile);
+        output = parseAiOutput(prepared.resultFile);
+        if (prepared.reviewFile && AIReviewResultSchema.parse(output).reviewEvidenceHash !== prepared.reviewFile.hash)
+          fail('REVIEW_EVIDENCE_MISMATCH', 'Review output не совпадает с evidence');
+      } catch (error) {
+        failureReason = errorReason(error, 'AI_OUTPUT_INVALID'); exitCode = 1; output = null;
+      }
+    }
+    try { if (prepared.reviewFile) verifyReviewEvidenceFile(prepared.reviewFile); }
+    catch (error) { failureReason = errorReason(error, 'REVIEW_EVIDENCE_INVALID'); exitCode = 1; output = null; }
+    const { usage, ...result } = completion;
+    return { ...result, exitCode, failureReason, output,
+      execution: { ...executionMetadata(prepared, output, usage), ...('execution' in completion ? completion.execution : {}) } };
+  } finally {
+    cleanupPrepared(prepared, completion?.stopped ?? !startObserved);
   }
 }
 
@@ -1266,3 +1325,19 @@ export function inspectCodexInstallation(ai = {}) {
     return { available: false, reason: errorReason(error, 'RUNNER_TOOLCHAIN_INVALID'), version: null };
   }
 }
+
+/** Verified CLI metadata for an explicit learning preflight; no login or inference.
+ * The configured concrete model remains the caller's responsibility.
+ * @returns {import('./learning-runner.mjs').LearningToolchain}
+ */
+export function learningProviderToolchain(ai) {
+  if (ai?.provider !== 'codex')
+    fail('LEARNING_PROVIDER_UNSUPPORTED', 'Учебный toolchain проверен только для Codex');
+  const toolchain = runnerToolchain({ ai });
+  if (typeof toolchain.codexEntry !== 'string' || !('codexVersion' in toolchain.identity))
+    throw new GraphError('LEARNING_CODEX_TOOLCHAIN_INVALID', 'Нет проверенного Codex toolchain');
+  return Object.freeze({ node: toolchain.node, codexEntry: toolchain.codexEntry,
+    digest: toolchain.digest, identity: toolchain.identity });
+}
+
+export { runnerToolchain as prepareRunnerToolchain };

@@ -37,6 +37,10 @@ export function deriveTaskProof({ state, task, plan, currentFingerprint, current
   const artifactCache = new Map();
   const executions = [...previousExecutions, { state, task, plan }];
   const currentExecution = executions.length - 1;
+  const staged = plan.schemaVersion === 3 && plan.stage === 'execution';
+  const finalCheckNodeIds = new Set(staged ? plan.executionStages?.finalCheckNodeIds ?? [] : []);
+  const finalCheck = (record) => !staged || (record.executionIndex === currentExecution && finalCheckNodeIds.has(record.definition.id));
+  const finalReview = (record) => !staged || (record.executionIndex === currentExecution && record.definition.id === plan.executionStages?.finalReviewNodeId);
   const readArtifactData = (id) => {
     if (artifactCache.has(id)) return artifactCache.get(id);
     const artifact = readArtifact(id);
@@ -162,8 +166,8 @@ export function deriveTaskProof({ state, task, plan, currentFingerprint, current
     const workNodeIds = requirement.workIds ?? [];
     const work = workNodeIds.map((id) => latest(records.filter((record) => record.executionIndex === currentExecution && record.definition.id === id && record.definition.action.id === 'ai-implement')));
     const workComplete = work.length > 0 && work.every((record) => record && terminal(record.receipt) && record.receipt.verdict === 'pass' && record.actual.status === 'passed');
-    const assessment = latest(assessments.filter((entry) => entry.requirementId === requirement.id));
-    const checks = requirement.verification.checkIds.map((id) => latest(checkRecords.filter((entry) => entry.checkId === id && entry.item.requirementIds.includes(requirement.id))));
+    const assessment = latest(assessments.filter((entry) => entry.requirementId === requirement.id && finalReview(entry.record)));
+    const checks = requirement.verification.checkIds.map((id) => latest(checkRecords.filter((entry) => entry.checkId === id && entry.item.requirementIds.includes(requirement.id) && finalCheck(entry.record))));
     const acceptance = latest(acceptances.filter((entry) => entry.item.requirementIds.includes(requirement.id)));
     const selected = requirement.verification.method === 'human' ? [acceptance] : [assessment, ...(requirement.verification.method === 'check' ? checks : [])];
     const validPath = ['source-review', 'human'].includes(requirement.verification.method) || (requirement.verification.method === 'check' && checks.length > 0);
@@ -193,10 +197,23 @@ export function deriveTaskProof({ state, task, plan, currentFingerprint, current
       requirement.status = 'failed'; requirement.reason = 'Есть открытое блокирующее замечание';
     }
   }
-  const requiredCheckIds = unique([...(task.checks ?? []).map((id) => id.startsWith('check-') ? id : `check-${id}`), ...plan.nodes.filter((node) => node.action.id.startsWith('check-')).map(checkName)]);
+  const requiredCheckIds = unique([...(task.checks ?? []).map((id) => id.startsWith('check-') ? id : `check-${id}`),
+    ...plan.nodes.filter((node) => node.action.id.startsWith('check-') && (!staged || finalCheckNodeIds.has(node.id))).map(checkName)]);
+  if (staged && !finalCheckNodeIds.size) blockers.push('Нет обязательных проверок финального этапа');
+  const finalReviewRecord = staged ? latest(records.filter((record) => record.definition.action.id === 'ai-review' && finalReview(record))) : null;
+  if (staged && (!finalReviewRecord || finalReviewRecord.actual.status !== 'passed' || !terminal(finalReviewRecord.receipt) ||
+      finalReviewRecord.receipt.verdict !== 'pass' || finalReviewRecord.receipt.beforeFingerprint !== currentHash ||
+      finalReviewRecord.receipt.afterFingerprint !== currentHash || !hash(finalReviewRecord.receipt.reviewEvidenceHash) ||
+      !finalReviewRecord.artifacts.some(({ artifact, data }) => artifact.kind === 'review-findings' && data?.verdict === 'pass' &&
+        data.reviewEvidenceHash === finalReviewRecord.receipt.reviewEvidenceHash)))
+    blockers.push('Независимое финальное ревью не подтверждено на текущем результате');
   for (const id of requiredCheckIds) {
-    const entry = latest(checkRecords.filter((item) => item.checkId === id && item.record.executionIndex === currentExecution));
+    const entry = latest(checkRecords.filter((item) => item.checkId === id && item.record.executionIndex === currentExecution && finalCheck(item.record)));
     if (!successful(entry)) blockers.push(`Обязательная проверка ${id} не подтверждена на текущем результате`);
+  }
+  if (staged) for (const nodeId of finalCheckNodeIds) {
+    if (!successful(latest(checkRecords.filter((item) => item.record.definition.id === nodeId && finalCheck(item.record)))))
+      blockers.push(`Финальная проверка ${nodeId} не подтверждена на текущем результате`);
   }
   for (const item of requirements.filter((item) => item.mandatory && item.status !== 'proven')) blockers.push(`${item.id}: ${item.reason}`);
   if (findings.some((item) => item.blocking && item.status === 'open')) blockers.push('Есть открытые блокирующие замечания');
@@ -212,7 +229,7 @@ export function deriveTaskProof({ state, task, plan, currentFingerprint, current
   let certificate = null;
   if (proven) {
     const proofEvidence = unique([...requirements.filter((item) => item.mandatory).flatMap((item) => item.selected.map((entry) => entry.item.id)),
-      ...requiredCheckIds.map((id) => latest(checkRecords.filter((item) => item.checkId === id && item.record.executionIndex === currentExecution)).item.id)]);
+      ...requiredCheckIds.map((id) => latest(checkRecords.filter((item) => item.checkId === id && item.record.executionIndex === currentExecution && finalCheck(item.record))).item.id)]);
     const items = evidence.filter((item) => proofEvidence.includes(item.id));
     const body = { version: 1, status: 'PROVEN', taskId: task.id, goal: contract.goal, contractHash: hashObject(contract), resultHash: currentHash,
       coverage,
@@ -226,7 +243,8 @@ export function deriveTaskProof({ state, task, plan, currentFingerprint, current
       limitations: unique([...(contract.unknowns ?? []),
         ...(requirements.some((item) => item.verification.method === 'human') ? ['Часть требований подтверждена личной приемкой оператора'] : []),
         ...(requirements.some((item) => item.verification.method === 'source-review') ? ['Проверка исходников подтверждает наблюдаемые в коде свойства; запуск браузера или production из нее не следует'] : [])]),
-      requirementIds: required.map((item) => item.id), evidenceIds: proofEvidence, receiptIds: unique(items.map((item) => item.receiptId)),
+      requirementIds: required.map((item) => item.id), evidenceIds: proofEvidence,
+      receiptIds: unique([...items.map((item) => item.receiptId), ...(finalReviewRecord ? [finalReviewRecord.receiptId] : [])]),
       issuedAt: items.map((item) => item.checkedAt).sort().at(-1) ?? null };
     certificate = { ...body, id: hashObject(body) };
   }

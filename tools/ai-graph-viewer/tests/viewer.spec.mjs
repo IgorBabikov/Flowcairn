@@ -11,6 +11,7 @@ import {
   snapshot,
   token,
 } from './fixtures.mjs';
+import { book, stepPicker, stepDetails, openDiagnostics, openJournal, newQuest, selectRun, selectStep, showVersion } from './ui-paths.mjs';
 
 function runnableSnapshot() {
   const current = snapshot();
@@ -47,59 +48,50 @@ function chainSnapshot(overrides = {}) {
   return Object.assign(current, overrides);
 }
 
-async function readableInGraph(page, title) {
-  const node = page.locator('.graph-node', { hasText: title });
-  await expect(node).toBeAttached();
-  await expect
-    .poll(async () => {
-      const box = await node.boundingBox();
-      const viewport = await page.locator('.react-flow').boundingBox();
-      return Boolean(
-        box &&
-        viewport &&
-        box.width >= 215 &&
-        box.x >= viewport.x - 1 &&
-        box.x + box.width <= viewport.x + viewport.width + 1 &&
-        box.y >= viewport.y - 1 &&
-        box.y + box.height <= viewport.y + viewport.height + 1,
-      );
-    })
-    .toBe(true);
+async function readableStep(page, title) {
+  await expect(stepPicker(page).locator('option:checked')).toContainText(title);
+  const heading = stepDetails(page).getByRole('heading', { name: title, exact: true });
+  await expect(heading).toBeVisible();
+  await heading.scrollIntoViewIfNeeded();
+  const geometry = await heading.evaluate(element => {
+    const rect = element.getBoundingClientRect();
+    return { width: rect.width, left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom,
+      viewportWidth: innerWidth, viewportHeight: innerHeight,
+      clipped: element.scrollWidth > element.clientWidth };
+  });
+  expect(geometry.width).toBeGreaterThan(150);
+  expect(geometry.left).toBeGreaterThanOrEqual(0);
+  expect(geometry.right).toBeLessThanOrEqual(geometry.viewportWidth);
+  expect(geometry.top).toBeGreaterThanOrEqual(0);
+  expect(geometry.bottom).toBeLessThanOrEqual(geometry.viewportHeight);
+  expect(geometry.clipped).toBe(false);
 }
 
-async function openGraph(page) {
-  await page.getByRole('button', { name: 'Граф', exact: true }).click();
-  await page.getByRole('button', { name: 'Детали исполнения', exact: true }).click();
-  const closeDetails = page.getByRole('button', { name: 'Закрыть детали', exact: true });
-  if (page.viewportSize().width < 1180 && await closeDetails.isVisible()) await closeDetails.click();
-}
-
-async function selectMobileRun(page, name) {
-  await page.getByRole('button', { name: 'Показать запуски', exact: true }).click();
-  await page.getByRole('dialog', { name: 'Запуски', exact: true }).getByRole('button', { name }).click();
-  const closeDetails = page.getByRole('button', { name: 'Закрыть детали', exact: true });
-  if (page.viewportSize().width < 1180 && await closeDetails.isVisible()) await closeDetails.click();
+async function version(page) {
+  return showVersion(page);
 }
 
 test('renders backend state, confirms a gate, and retries one operation id', async ({ page }) => {
   const fixture = await mockApi(page);
   await page.goto(`/#session=${token}`);
-  await openGraph(page);
+  await openDiagnostics(page, 'nodes');
 
-  await expect(page.getByRole('heading', { name: 'flowcairn' })).toBeVisible();
-  await expect(page.locator('.node-mode', { hasText: 'Чтение' })).toBeVisible();
-  await expect(page.locator('.node-mode', { hasText: 'Запись' })).toBeVisible();
-  await expect(page.getByText('project-context · 11111111')).toBeVisible();
+  await expect(page.locator('.game-brand h1')).toHaveText('Flowcairn');
+  await selectStep(page, 'approve-plan');
+  await expect(stepDetails(page).locator('.fact-list')).toContainText('Чтение');
+  await expect(stepDetails(page)).toContainText('project-context · 11111111');
+  await selectStep(page, 'implement');
+  await expect(stepDetails(page).locator('.fact-list')).toContainText('Запись');
   expect(page.url()).not.toContain('session=');
   expect(await page.evaluate(() => sessionStorage.getItem('flowcairn.graph.session'))).toBe(token);
 
-  await page.getByRole('tab', { name: 'Результаты' }).click();
+  await openDiagnostics(page, 'evidence');
   await page.getByRole('button', { name: /Plan evidence/ }).click();
-  await expect(page.getByRole('dialog')).toContainText('<script>attack()</script>');
+  await expect(page.getByRole('dialog', { name: 'Plan evidence', exact: true })).toContainText('<script>attack()</script>');
   await expect(page.locator('dialog script')).toHaveCount(0);
   await page.getByRole('button', { name: 'Закрыть', exact: true }).click();
 
-  await page.getByRole('tab', { name: 'Обзор' }).click();
+  await selectStep(page, 'approve-plan');
   await page.getByRole('button', { name: 'Подтвердить план' }).click();
   const gate = page.getByRole('dialog', { name: 'Подтвердите решение' });
   await expect(gate).toContainText('workspace.source.write');
@@ -110,46 +102,54 @@ test('renders backend state, confirms a gate, and retries one operation id', asy
   const gateBody = fixture.calls.find((call) => call.action === 'gate').body;
   expect(gateBody.permissions).toEqual(['workspace.source.write']);
   expect(gateBody.challenge).toBe('challenge-fixture');
+  expect(gateBody.nodeId).toBe('approve-plan');
+  expect(gateBody.expectedRevision).toBe(3);
+  expect(gateBody.planHash).toBe(fixture.current().planHash);
 
-  await page.getByRole('button', { name: /Внесение изменений/ }).click();
-  await page.getByRole('button', { name: 'Запустить', exact: true }).last().click();
+  await selectStep(page, 'implement');
+  await stepDetails(page).getByRole('button', { name: 'Запустить', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Повторить тот же запрос' })).toBeVisible();
   await page.getByRole('button', { name: 'Повторить тот же запрос' }).click();
   await expect.poll(() => fixture.calls.filter((call) => call.action === 'run').length).toBe(2);
   const runBodies = fixture.calls.filter((call) => call.action === 'run').map((call) => call.body);
   expect(runBodies[0].operationId).toBe(runBodies[1].operationId);
+  expect(runBodies[1]).toEqual(runBodies[0]);
+  expect(runBodies[0].nodeId).toBe('implement');
+  expect(runBodies[0].planHash).toBe(gateBody.planHash);
 });
 
 test('creates a task from ordinary text without ids, permissions or external calls', async ({ page }) => {
   const fixture = await mockApi(page, snapshot(), { emptyUntilIntake: true });
   await page.goto(`/#session=${token}`);
-  const composer = page.getByRole('region', { name: 'Новая задача' });
+  await newQuest(page);
+  const composer = page.getByRole('dialog', { name: 'Новое поручение', exact: true });
   await expect(composer).toBeVisible();
   await expect(page.getByText('flowcairn task --file task.json')).toHaveCount(0);
   await expect(page.getByLabel('ID зарегистрированной задачи')).toHaveCount(0);
-  await expect(composer.getByRole('button', { name: 'Запустить', exact: true })).toBeDisabled();
-  await composer.getByLabel('Заголовок задачи', {exact:true}).fill('Исправить поиск');
+  await expect(composer.getByRole('button', { name: 'Начать анализ', exact: true })).toBeDisabled();
+  await composer.getByLabel('Название', {exact:true}).fill('Исправить поиск');
   await composer.getByLabel('Номер задачи', {exact:true}).fill('TASK-101');
-  await composer.getByLabel('Полное описание задачи', {exact:true}).fill('Исправить поиск и добавить проверку пустого ввода');
-  await composer.getByRole('button', { name: 'Запустить', exact: true }).click();
-  await openGraph(page);
-  await expect(page.locator('.react-flow')).toBeVisible();
+  await composer.getByLabel('Что нужно сделать', {exact:true}).fill('Исправить поиск и добавить проверку пустого ввода');
+  await composer.getByRole('button', { name: 'Начать анализ', exact: true }).click();
+  await openDiagnostics(page, 'nodes');
+  await expect(stepPicker(page)).toBeVisible();
   const request = fixture.calls.find(call => call.action === 'intake').body;
   expect(Object.keys(request).sort()).toEqual(['contextHash', 'description', 'operationId', 'taskNumber', 'title']);
   expect(request.contextHash).toBe(projectContext.contextHash);
   expect(fixture.calls.filter(call => call.action === 'run' || call.action === 'gate')).toHaveLength(0);
 });
 
-test('shows the user task number in the run rail and graph header', async ({ page }) => {
+test('shows the user task number in the journal and task context', async ({ page }) => {
   await mockApi(page, snapshot());
   await page.goto(`/#session=${token}`);
-  await openGraph(page);
-  await expect(page.locator('.run-row').first()).toContainText('FORM-101');
-  await expect(page.locator('.run-row').first()).not.toContainText('TASK-101');
-  await expect(page.locator('.graph-goal summary')).toContainText('FORM-101');
+  const journal = await openJournal(page);
+  await expect(journal.locator('.journal-entry').first()).toContainText('FORM-101');
+  await expect(journal.locator('.journal-entry').first()).not.toContainText('TASK-101');
+  await selectRun(page, 'FORM-101');
+  await expect(book(page).getByRole('article', { name: 'Обзор задачи' }).locator('.task-number')).toHaveText('FORM-101');
 });
 
-test('keeps the newest plan in the rail when an older run becomes stale later', async ({ page }) => {
+test('keeps the newest plan in the journal when an older run becomes stale later', async ({ page }) => {
   const stale = snapshot();
   stale.runId = 'run-old';
   stale.planVersion = 4;
@@ -167,28 +167,29 @@ test('keeps the newest plan in the rail when an older run becomes stale later', 
   await mockApi(page, stale, { extraRuns: [runSummary(latest)] });
   await page.route('**/api/runs/run-new/snapshot', route => route.fulfill({ json: latest }));
   await page.goto(`/#session=${token}`);
-  await openGraph(page);
-  const rail = page.locator('.run-list');
-  await expect(rail).toContainText('FORM-102');
-  await expect(rail).toContainText('Версия плана 5');
-  await expect(rail).not.toContainText('Версия плана 4');
-  await expect(page.locator('.graph-node').first()).toContainText('Этап актуального плана');
+  const journal = await openJournal(page);
+  await expect(journal.locator('.journal-entry')).toHaveCount(1);
+  await expect(journal).toContainText('FORM-102');
+  await expect(journal).toContainText('Версия плана: 5');
+  await expect(journal).not.toContainText('Версия плана: 4');
+  await selectRun(page, 'FORM-102', 'nodes');
+  await expect(stepPicker(page).locator('option:checked')).toContainText('Этап актуального плана');
 });
 
 test('replays a lost intake response with the exact same request', async ({ page }) => {
   const fixture = await mockApi(page, snapshot(), { loseFirstCreateResponse: true, loseFirstRunResponse: false });
   await page.goto(`/#session=${token}`);
-  await page.getByRole('button', { name: 'Новая задача' }).click();
-  const composer = page.getByRole('region', { name: 'Новая задача' });
-  await composer.getByLabel('Заголовок задачи', {exact:true}).fill('Исправить поиск');
+  await newQuest(page);
+  const composer = page.getByRole('dialog', { name: 'Новое поручение', exact: true });
+  await composer.getByLabel('Название', {exact:true}).fill('Исправить поиск');
   await composer.getByLabel('Номер задачи', {exact:true}).fill('TASK-101');
-  await composer.getByLabel('Полное описание задачи', {exact:true}).fill('Проверить стабильный intake');
-  await composer.getByRole('button', { name: 'Запустить', exact: true }).click();
+  await composer.getByLabel('Что нужно сделать', {exact:true}).fill('Проверить стабильный intake');
+  await composer.getByRole('button', { name: 'Начать анализ', exact: true }).click();
   await expect(composer.getByRole('alert')).toContainText('Результат операции неизвестен');
-  await expect(composer.getByLabel('Полное описание задачи', {exact:true})).toBeDisabled();
-  await expect(composer.getByRole('button', {name:'Закрыть', exact:true})).toHaveCount(0);
+  await expect(composer.getByLabel('Что нужно сделать', {exact:true})).toBeDisabled();
+  await expect(composer.getByRole('button', {name:'Закрыть свиток', exact:true})).toBeDisabled();
   await page.keyboard.press('Escape');
-  await expect(composer.getByLabel('Полное описание задачи', {exact:true})).toHaveValue('Проверить стабильный intake');
+  await expect(composer.getByLabel('Что нужно сделать', {exact:true})).toHaveValue('Проверить стабильный intake');
   await composer.getByRole('button', { name: 'Повторить тот же запрос' }).click();
   await expect(composer).toHaveCount(0);
   const requests = fixture.calls.filter(call => call.action === 'intake').map(call => call.body);
@@ -201,18 +202,18 @@ test('does not let a delayed snapshot replace a newer revision', async ({ page }
     loseFirstRunResponse: false,
   });
   await page.goto(`/#session=${token}`);
-  await expect(page.getByTestId('run-revision')).toHaveText('3');
-  await openGraph(page);
+  await openDiagnostics(page, 'nodes');
+  await expect((await version(page)).getByTestId('run-revision')).toHaveText('3');
 
   const held = fixture.holdNextSnapshot();
   await held.captured;
-  await page.getByRole('button', { name: /Внесение изменений/ }).click();
-  await page.getByRole('button', { name: 'Запустить', exact: true }).last().click();
-  await expect(page.getByTestId('run-revision')).toHaveText('4');
+  await selectStep(page, 'implement');
+  await stepDetails(page).getByRole('button', { name: 'Запустить', exact: true }).click();
+  await expect(book(page).locator('.diagnostic-version').getByTestId('run-revision')).toHaveText('4');
 
   held.release();
   await page.waitForTimeout(250);
-  await expect(page.getByTestId('run-revision')).toHaveText('4');
+  await expect(book(page).locator('.diagnostic-version').getByTestId('run-revision')).toHaveText('4');
 
   await page.getByRole('tab', { name: 'История' }).click();
   await expect(page.getByText('r4', { exact: true })).toBeVisible();
@@ -224,11 +225,10 @@ test('coalesces rapid toolbar clicks before React rerenders', async ({ page }) =
     runDelayMs: 300,
   });
   await page.goto(`/#session=${token}`);
-  await openGraph(page);
+  await openDiagnostics(page, 'nodes');
 
-  const node = page.locator('.graph-node', { hasText: 'Внесение изменений' });
-  await node.click();
-  const button = page.locator('.node-toolbar').getByRole('button', { name: 'Запустить' });
+  await selectStep(page, 'implement');
+  const button = stepDetails(page).getByRole('button', { name: 'Запустить', exact: true });
   await expect(button).toBeVisible();
   await button.evaluate((element) => {
     element.click();
@@ -247,16 +247,18 @@ test('sends Stop while a long Run request is still pending', async ({ page }) =>
     runDelayMs: 3500,
   });
   await page.goto(`/#session=${token}`);
-  await page.getByRole('button', { name: 'Запустить', exact: true }).first().click();
+  await openDiagnostics(page, 'nodes');
+  await version(page);
+  await book(page).locator('.diagnostic-tools').getByRole('button', { name: 'Запустить', exact: true }).click();
 
-  const stop = page.getByRole('button', { name: 'Остановить', exact: true });
+  const stop = book(page).getByRole('button', { name: 'Остановить', exact: true });
   await expect(stop).toBeEnabled({ timeout: 3000 });
   await stop.click();
   await expect.poll(() => fixture.calls.filter((call) => call.action === 'stop').length).toBe(1);
-  await expect(page.getByTestId('run-revision')).toHaveText('5');
+  await expect(book(page).locator('.diagnostic-version').getByTestId('run-revision')).toHaveText('5');
 
   await page.waitForTimeout(1800);
-  await expect(page.getByTestId('run-revision')).toHaveText('5');
+  await expect(book(page).locator('.diagnostic-version').getByTestId('run-revision')).toHaveText('5');
   expect(fixture.calls.filter((call) => call.action === 'run')).toHaveLength(1);
 });
 
@@ -267,6 +269,7 @@ test('shows stopping immediately and keeps it after the control response', async
   current.capabilities = { ...allDenied, stop: allowed };
   const fixture = await mockApi(page, current, { stopDelayMs: 600 });
   await page.goto(`/#session=${token}`);
+  await openDiagnostics(page, 'result');
 
   await page.getByRole('button', { name: 'Остановить', exact: true }).click();
 
@@ -286,6 +289,7 @@ test('distinguishes confirmed stop from unconfirmed termination', async ({ page 
   current.capabilities = allDenied;
   const fixture = await mockApi(page, current);
   await page.goto(`/#session=${token}`);
+  await openDiagnostics(page, 'result');
 
   const status = page.locator('.execution-status');
   await expect(status).toContainText('Процесс остановлен');
@@ -303,6 +307,7 @@ test('refreshes snapshot when the stop response is lost', async ({ page }) => {
   current.capabilities = { ...allDenied, stop: allowed };
   const fixture = await mockApi(page, current, { loseStopResponse: true });
   await page.goto(`/#session=${token}`);
+  await openDiagnostics(page, 'result');
   const reads = fixture.snapshotReads();
 
   await page.getByRole('button', { name: 'Остановить', exact: true }).click();
@@ -320,6 +325,7 @@ test('does not claim stop acceptance when both stop response and snapshot are un
   current.capabilities = { ...allDenied, stop: allowed };
   const fixture = await mockApi(page, current, { loseStopResponse: true });
   await page.goto(`/#session=${token}`);
+  await openDiagnostics(page, 'result');
   const stop = page.getByRole('button', { name: 'Остановить', exact: true });
   await expect(stop).toBeVisible();
   await page.route('**/snapshot', (route) => route.fulfill({
@@ -343,6 +349,7 @@ test('clears a stale Stop request after revision conflict before allowing a new 
   current.capabilities = { ...allDenied, stop: allowed };
   const fixture = await mockApi(page, current, { stopConflictFirst: true });
   await page.goto(`/#session=${token}`);
+  await openDiagnostics(page, 'result');
   const initialSnapshotReads = fixture.snapshotReads();
 
   const stop = page.getByRole('button', { name: 'Остановить', exact: true });
@@ -361,17 +368,17 @@ test('clears a stale Stop request after revision conflict before allowing a new 
 test('accepts a validated replan successor and resets run-scoped state', async ({ page }) => {
   const fixture = await mockApi(page);
   await page.goto(`/#session=${token}`);
-  await openGraph(page);
+  await openDiagnostics(page, 'nodes');
   await page.getByRole('tab', { name: 'История' }).click();
   await expect(page.getByText('r3', { exact: true })).toBeVisible();
-  await page.getByRole('tab', { name: 'Обзор' }).click();
+  await openDiagnostics(page, 'plan');
   await page.getByRole('button', { name: 'Новая версия плана' }).click();
   const draft = page.getByRole('dialog', { name: 'Черновик новой версии' });
   await draft.getByRole('button', { name: 'Отправить на серверную проверку' }).click();
 
-  await expect(page.getByTestId('plan-version')).toHaveText('2');
-  await expect(page.getByTestId('run-revision')).toHaveText('0');
-  await page.getByRole('button',{name:'Детали исполнения',exact:true}).click();
+  await version(page);
+  await expect(book(page).locator('.diagnostic-version').getByTestId('plan-version')).toHaveText('2');
+  await expect(book(page).locator('.diagnostic-version').getByTestId('run-revision')).toHaveText('0');
   await page.getByRole('tab', { name: 'История' }).click();
   await expect(page.getByText('r0', { exact: true })).toBeVisible();
   await expect(page.getByText('r3', { exact: true })).toHaveCount(0);
@@ -385,8 +392,9 @@ test('loads immutable plan even when the initial snapshot becomes stale', async 
     eventsDelayMs: 3500,
   });
   await page.goto(`/#session=${token}`);
-  await openGraph(page);
-  await expect(page.getByTestId('run-revision')).toHaveText('4', { timeout: 6000 });
+  await openDiagnostics(page, 'nodes');
+  await version(page);
+  await expect(book(page).locator('.diagnostic-version').getByTestId('run-revision')).toHaveText('4', { timeout: 6000 });
   await page.getByRole('tab', { name: 'План' }).click();
   await expect(page.getByRole('heading', { name: 'План v1' })).toBeVisible();
 });
@@ -415,7 +423,7 @@ test('ignores a delayed comparison response for a previous selection', async ({ 
     },
   });
   await page.goto(`/#session=${token}`);
-  await openGraph(page);
+  await openDiagnostics(page, 'nodes');
   await page.getByRole('tab', { name: 'План' }).click();
   const comparison = page.getByRole('combobox');
   await comparison.selectOption('run-b');
@@ -433,19 +441,25 @@ test('uses native modal lifecycle and keeps toolbar keyboard activation', async 
   const fixture = await mockApi(page, runnableSnapshot(), { loseFirstRunResponse: false });
   await page.goto(`/#session=${token}`);
 
-  const create = page.getByRole('button', { name: 'Новая задача' });
+  const journal = await openJournal(page);
+  const create = journal.getByRole('button', { name: 'Новое поручение', exact: true });
   await create.focus();
   await create.click();
-  const createDialog = page.getByRole('region', { name: 'Новая задача' });
+  const createDialog = page.getByRole('dialog', { name: 'Новое поручение', exact: true });
   await expect(createDialog).toBeVisible();
-  await expect(createDialog.getByLabel('Заголовок задачи', {exact:true})).toBeFocused();
+  expect(await createDialog.evaluate(element => element.matches(':modal'))).toBe(true);
+  await expect(createDialog.locator('[data-overlay-heading]')).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(createDialog.getByRole('button', { name: 'Закрыть свиток', exact: true })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(createDialog.getByLabel('Название', { exact: true })).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(createDialog).toHaveCount(0);
-  await expect(create).toBeFocused();
+  await expect(page.getByRole('button', { name: 'Журнал', exact: true })).toBeFocused();
 
-  await openGraph(page);
-  await page.getByRole('button', { name: /Внесение изменений/ }).click();
-  const toolbarRun = page.locator('.node-toolbar').getByRole('button', { name: 'Запустить' });
+  await openDiagnostics(page, 'nodes');
+  await selectStep(page, 'implement');
+  const toolbarRun = stepDetails(page).getByRole('button', { name: 'Запустить', exact: true });
   await toolbarRun.focus();
   await page.keyboard.press('Enter');
   await expect.poll(() => fixture.calls.filter((call) => call.action === 'run').length).toBe(1);
@@ -456,7 +470,7 @@ test('draft and evidence dialogs are modal, closable with Escape, and labelled',
 }) => {
   await mockApi(page);
   await page.goto(`/#session=${token}`);
-  await openGraph(page);
+  await openDiagnostics(page, 'plan');
 
   await page.getByRole('button', { name: 'Новая версия плана' }).click();
   const draft = page.getByRole('dialog', { name: 'Черновик новой версии' });
@@ -465,7 +479,7 @@ test('draft and evidence dialogs are modal, closable with Escape, and labelled',
   await page.keyboard.press('Escape');
   await expect(draft).toHaveCount(0);
 
-  await page.getByRole('tab', { name: 'Результаты' }).click();
+  await openDiagnostics(page, 'evidence');
   await page.getByRole('button', { name: /Plan evidence/ }).click();
   const evidence = page.getByRole('dialog', { name: 'Plan evidence' });
   expect(await evidence.evaluate((element) => element.matches(':modal'))).toBe(true);
@@ -477,7 +491,9 @@ test('fallback polling is single-flight', async ({ page }) => {
   const options = {};
   const fixture = await mockApi(page, snapshot(), options);
   await page.goto(`/#session=${token}`);
-  await expect(page.getByTestId('run-revision')).toHaveText('3');
+  await openDiagnostics(page, 'nodes');
+  await version(page);
+  await expect(book(page).locator('.diagnostic-version').getByTestId('run-revision')).toHaveText('3');
   options.snapshotDelayMs = 2500;
 
   await page.waitForTimeout(5200);
@@ -490,24 +506,44 @@ test('coalesces SSE bursts and polling into one snapshot request', async ({ page
     streamBurst: [4, 5, 6],
   });
   await page.goto(`/#session=${token}`);
+  await openDiagnostics(page, 'nodes');
+  await version(page);
 
-  await expect(page.getByTestId('run-revision')).toHaveText('6', { timeout: 6000 });
+  await expect(book(page).locator('.diagnostic-version').getByTestId('run-revision')).toHaveText('6', { timeout: 6000 });
   expect(fixture.maxSnapshotReads()).toBe(1);
   expect(fixture.snapshotReads()).toBe(2);
 });
 
 test('accepts a fail-closed snapshot without revision and stops catch-up', async ({ page }) => {
+  const clockStart = new Date('2026-10-09T00:00:00Z');
+  await page.clock.install({ time: clockStart });
+  await page.clock.pauseAt(clockStart);
   const fixture = await mockApi(page, snapshot(), {
     failClosedSnapshotAfterFirst: true,
     streamBurst: [4],
   });
   await page.goto(`/#session=${token}`);
-
-  await page.getByRole('button',{name:'Состояние проекта',exact:true}).click();
-  await expect(page.locator('.run-health .negative')).toHaveText('Целостность данных не подтверждена');
-  await expect(page.getByTestId('run-revision')).toHaveText('—');
-  await page.waitForTimeout(500);
+  await expect(page.getByTestId('rpg-runtime-status')).toHaveText('Состояние недоступно');
   expect(fixture.snapshotReads()).toBe(2);
+  // No revision means SSE catch-up stops immediately, but normal disconnected
+  // polling must continue. Keep navigation time separate from that 2s timer.
+  await page.clock.runFor(1999);
+  expect(fixture.snapshotReads()).toBe(2);
+  const nextPoll = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/snapshot'));
+  await page.clock.runFor(1);
+  await (await nextPoll).finished();
+  await page.clock.runFor(500);
+  expect(fixture.snapshotReads()).toBe(3);
+
+  await openDiagnostics(page, 'nodes');
+  await expect(page.getByTestId('rpg-runtime-status')).toHaveText('Состояние недоступно');
+  await version(page);
+  await expect(book(page).locator('.diagnostic-version').getByTestId('run-revision')).toHaveText('—');
+  await expect(stepPicker(page).locator('option')).toHaveCount(1);
+  await expect(book(page).getByRole('button', { name: 'Запустить', exact: true })).toHaveCount(0);
+  await openDiagnostics(page, 'result');
+  await expect(book(page).locator('.workflow-summary')).toHaveText('Целостность данных не подтверждена');
+  expect(fixture.snapshotReads()).toBe(3);
   expect(fixture.maxSnapshotReads()).toBe(1);
 });
 
@@ -528,7 +564,8 @@ test('does not run two-second list polling while SSE is connected', async ({ pag
   });
   const fixture = await mockApi(page);
   await page.goto(`/#session=${token}`);
-  await expect(page.getByText('На связи')).toBeVisible();
+  await openDiagnostics(page, 'nodes');
+  await expect(book(page).getByText('На связи', { exact: true })).toBeVisible();
   const initialReads = fixture.listReads();
 
   await page.waitForTimeout(2500);
@@ -538,17 +575,19 @@ test('does not run two-second list polling while SSE is connected', async ({ pag
 test('explicit refresh discovers a run from an initially empty list', async ({ page }) => {
   await mockApi(page, snapshot(), { emptyFirstList: true });
   await page.goto(`/#session=${token}`);
-  await expect(page.getByRole('region', { name: 'Новая задача' })).toBeVisible();
-  await page.getByRole('button', { name: 'Обновить' }).click();
-  await expect(page.getByRole('button', { name: /FORM-101/ })).toBeVisible();
+  const journal = await openJournal(page);
+  await expect(journal).toContainText('Здесь появятся ваши поручения');
+  await journal.getByRole('button', { name: 'Обновить журнал', exact: true }).click();
+  await expect(journal.locator('.journal-entry', { hasText: 'FORM-101' })).toBeVisible();
 });
 
 test('dark status text tokens meet 4.5 to 1 contrast', async ({ page }) => {
   await mockApi(page);
   await page.goto(`/#session=${token}`);
-  await page.getByRole('button', { name: 'Сменить тему' }).click();
+  await openDiagnostics(page, 'nodes');
+  await book(page).getByRole('button', { name: 'Сменить тему' }).click();
   const ratios = await page.evaluate(() => {
-    const style = getComputedStyle(document.documentElement);
+    const style = getComputedStyle(document.querySelector('.diagnostic-paper'));
     const parse = (value) => {
       const normalized = value.trim().replace('#', '');
       return [0, 2, 4].map((offset) => Number.parseInt(normalized.slice(offset, offset + 2), 16));
@@ -578,43 +617,25 @@ test('dark status text tokens meet 4.5 to 1 contrast', async ({ page }) => {
   expect(Math.min(...ratios)).toBeGreaterThanOrEqual(4.5);
 });
 
-test('opens an eleven-node mobile graph on a readable active node and keeps fit-all overview', async ({
-  page,
-}) => {
+test('opens eleven mobile steps on the active step and keeps every step and dependency accessible', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const current = chainSnapshot({ activeNodeId: 'node-5', status: 'running' });
   current.nodes[5] = { ...current.nodes[5], status: 'running' };
-  await mockApi(page, current);
+  const fixture = await mockApi(page, current);
   await page.goto(`/#session=${token}`);
-  await openGraph(page);
-  await expect(page.locator('.graph-node.status-running')).toHaveCount(1);
-  await expect(page.locator('.react-flow__minimap')).toBeHidden();
-  await readableInGraph(page, 'Этап 6');
-
-  await page.getByRole('button', { name: 'Весь граф', exact: true }).click();
-  await page.waitForTimeout(250);
-
-  const contained = await page.evaluate(() => {
-    const viewport = document.querySelector('.react-flow')?.getBoundingClientRect();
-    const nodes = [...document.querySelectorAll('.graph-node')].map((node) =>
-      node.getBoundingClientRect(),
-    );
-    return Boolean(
-      viewport &&
-      nodes.length === 11 &&
-      nodes.every(
-        (node) =>
-          node.left >= viewport.left - 1 &&
-          node.right <= viewport.right + 1 &&
-          node.top >= viewport.top - 1 &&
-          node.bottom <= viewport.bottom + 1,
-      ),
-    );
-  });
-  expect(contained).toBe(true);
-
-  await page.getByRole('button', { name: 'Текущий этап' }).click();
-  await readableInGraph(page, 'Этап 6');
+  await openDiagnostics(page, 'nodes');
+  await expect(stepPicker(page).locator('option')).toHaveCount(12);
+  await expect(stepPicker(page).locator('option').filter({ hasText: 'Выполняется' })).toHaveCount(1);
+  await readableStep(page, 'Этап 6');
+  for (const node of current.nodes) {
+    await selectStep(page, node.id);
+    await readableStep(page, node.title);
+    await expect(stepDetails(page)).toHaveAttribute('data-node-id', node.id);
+    if (node.needs.length) await expect(stepDetails(page).locator('.fact-list')).toContainText(node.needs[0]);
+  }
+  await book(page).getByRole('button', { name: 'Текущий этап', exact: true }).click();
+  await readableStep(page, 'Этап 6');
+  expect(fixture.calls).toHaveLength(0);
 });
 
 test('mobile focuses active, waiting, failed, and completed nodes again on run switch', async ({
@@ -692,44 +713,39 @@ test('mobile focuses active, waiting, failed, and completed nodes again on run s
   });
 
   await page.goto(`/#session=${token}`);
-  await openGraph(page);
-  await readableInGraph(page, 'Этап 6');
-  await selectMobileRun(page, /TASK-WAITING/);
-  await readableInGraph(page, 'Этап 4');
-  await selectMobileRun(page, /TASK-FAILED/);
-  await readableInGraph(page, 'Этап 5');
-  await page.getByRole('button', { name: 'Весь граф', exact: true }).click();
-  await expect
-    .poll(
-      async () => (await page.locator('.graph-node', { hasText: 'Этап 5' }).boundingBox())?.width,
-    )
-    .toBeLessThan(100);
+  await openDiagnostics(page, 'nodes');
+  await readableStep(page, 'Этап 6');
+  await selectRun(page, 'TASK-WAITING', 'nodes');
+  await readableStep(page, 'Этап 4');
+  await selectRun(page, 'TASK-FAILED', 'nodes');
+  await readableStep(page, 'Этап 5');
+  await selectStep(page, 'node-0');
+  await readableStep(page, 'Этап 1');
   await page.getByRole('button', { name: 'Текущий этап' }).click();
-  await readableInGraph(page, 'Этап 5');
-  await selectMobileRun(page, /TASK-COMPLETED/);
-  await readableInGraph(page, 'Этап 11');
+  await readableStep(page, 'Этап 5');
+  await selectRun(page, 'TASK-COMPLETED', 'nodes');
+  await readableStep(page, 'Этап 11');
 });
 
-test('polling revision and locale changes preserve the operator viewport', async ({ page }) => {
+test('polling revision and locale changes preserve the selected diagnostic step', async ({ page }) => {
   const current = chainSnapshot({ activeNodeId: 'node-5', status: 'running' });
   current.nodes[5] = { ...current.nodes[5], status: 'running' };
   await mockApi(page, current, { advanceAfterFirstSnapshot: true });
   await page.goto(`/#session=${token}`);
-  await openGraph(page);
-  await page.getByRole('button', { name: 'Текущий этап', exact: true }).click();
-  await readableInGraph(page, 'Этап 6');
-
-  await page.getByRole('button', { name: 'Отдалить' }).click();
-  await page.getByRole('button', { name: 'Отдалить' }).click();
-  const viewport = page.locator('.react-flow__viewport');
-  const before = await viewport.evaluate((element) => element.getAttribute('style'));
-  await page.getByRole('button', { name: 'На английском' }).click();
-  await expect(viewport).toHaveAttribute('style', before ?? '');
-  await expect(page.getByTestId('run-revision')).toHaveText('4', { timeout: 5000 });
-  await expect(viewport).toHaveAttribute('style', before ?? '');
+  await openDiagnostics(page, 'nodes');
+  await book(page).getByRole('button', { name: 'Текущий этап', exact: true }).click();
+  await readableStep(page, 'Этап 6');
+  await selectStep(page, 'node-8');
+  await version(page);
+  await book(page).getByRole('button', { name: 'На английском' }).click();
+  await expect(stepPicker(page)).toHaveValue('node-8');
+  await expect(book(page).getByRole('tab', { name: 'Steps', exact: true })).toHaveAttribute('aria-selected', 'true');
+  await expect(book(page).locator('.diagnostic-version').getByTestId('run-revision')).toHaveText('4', { timeout: 5000 });
+  await expect(stepDetails(page)).toHaveAttribute('data-node-id', 'node-8');
+  await readableStep(page, 'Этап 9');
 });
 
-test('keeps graph cards visible and run list bounded on tablet with many runs', async ({
+test('keeps the journal bounded and selected step readable on tablet with many runs', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 800, height: 618 });
@@ -738,54 +754,56 @@ test('keeps graph cards visible and run list bounded on tablet with many runs', 
     runSummary({
       ...current,
       runId: `run-tablet-${index}`,
-      task: { ...current.task, id: `TASK-TABLET-${index}` },
+      task: { ...current.task, id: `TASK-TABLET-${index}`, taskNumber: `TASK-TABLET-${index}` },
     }),
   );
   await mockApi(page, current, { extraRuns });
   await page.goto(`/#session=${token}`);
-  await openGraph(page);
-  await expect(page.locator('.run-row')).toHaveCount(9);
-  await expect(page.locator('.graph-node').first()).toBeAttached();
-
-  const layout = await page.evaluate(() => {
-    const graph = document.querySelector('.graph-region')?.getBoundingClientRect();
-    const node = document.querySelector('.graph-node')?.getBoundingClientRect();
-    const list = document.querySelector('.run-list');
-    return {
-      graphTop: graph?.top ?? Infinity,
-      nodeTop: node?.top ?? Infinity,
-      viewportHeight: window.innerHeight,
-      listClientHeight: list?.clientHeight ?? 0,
-      listScrollHeight: list?.scrollHeight ?? 0,
-    };
+  const journal = await openJournal(page);
+  await expect(journal.locator('.journal-entry')).toHaveCount(9);
+  const layout = await journal.evaluate(element => {
+    const rect = element.getBoundingClientRect();
+    return { top: rect.top, bottom: rect.bottom, viewportHeight: innerHeight,
+      clientHeight: element.clientHeight, scrollHeight: element.scrollHeight };
   });
-  expect(layout.graphTop).toBeLessThan(layout.viewportHeight);
-  expect(layout.nodeTop).toBeLessThan(layout.viewportHeight);
-  expect(layout.listClientHeight).toBeLessThan(layout.listScrollHeight);
+  expect(layout.top).toBeGreaterThanOrEqual(0);
+  expect(layout.bottom).toBeLessThanOrEqual(layout.viewportHeight);
+  expect(layout.clientHeight).toBeLessThan(layout.scrollHeight);
+  const last = journal.locator('.journal-entry').last();
+  await last.scrollIntoViewIfNeeded();
+  await expect(last).toBeVisible();
+  await last.click();
+  await expect(last).toHaveAttribute('aria-pressed', 'true');
+  await selectRun(page, 'FORM-101', 'nodes');
+  await readableStep(page, 'Проверка плана');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
-test('reduced motion disables graph animation', async ({ page }) => {
+test('reduced motion disables diagnostic execution animation and keeps the active step readable', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   const current = runnableSnapshot();
+  current.status = 'running';
   current.activeNodeId = 'implement';
   current.nodes[1] = { ...current.nodes[1], status: 'running' };
   await mockApi(page, current);
   await page.goto(`/#session=${token}`);
-  await openGraph(page);
-  const edge = page.locator('.react-flow__edge-path');
-  await expect(edge).toHaveCount(1);
-  const motion = await edge.evaluate((element) => {
+  await openDiagnostics(page, 'result');
+  const loader = book(page).locator('.status-loader-mark');
+  await expect(loader).toHaveCount(1);
+  const motion = await loader.evaluate(element => {
     const style = getComputedStyle(element);
     return { animation: style.animationName, transition: style.transitionDuration };
   });
   expect(motion.animation).toBe('none');
   expect(motion.transition).toBe('0s');
+  await selectStep(page, 'implement');
+  await expect(stepDetails(page).locator('.status-chip')).toHaveClass(/status-running/);
 });
 
 test('clears an expired gate request and refreshes capabilities', async ({ page }) => {
   const fixture = await mockApi(page, snapshot(), { gateErrorCode: 'GATE_EXPIRED' });
   await page.goto(`/#session=${token}`);
-  await openGraph(page);
+  await openDiagnostics(page, 'nodes');
   const readsBeforeGate = fixture.snapshotReads();
 
   await page.getByRole('button', { name: 'Подтвердить план' }).click();
@@ -856,10 +874,14 @@ test('renders a fail-closed snapshot when optional evidence reads fail', async (
     });
   });
   await page.goto(`/#session=${token}`);
-  await page.getByRole('button',{name:'Граф',exact:true}).click();
-  await page.getByRole('button',{name:'Состояние проекта',exact:true}).click();
-  await expect(page.locator('.run-health .negative')).toHaveText('Целостность данных не подтверждена');
-  await expect(page.getByRole('heading', { name: 'Граф выполнения' }).first()).toBeVisible();
+  await openDiagnostics(page, 'nodes');
+  await expect(page.getByTestId('rpg-runtime-status')).toHaveText('Состояние недоступно');
+  await expect(book(page).getByRole('heading', { name: 'Книга диагностики', exact: true })).toBeVisible();
+  await expect(stepPicker(page).locator('option')).toHaveCount(1);
+  await expect(stepDetails(page)).toHaveCount(0);
+  await expect(book(page).getByRole('button', { name: 'Запустить', exact: true })).toHaveCount(0);
+  await openDiagnostics(page, 'result');
+  await expect(book(page).locator('.workflow-summary')).toHaveText('Целостность данных не подтверждена');
   await expect(page.locator('.error-banner')).toHaveCount(0);
 });
 
@@ -867,8 +889,9 @@ test('keeps controls usable on mobile and supports RU/EN and dark mode', async (
   await page.setViewportSize({ width: 390, height: 844 });
   await mockApi(page);
   await page.goto(`/#session=${token}`);
-  await page.getByRole('button', { name: 'На английском' }).click();
-  await expect(page.getByRole('heading', { name: 'flowcairn' })).toBeVisible();
+  await openDiagnostics(page, 'nodes');
+  await book(page).getByRole('button', { name: 'На английском' }).click();
+  await expect(book(page).getByRole('heading', { name: 'Diagnostic book', exact: true })).toBeVisible();
   expect(await page.locator('html').getAttribute('lang')).toBe('en');
   await page.getByRole('button', { name: 'Switch theme' }).click();
   await expect(page.locator('html')).toHaveAttribute('data-dark', '');
@@ -883,12 +906,13 @@ test('actual service fixture smoke', async ({ page }, testInfo) => {
   await page.goto(process.env.FLOWCAIRN_TEST_URL);
   await expect(
     page.getByRole('heading', {
-      name: 'flowcairn',
+      name: 'Flowcairn', exact: true,
     }),
   ).toBeVisible();
-  await expect(page.locator('.operator-layout')).toBeVisible();
-  const advancedGraph = page.getByRole('button', { name: 'Граф', exact: true });
-  if (await advancedGraph.isVisible()) await advancedGraph.click();
-  await expect(page.locator('.graph-node').first()).toBeVisible();
+  await expect(page.getByTestId('rpg-shell')).toBeVisible();
+  await openDiagnostics(page, 'nodes');
+  await expect(stepPicker(page).locator('option').nth(1)).toBeAttached();
+  await book(page).getByRole('button', { name: 'Текущий этап', exact: true }).click();
+  await expect(stepDetails(page)).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath('actual-workflow.png'), fullPage: true });
 });

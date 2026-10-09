@@ -5,7 +5,7 @@ import { closeSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, renam
 import path from 'node:path';
 import { GraphError, sha256 } from '../scripts/ai-graph/lib/io.mjs';
 import {
-  ProjectProfileSchema, onboardingConsentHash, hasOnboardingConsent, loadProjectProfile,
+  ProjectProfileSchema, ProjectProfileV1Schema, onboardingConsentHash, hasOnboardingConsent, loadProjectProfile,
   PACKAGE_MANAGER_LOCKS, packageManagerLock, discoverProjectChecks, trustedLocalChecksHash,
   PROJECT_CHECK_IDS, validatePackageManagerProject,
 } from '../scripts/ai-graph/lib/project.mjs';
@@ -15,7 +15,7 @@ import { requireCodexReady } from './codex-setup.mjs';
 import { defaultProvider } from '../scripts/ai-graph/lib/platform.mjs';
 import { probeExternalProvider } from '../scripts/ai-graph/lib/providers.mjs';
 import { discoverWorkspaceManifests } from './workspaces.mjs';
-import { PROFILE, csv, existsNoFollow, git, projectRoot, readRegular } from './project-files.mjs';
+import { PROFILE, csv, existsNoFollow, git, projectRoot, readRegular, readCheckProfile } from './project-files.mjs';
 
 const OWNER_FILE = '.ai-orchestrator/flowcairn-install.json';
 const IGNORE_BLOCK = '# Flowcairn: локальное состояние, не исходники\n.ai-orchestrator/\n';
@@ -111,6 +111,13 @@ export function initializeProject(input, options = {}) {
       fail('PROFILE_MIGRATION_REQUIRED', 'Legacy-профиль требует безопасной миграции через npx flowcairn.');
   }
   const existingProfile = profileExists ? loadProjectProfile(root) : null;
+  if (existingProfile && options['check-profile'] !== undefined) {
+    const requested = readCheckProfile(root, options['check-profile']);
+    const requiredCheckIds = options.checks !== undefined ? csv(options.checks)
+      : (options['check-mode'] ?? existingProfile.checkMode) === 'none' ? [] : requested.requiredCheckIds;
+    if (existingProfile.version !== 2 || JSON.stringify(existingProfile.checkProfile) !== JSON.stringify({ ...requested, requiredCheckIds }))
+      fail('CHECK_PROFILE_EXISTS', 'Для регистрации другого профиля проверок закройте UI и выполните npx flowcairn setup --check-profile PATH.');
+  }
   const selectedProvider = options.provider ?? defaultProvider();
   if (!existingProfile && ['claude', 'cursor'].includes(selectedProvider)) {
     const probe = probeExternalProvider(selectedProvider, { executable: options['provider-path'] });
@@ -164,7 +171,7 @@ export function initializeProject(input, options = {}) {
     ([options.model, options['review-model']].some((value) =>
       /^(?:sk-|sess-|Bearer\s)/i.test(value ?? ''),
     ) ||
-      !ProjectProfileSchema.shape.ai.safeParse({
+      !ProjectProfileV1Schema.shape.ai.safeParse({
         provider: selectedProvider,
         model: options.model,
       }).success)
@@ -174,20 +181,27 @@ export function initializeProject(input, options = {}) {
       ((options['review-model'] && options['review-model'] !== options.model) ||
        (options['review-reasoning-effort'] && options['review-reasoning-effort'] !== options['reasoning-effort'])))
     fail('AI_CONFIG', 'В ручном режиме модель и усиление одинаковы для всех этапов. Для отдельной настройки ревью выберите auto.');
-  let pkg;
-  try {
+  const importedChecks = options['check-profile'] === undefined ? null : readCheckProfile(root, options['check-profile']);
+  let pkg = null;
+  const readNodeManifest = !importedChecks && existingProfile?.version !== 2 && existsNoFollow(path.join(root, 'package.json'));
+  if (readNodeManifest) try {
     pkg = JSON.parse(readRegular(path.join(root, 'package.json'), 256 * 1024).toString('utf8'));
   } catch (error) {
     if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
     fail(
       'PACKAGE_JSON',
-      'В корне Git нужен существующий корректный package.json. Укажите корень Node-проекта через --root.',
+      'package.json содержит некорректный JSON. Исправьте его или выберите явный --check-profile.',
     );
   }
-  if (!pkg || typeof pkg !== 'object' || Array.isArray(pkg))
+  if (readNodeManifest && (!pkg || typeof pkg !== 'object' || Array.isArray(pkg)))
     fail('PACKAGE_JSON', 'В package.json нужен JSON-объект.');
-  const manager =
-    existingProfile?.packageManager ?? packageManager(root, pkg, options['package-manager']);
+  const discoveredChecks = pkg ? discoverProjectChecks(pkg) : { checks: [], checkScripts: {} };
+  // An explicitly requested legacy worktree keeps its adapter, even without checks.
+  const legacyWorktree = options['workspace-mode'] === 'worktree' && pkg !== null;
+  const generic = importedChecks !== null || existingProfile?.version === 2 ||
+    (!existingProfile && options['package-manager'] === undefined && !legacyWorktree && !discoveredChecks.checks.length);
+  if (!generic && !pkg) fail('PACKAGE_JSON', 'Для выбранного адаптера npm scripts нужен package.json проекта.');
+  const manager = generic ? undefined : existingProfile?.packageManager ?? packageManager(root, pkg, options['package-manager']);
   const gitCheckout = existsNoFollow(path.join(root, '.git'));
   const integrationBranch =
     existingProfile?.integrationBranch ?? options.branch ?? (gitCheckout ? git(root, ['branch', '--show-current']) : 'direct');
@@ -196,37 +210,42 @@ export function initializeProject(input, options = {}) {
       'BRANCH_REQUIRED',
       'Git находится в detached HEAD. Переключитесь на рабочую ветку или укажите --branch.',
     );
-  validatePackageManagerProject(root, manager, pkg);
-  const discoveredChecks = discoverProjectChecks(pkg);
+  if (!generic) validatePackageManagerProject(root, manager, pkg);
   const checkMode = options['check-mode'] ?? 'trusted-local';
   if (!['none', 'trusted-local', 'hardened'].includes(checkMode))
     fail('CHECK_MODE', 'Доступны check-mode: none, trusted-local или hardened.');
+  const checkProfile = importedChecks ?? (existingProfile?.version === 2 ? existingProfile.checkProfile : null) ??
+    { version: 1, requiredCheckIds: [], definitions: [], environment: [] };
   const checks = options.checks === undefined
-    ? (checkMode !== 'none' ? discoveredChecks.checks : [])
+    ? (checkMode !== 'none' ? generic ? checkProfile.requiredCheckIds : discoveredChecks.checks : [])
     : csv(options.checks);
   if (checkMode === 'none' && checks.length)
     fail('CHECK_MODE', 'Для проверок проекта выберите trusted-local или hardened.');
   for (const check of checks) {
-    if (!PROJECT_CHECK_IDS.includes(check) || !discoveredChecks.checkScripts[check])
-      fail('CHECK_SCRIPT_MISSING', `Для проверки ${check} нужен существующий script package.json.`);
+    if (generic ? !checkProfile.definitions.some((definition) => definition.id === check) : !PROJECT_CHECK_IDS.includes(check) || !discoveredChecks.checkScripts[check])
+      fail(generic ? 'CHECK_NOT_REGISTERED' : 'CHECK_SCRIPT_MISSING', `Проверка ${check} отсутствует в выбранном профиле проекта.`);
   }
-  const checkScripts = Object.fromEntries(checks.map((check) => [check, discoveredChecks.checkScripts[check]]));
+  const checkScripts = generic ? undefined : Object.fromEntries(checks.map((check) => [check, discoveredChecks.checkScripts[check]]));
   const workspaceMode = options['workspace-mode'] ?? 'direct';
   if (!['direct', 'worktree'].includes(workspaceMode))
     fail('WORKSPACE_MODE', 'Доступны режимы работы: direct или worktree.');
+  if (generic && workspaceMode !== 'direct')
+    fail('WORKSPACE_MODE', 'Профиль команд пока доступен в режиме direct. Явно выберите --workspace-mode direct.');
   const profile =
     existingProfile ??
     ProjectProfileSchema.parse({
-      version: 1,
+      version: generic ? 2 : 1,
       integrationBranch,
       workspaceMode,
-      packageManager: manager,
+      ...(generic ? { checkProfile: { ...checkProfile, requiredCheckIds: checks } } : { packageManager: manager }),
       contextPaths: csv(options.context),
       checks,
       checkMode,
-      ...(checks.length ? { checkScripts } : {}),
-      outputPaths: csv(options.outputs),
-      manifests: discoverManifests(root, pkg, manager, options.manifests),
+      ...(!generic && checks.length ? { checkScripts } : {}),
+      outputPaths: options.outputs === undefined && generic
+        ? [...new Set(checkProfile.definitions.flatMap((definition) => definition.outputPaths))] : csv(options.outputs),
+      manifests: generic ? csv(options.manifests)
+        : discoverManifests(root, pkg, manager, options.manifests),
       ...(options._skillManifest?.length ? { skillManifest: options._skillManifest } : {}),
       ...(['read-consent', 'test-policy', 'coverage'].some((key) => options[key] !== undefined) ? { onboarding: {
         version: 1, readConsent: options['read-consent'] === true,
@@ -262,6 +281,8 @@ export function initializeProject(input, options = {}) {
   const profileText = existingProfile
     ? readRegular(path.join(root, PROFILE)).toString('utf8')
     : JSON.stringify(profile, null, 2) + '\n';
+  if (Buffer.byteLength(profileText) > 32768)
+    fail('PROJECT_PROFILE_TOO_LARGE', 'Итоговый профиль превышает 32 KiB. Сократите определения проверок.');
   if (options['dry-run'])
     return {
       created: false,

@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import { readFileSync, lstatSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { authorize, control, send, sendError } from './controller.mjs';
+import { authorize, control, learningRead, send, sendError } from './controller.mjs';
 
 const DIRECTORY = path.dirname(fileURLToPath(import.meta.url));
 const TYPES = {
@@ -10,9 +10,15 @@ const TYPES = {
   '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.woff2': 'font/woff2',
+  '.json': 'application/json; charset=utf-8',
+  '.png': 'image/png',
 };
 const STATIC_FILES = new Set(['index.html', 'app.js', 'app.css',
-  'fonts/Manrope-Cyrillic-Variable.woff2', 'fonts/Manrope-Latin-Variable.woff2']);
+  'fonts/Manrope-Cyrillic-Variable.woff2', 'fonts/Manrope-Latin-Variable.woff2',
+  'assets/rpg/world.json', 'assets/rpg/world.png',
+  'assets/rpg/workshop-room.png', 'assets/rpg/archive-room.png',
+  'assets/rpg/hero-idle.png', 'assets/rpg/mentor-idle.png',
+  'assets/rpg/ui-codex.png', 'assets/rpg/ui-quest-scroll.png']);
 
 export function startViewer({ service, token, port = 4329, dist = path.join(DIRECTORY, 'dist') }) {
   if (!/^[a-zA-Z0-9_-]{24,128}$/.test(token))
@@ -50,6 +56,7 @@ export function startViewer({ service, token, port = 4329, dist = path.join(DIRE
             runs: service.listRuns(),
             capabilities: service.capabilities(),
           });
+        if (await learningRead(service, response, url)) return;
         const match = url.pathname.match(
           /^\/api\/runs\/([a-z][a-z0-9-]{1,79})\/(snapshot|plan|events|stream|receipts\/[a-f0-9]{64}|artifacts\/[a-f0-9]{64})$/,
         );

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { GateSnapshot, GraphPlan, Snapshot } from './contracts';
 import { humanText, nodeTitle, runtimeProblem, StatusIcon, technicalProblem } from './presentation';
+import { PlanRequirements } from './PlanRequirements';
 import { PlanDecision, planDecision } from './PlanDecision';
 import { WideWorkList } from './WideWorkList';
 import { TechnicalDetails } from './TechnicalDetails';
@@ -57,6 +58,7 @@ export function WorkflowPanel({ snapshot, plan, busy, stateUnavailable = false, 
       : approved ? 'Реализация, проверки и исправления пройдут автоматически. Можно вернуться к результату позже.'
       : waitingToStart ? 'Анализ еще не начался. Начните работу, чтобы получить план для согласования.'
       : 'Изучаем проект и требования. Затем покажем план для согласования.'}</p>
+    {gate?.type === 'approve-plan' && <PlanRequirements snapshot={snapshot} plan={plan} unavailable={stateUnavailable} />}
     {!wide && <PlanDecision snapshot={snapshot} plan={plan} unavailable={stateUnavailable} busy={busy} feedback={feedback} onApprove={onApprove} />}
     {blocked && problem && <section className="workflow-problem" role="alert">
       <strong>Что делать дальше</strong>

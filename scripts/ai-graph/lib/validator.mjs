@@ -2,6 +2,8 @@ import { GraphError, hashObject } from './io.mjs';
 import { GraphPlanSchema, TaskSpecSchema, assertJsonBounds } from './schemas.mjs';
 import { validateTaskContract } from './task-contract.mjs';
 import { validAutonomyForNodes } from './autonomy-policy.mjs';
+import { validatePlanChecks } from './plan-checks.mjs';
+import { buildExecutionStages, assertExecutionStages } from './stage-plan.mjs';
 import {
   resolveAction,
   requiredChecks,
@@ -22,7 +24,7 @@ const same = (a, b) => JSON.stringify([...a].sort()) === JSON.stringify([...b].s
 export function validatePlan(
   input,
   taskInput,
-  { runtimeHash = undefined, skills = undefined, resolveSkills = undefined, resolveReadPaths = undefined, contextHash = undefined, provider = undefined, mode = 'current' } = {},
+  { runtimeHash = undefined, skills = undefined, resolveSkills = undefined, resolveReadPaths = undefined, contextHash = undefined, provider = undefined, checks = undefined, mode = 'current' } = {},
 ) {
   if (!['current', 'historical'].includes(mode))
     reject('INVALID_VALIDATION_MODE', 'Неизвестный режим проверки плана');
@@ -33,6 +35,8 @@ export function validatePlan(
   if (!parsed.success) reject('INVALID_PLAN', 'GraphPlan не соответствует schema');
   const task = TaskSpecSchema.parse(taskInput),
     plan = parsed.data;
+  validatePlanChecks(plan, task, historical ? null : checks);
+  if (plan.schemaVersion !== task.schemaVersion) reject('PLAN_TASK_MISMATCH', 'Версии формата плана и задачи не совпадают');
   const taskHashes = historical
     ? new Set([hashObject(taskInput), hashObject(task)])
     : new Set([hashObject(task)]);
@@ -74,6 +78,7 @@ export function validatePlan(
     }
     ancestors.set(id, set);
   }
+  assertExecutionStages(plan, task, ancestors);
   const autonomous = plan.workflow === 'autonomous';
   const productPlanning = autonomous && plan.stage === 'planning';
   const providerConsent = plan.nodes.filter((node) => node.action.id === 'human-provider-consent');
@@ -112,7 +117,7 @@ export function validatePlan(
       reject('DUPLICATE_DEPENDENCY', 'Зависимости повторяются');
     const action = historical
       ? null
-      : resolveAction(node.action.id, node.action.version, node.action.inputs);
+      : resolveAction(node.action.id, node.action.version, node.action.inputs, plan.schemaVersion === 3 ? plan.checks : null);
     if (new Set(node.permissions).size !== node.permissions.length)
       reject('PERMISSION_MISMATCH', 'Node содержит повторяющиеся permissions');
     if (!historical && !same(node.permissions, action.permissions))
@@ -204,9 +209,10 @@ export function validatePlan(
       reject('MISSING_SCOPE_CHECK', 'Implementation требует workspace-check после записи');
     for (const check of plan.nodes.filter(
       (n) =>
-        n.action.id.startsWith('check-') ||
-        n.action.id === 'ai-review' ||
-        n.action.id === 'artifact-handoff',
+        plan.schemaVersion !== 3 && (
+          n.action.id.startsWith('check-') ||
+          n.action.id === 'ai-review' ||
+          n.action.id === 'artifact-handoff'),
     ))
       if (
         implementations.some(
@@ -259,12 +265,12 @@ export function assertPlanHash(plan, expectedHash) {
     reject('PLAN_INTEGRITY', 'Immutable plan hash не совпадает');
 }
 
-export function compilePlan(task, { runtimeHash, skills, resolveSkills = undefined, resolveReadPaths = undefined, contextHash = undefined, provider = undefined, version = 1, parentPlanHash = null }) {
+export function compilePlan(task, { runtimeHash, skills, resolveSkills = undefined, resolveReadPaths = undefined, contextHash = undefined, provider = undefined, checks = undefined, learningMode = 'after-stage', version = 1, parentPlanHash = null }) {
   const nodes = [];
   const externalProvider = ['claude', 'cursor'].includes(provider);
   const aiReads = [...new Set([...task.scope, ...task.contextPaths, ...REQUIRED_AI_CONTEXT_PATHS])];
   const add = (id, actionId, title, outcome, needs) => {
-    const action = resolveAction(actionId);
+    const action = resolveAction(actionId, 1, {}, task.schemaVersion === 3 ? checks : null);
     nodes.push({
       id,
       title,
@@ -323,9 +329,11 @@ export function compilePlan(task, { runtimeHash, skills, resolveSkills = undefin
       build: 'Собрать проект',
       'graph-tests': 'Проверить работу графа',
       'shared-build': 'Собрать общие пакеты',
-    }[check];
-    add(check, `check-${check}`, title, 'Проверка успешно завершена', [previous]);
-    previous = check;
+    }[check] ?? checks?.definitions?.find((item) => item.id === check)?.title ?? `Проверка ${check}`;
+    const builtin = ['shared-build', 'graph-tests', 'typecheck', 'lint', 'tests', 'build'].includes(check);
+    const nodeId = task.schemaVersion === 3 && !builtin ? `check-${check}` : check;
+    add(nodeId, `check-${check}`, title, 'Проверка успешно завершена', [previous]);
+    previous = nodeId;
   }
   add('review', 'ai-review', 'Провести независимое ревью', 'Нет блокирующих замечаний', [previous]);
   add(
@@ -347,7 +355,9 @@ export function compilePlan(task, { runtimeHash, skills, resolveSkills = undefin
   const selectedSkills = skills.filter((skill) => nodes.some((node) => node.skills.includes(skill.id)));
   return validatePlan(
     {
-      schemaVersion: 2,
+      schemaVersion: task.schemaVersion,
+      ...(task.schemaVersion === 3 ? { stage: 'execution', checks, checkRegistryHash: hashObject(checks),
+        learning: { version: 1, initialMode: learningMode }, executionStages: buildExecutionStages(nodes) } : {}),
       ...(contextHash ? { contextHash } : {}),
       taskHash: hashObject(task),
       version,
@@ -360,6 +370,6 @@ export function compilePlan(task, { runtimeHash, skills, resolveSkills = undefin
       nodes,
     },
     task,
-    { runtimeHash, skills, resolveSkills, resolveReadPaths, contextHash, provider },
+    { runtimeHash, skills, resolveSkills, resolveReadPaths, contextHash, provider, checks },
   );
 }

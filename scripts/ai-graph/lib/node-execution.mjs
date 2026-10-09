@@ -12,6 +12,7 @@ import { selectAnalysisEvidence } from './analysis-evidence.mjs';
 import { normalizeRequirementReview, validateRequirementAssessments } from './requirement-verification.mjs';
 import { projectContextMap } from './project-context-map.mjs';
 import { MAX_ANALYSIS_BYTES } from './context-limits.mjs';
+import { captureStageBefore, completeStageBoundary } from './stage-execution.mjs';
 
 const fail = (code, message) => { throw new GraphError(code, message); };
 const unique = (values) => [...new Set(values)];
@@ -23,6 +24,7 @@ export async function executeNode(host, state, task, plan, definition, signal) {
       definition.action.id,
       definition.action.version,
       definition.action.inputs,
+      plan.checks ?? null,
     );
     if (
       !definition.needs.every((id) => state.nodes[id].status === 'passed') ||
@@ -39,6 +41,8 @@ export async function executeNode(host, state, task, plan, definition, signal) {
       definition,
     );
     if (attempt > definition.retry.maxAttempts) fail('ATTEMPT_LIMIT', 'Лимит попыток исчерпан');
+    state = captureStageBefore(host, state, task, plan, definition, before);
+    if (state.learning?.failure) return state;
     const startReceipt = host.receipt(state, task, plan, definition, {
       phase: 'started',
       attempt,
@@ -213,7 +217,7 @@ export async function executeNode(host, state, task, plan, definition, signal) {
         assertJsonBounds(result.output);
         aiOutput = (definition.action.id === 'ai-plan' ? AIPlanningResultSchema : definition.action.id === 'ai-analyze' && plan.workflow === 'autonomous' ? AIAnalysisResultSchema : reviewBundle ? AIReviewResultSchema : AIResultSchema).parse(result.output);
         if (definition.action.id === 'ai-plan' && aiOutput.verdict === 'pass' && !Reflect.get(aiOutput, 'contextRequests')?.length)
-          compileTaskProposal(task, aiOutput, { runtimeHash: host.adapters.identity(), skills: host.adapters.skills(task), resolveSkills: host.adapters.resolveSkills, resolveReadPaths: host.adapters.resolveReadPaths, contextHash: host.adapters.contextHash?.(task), provider: host.adapters.project?.ai.provider, analysis: host.analysis(state, plan), workflow: plan.workflow });
+          compileTaskProposal(task, aiOutput, { runtimeHash: host.adapters.identity(), skills: host.adapters.skills(task), resolveSkills: host.adapters.resolveSkills, resolveReadPaths: host.adapters.resolveReadPaths, contextHash: host.adapters.contextHash?.(task), provider: host.adapters.project?.ai.provider, analysis: host.analysis(state, plan), workflow: plan.workflow, checks: host.adapters.checkRegistry?.() });
         if (reviewBundle) {
           const verified = buildReviewEvidence({
             state,
@@ -397,7 +401,7 @@ export async function executeNode(host, state, task, plan, definition, signal) {
       reason = host.safeReason(error);
       verdict = 'uncertain';
       if (!processStarted && !result && error instanceof GraphError &&
-          ['RUNNER_PROMPT_LIMIT', 'AI_CONTEXT_LIMIT', 'INSTRUCTION_CONTEXT_LIMIT'].includes(error.code)) {
+          ['RUNNER_PROMPT_LIMIT', 'AI_CONTEXT_LIMIT', 'INSTRUCTION_CONTEXT_LIMIT', 'CHECK_SHELL_CONFIG_UNSUPPORTED'].includes(error.code)) {
         // These errors are raised during command preparation, before a process is started.
         result = { exitCode: 1, stopped: true, uncertain: false,
           execution: { kind: 'preflight', processStarted: false, reason: error.code } };
@@ -475,7 +479,7 @@ export async function executeNode(host, state, task, plan, definition, signal) {
         after?.hash === before.hash,
     });
     const next = reconcile(
-      {
+      completeStageBoundary(host, {
         ...current,
         nodes: finalNodes,
         workspaceFingerprint: after ? host.persistFingerprint(after) : current.workspaceFingerprint,
@@ -490,7 +494,7 @@ export async function executeNode(host, state, task, plan, definition, signal) {
               },
             }
           : {}),
-      },
+      }, task, plan, definition, after, receipt),
       plan,
     );
     // Поздняя команда Stop не переписывает успешный receipt уже завершенного

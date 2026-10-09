@@ -9,6 +9,7 @@ import { loadProjectProfile, projectContextPaths } from './project.mjs';
 import { ownedBootstrapFiles } from './bootstrap.mjs';
 import { isSensitiveSourcePath } from './source.mjs';
 import { fingerprintProjectSource } from './project-source-access.mjs';
+import { checkProfileSummary } from './check-profile.mjs';
 
 function git(root, args) {
   const result = spawnSync(gitExecutable(), ['-c', 'core.fsmonitor=false', ...args], {
@@ -67,8 +68,8 @@ export function projectSummary(service) {
   // Other unsafe names remain a blocker. Never read private configuration to build the preview.
   const unsafeChanges = changed.some((file) => !safe(file) &&
     !(RelativePath.safeParse(file).success && isSensitiveSourcePath(file)));
-  return { schemaVersion: 2, name: path.basename(service.root), contextHash, contextPaths, scopeCandidates, bootstrap,
-    checks: profile.checks, ai: { provider: profile.ai.provider, model: profile.ai.model },
+  return { schemaVersion: 3, name: path.basename(service.root), contextHash, contextPaths, scopeCandidates, bootstrap,
+    checkIds: profile.checks, ...checkProfileSummary(service.root, profile), ai: { provider: profile.ai.provider, model: profile.ai.model },
     capabilities: { intake: { allowed: scopeCandidates.length > 0 && !unsafeChanges,
       reason: unsafeChanges ? 'Измененные или новые файлы содержат закрытые/небезопасные пути; исключите их из рабочего дерева перед snapshot' : scopeCandidates.length ? null : 'Не найден доступный scope исходников' } } };
 }

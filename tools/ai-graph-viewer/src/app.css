@@ -1,4 +1,3 @@
-@import '@xyflow/react/dist/style.css';
 @import './cockpit.css';
 
 @font-face {
@@ -364,7 +363,6 @@ button {
   min-width: 0;
 }
 .run-rail,
-.graph-region,
 .detail-panel {
   min-width: 0;
   min-height: 0;
@@ -398,8 +396,7 @@ button {
   padding: 12px;
   border-block-end: 1px solid var(--border);
 }
-.rail-heading h2,
-.graph-header h2 {
+.rail-heading h2{
   margin: 0;
   font-size: 0.88rem;
 }
@@ -556,119 +553,9 @@ button {
 .negative {
   color: var(--danger);
 }
-
-.graph-region {
-  display: grid;
-  grid-template-rows: auto 1fr;
-}
-.graph-region:has(> .execution-status) { grid-template-rows: auto auto minmax(0, 1fr); }
-.graph-region:has(> .execution-status):has(> .next-action) { grid-template-rows: auto auto auto minmax(0, 1fr); }
-.graph-region > .execution-status { margin: 12px 16px 0; }
-.graph-header {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 10px;
-  padding: 13px 16px;
-  border-block-end: 1px solid var(--border);
-}
-.graph-header p {
-  max-width: none;
-  overflow-wrap: anywhere;
-  margin: 4px 0 0;
-  color: var(--muted);
-  font-size: 0.76rem;
-  line-height: 1.35;
-}
-.graph-tools {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 7px;
-}
-.graph-facts {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 14px;
-  color: var(--muted);
-  font-size: 0.7rem;
-  font-variant-numeric: tabular-nums;
-  white-space: normal;
-}
-.graph-view-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
-}
 code,
 pre {
   font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
-}
-.flow-wrap {
-  min-height: 0;
-  background: color-mix(in srgb, var(--page) 70%, var(--surface));
-}
-.react-flow__attribution {
-  background: color-mix(in srgb, var(--surface) 82%, transparent) !important;
-  color: var(--muted) !important;
-}
-.react-flow__controls {
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 11px;
-  box-shadow: var(--shadow);
-}
-.react-flow__controls.top.left {
-  margin: 18px;
-}
-.react-flow__controls-button {
-  border-color: var(--border);
-  background: var(--surface);
-  color: var(--text);
-  fill: currentColor;
-}
-.react-flow__minimap {
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 11px;
-  background: var(--soft) !important;
-}
-.react-flow__edge-path {
-  stroke: var(--border-strong);
-}
-.react-flow__handle {
-  width: 8px;
-  height: 8px;
-  border: 2px solid var(--surface);
-  background: var(--plum);
-}
-.graph-node {
-  width: 244px;
-  min-height: 132px;
-  padding: 14px;
-  border: 2px solid var(--node-status-color);
-  border-radius: 14px;
-  background: var(--surface);
-  color: var(--text);
-  text-align: start;
-  cursor: pointer;
-  isolation: isolate;
-  position: relative;
-  transition: border-color 180ms ease-out;
-}
-.graph-node.selected {
-  outline: 2px solid var(--plum);
-  outline-offset: 4px;
-}
-.graph-node > strong {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  overflow: hidden;
-  margin-block: 12px 6px;
-  font-size: 0.9rem;
-  line-height: 1.25;
 }
 .node-heading,
 .node-meta {
@@ -693,15 +580,6 @@ pre {
   color: var(--muted);
   font-size: 0.64rem;
   font-variant-numeric: tabular-nums;
-}
-.node-toolbar {
-  display: flex;
-  gap: 5px;
-  padding: 5px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--surface);
-  box-shadow: var(--shadow);
 }
 .toolbar-action {
   min-height: 30px;
@@ -1154,9 +1032,6 @@ dialog::backdrop {
 }
 
 @media (max-width: 720px) {
-  .react-flow__minimap {
-    display: none;
-  }
   .topbar {
     align-items: flex-start;
     flex-direction: column;
@@ -1205,24 +1080,6 @@ dialog::backdrop {
   }
   .run-rail {
     max-height: 270px;
-  }
-  .graph-region {
-    min-height: 560px;
-  }
-  .graph-header {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-  .graph-facts {
-    flex-wrap: wrap;
-    white-space: normal;
-  }
-  .graph-tools {
-    width: 100%;
-    justify-items: start;
-  }
-  .flow-wrap {
-    min-height: 490px;
   }
   .detail-panel {
     min-height: 460px;
@@ -1347,27 +1204,7 @@ dialog::backdrop {
   .status-mark {
     forced-color-adjust: none;
   }
-  .graph-node.selected {
-    outline: 2px solid Highlight;
-  }
 }
-
-/* Native Node classes and Edge.animated project committed snapshot state only. */
-.graph-node:focus-visible {
-  outline: 3px solid var(--text);
-  outline-offset: 5px;
-}
-.graph-node:hover {
-  border-color: var(--node-status-color);
-}
-.graph-node.status-idle, .graph-node.status-pending, .graph-node.status-cancelled, .graph-node.status-stale {
-  border-style: dashed;
-}
-.graph-node.status-uncertain { border-style: double; border-width: 3px; }
-.graph-node.status-running {
-  background: color-mix(in srgb, var(--status-running) 6%, var(--surface));
-}
-.graph-node.status-running.selected { outline: none; }
 .execution-border {
   position: absolute;
   z-index: 0;
@@ -1389,21 +1226,12 @@ dialog::backdrop {
   vector-effect: non-scaling-stroke;
   animation: execution-snake 3.6s linear infinite;
 }
-.graph-node.status-running > :not(.execution-border) { position: relative; z-index: 1; }
 @keyframes execution-snake { to { stroke-dashoffset: -100; } }
 .status-icon { width: 20px; height: 20px; flex: 0 0 auto; color: var(--node-status-color); }
-.graph-node .node-status { color: var(--text); font-weight: 650; }
 .node-hint { display: block; margin-top: 5px; color: var(--muted); font-size: .68rem; line-height: 1.4; }
-.react-flow__edge.dependency-active .react-flow__edge-path {
-  stroke: var(--status-running);
-  animation-duration: 1.6s;
-}
-.react-flow__edge.dependency-idle .react-flow__edge-path { animation: none; }
-[data-page-hidden] .execution-border rect,
-[data-page-hidden] .react-flow__edge-path { animation-play-state: paused !important; }
+[data-page-hidden] .execution-border rect{ animation-play-state: paused !important; }
 @media (prefers-reduced-motion: reduce) {
   .execution-border rect { animation: none; stroke-dasharray: 22 78; }
-  .react-flow__edge.animated .react-flow__edge-path { animation: none; }
 }
 
 /* Task intake extends the existing quiet operator surface. */
@@ -1486,7 +1314,6 @@ dialog::backdrop {
 .next-action { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 20px; border-bottom: 1px solid var(--border); }
 .next-action p { font-size: 0.85rem; line-height: 1.5; margin: 0; max-width: 65ch; }
 @media (max-width: 720px) { .next-action { flex-direction: column; align-items: stretch; } }
-.graph-region:has(> .next-action) { grid-template-rows: auto auto minmax(0, 1fr); }
 
 .scope-picker { font-size: 0.85rem; }
 .scope-picker summary { cursor: pointer; color: var(--muted); }
@@ -1498,11 +1325,6 @@ dialog::backdrop {
 .bootstrap-context summary { cursor: pointer; }
 .bootstrap-context li { overflow-wrap: anywhere; }
 .bootstrap-context > p { font-size: 0.8rem; margin-top: 10px; }
-
-.graph-goal { min-width: 0; margin-top: 4px; color: var(--muted); font-size: 0.76rem; line-height: 1.35; }
-.graph-goal summary { cursor: pointer; }
-.graph-goal summary span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
-.graph-goal[open] summary span { -webkit-line-clamp: 1; }
 
 /* Основной сценарий: задача, план и результат. Технические отчеты доступны отдельно. */
 input, textarea { caret-color: var(--plum); }
@@ -1535,9 +1357,7 @@ a { text-underline-offset: 3px; }
   .task-context-picker input, .task-context-picker textarea, .task-context-picker select { font-size: 16px; }
   .task-clarification > header { flex-wrap: wrap; }
 }
-.autonomous .graph-facts { display: none; }
 .autonomous .node-mode, .autonomous .node-meta, .autonomous .node-hint { display: none; }
-.autonomous .graph-node { min-height: 124px; }
 .workflow-panel { padding: 28px; }
 .workflow-panel h2 { max-width: 24ch; font-size: clamp(1.45rem, 2.25vw, 2rem); letter-spacing: -.028em; line-height: 1.12; margin: 0 0 12px; text-wrap: balance; }
 .workflow-summary { max-width: 60ch; color: var(--muted); font-size: .96rem; line-height: 1.58; margin: 0 0 22px; }
@@ -1567,16 +1387,9 @@ a { text-underline-offset: 3px; }
 .status-icon[data-status='failed'] { color: var(--status-failed); }
 .status-icon[data-status='cancelled'] { color: var(--status-cancelled); }
 .status-icon[data-status='waiting-for-human'] { color: var(--status-waiting-for-human); }
-.graph-node.status-waiting-for-human {
-  background: color-mix(in srgb, var(--status-waiting-for-human) 7%, var(--surface));
-  border-color: color-mix(in srgb, var(--status-waiting-for-human) 82%, var(--border-strong));
-}
-.graph-node.status-waiting-for-human.selected { outline: none; }
-[data-page-hidden] .graph-node::after { animation-play-state: paused; }
 @media (max-width: 720px) {
   .workflow-panel { padding: 22px 18px; }
   .autonomous .detail-panel { order: 1; }
-  .autonomous .graph-region { order: 2; }
   .autonomous .run-rail { order: 3; }
   .run-rail:has(.health-details[open]) { max-height: none; }
   .health-details { max-height: none; overflow: visible; }

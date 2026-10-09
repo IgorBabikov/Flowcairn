@@ -63,7 +63,7 @@ function scan(root, outputPaths) {
         if (excluded.isSymbolicLink()) fail('DIRECT_LINK', `Недопустимая ссылка: ${file}`);
         continue;
       }
-      if (classifySource(file).reason === 'output' || outputPaths.some((prefix) => within(file, prefix))) {
+      if (['dependency', 'output'].includes(classifySource(file).reason) || outputPaths.some((prefix) => within(file, prefix))) {
         if (lstatSync(target).isSymbolicLink()) fail('DIRECT_LINK', `Недопустимая ссылка в результатах: ${file}`);
         continue;
       }

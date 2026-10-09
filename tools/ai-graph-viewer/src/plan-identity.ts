@@ -12,10 +12,12 @@ function canonicalJson(value: unknown): string {
   return JSON.stringify(value) ?? 'null';
 }
 
-export async function hashPlan(value: GraphPlan): Promise<string> {
+export async function hashContent(value: unknown): Promise<string> {
   const digest = await crypto.subtle.digest(
     'SHA-256',
     new TextEncoder().encode(canonicalJson(value)),
   );
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
+
+export const hashPlan = (value: GraphPlan): Promise<string> => hashContent(value);

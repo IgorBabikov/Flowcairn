@@ -163,6 +163,7 @@ export const COPY = {
 export const STATUS: Record<Locale, Record<RunStatus, string>> = {
   ru: {
     idle: 'Не начат',
+    'learning-hold': 'Учебная пауза',
     waiting: 'Ожидает решения',
     pending: 'В очереди',
     ready: 'Готов к запуску',
@@ -176,6 +177,7 @@ export const STATUS: Record<Locale, Record<RunStatus, string>> = {
   },
   en: {
     idle: 'Idle',
+    'learning-hold': 'Learning pause',
     waiting: 'Waiting',
     pending: 'Pending',
     ready: 'Ready',

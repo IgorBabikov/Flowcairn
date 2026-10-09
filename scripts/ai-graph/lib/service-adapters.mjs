@@ -14,11 +14,13 @@ import { boundedProcess } from './bounded-process.mjs';
 import { captureBeforeContents, buildAttemptDiff } from './artifacts.mjs';
 import { applyProposedEdits } from './patch.mjs';
 import { prepareToolchain, verifyToolchain } from './toolchain.mjs';
+import { inspectProjectChecks } from './check-profile.mjs';
 import { effectiveInstructionFiles } from './instructions.mjs';
 import { projectInstructionMetadata } from './project-instruction-context.mjs';
 import { directAdapters } from './direct-adapters.mjs';
 import { taskContextInventory } from './intake.mjs';
 import { createReadContext } from './read-context.mjs';
+import { createLearningJobAdapter } from './learning-job-adapter.mjs';
 
 const fail = (code, message) => { throw new GraphError(code, message); };
 const unique = (values) => [...new Set(values)];
@@ -176,8 +178,15 @@ export async function defaultAdapters(root) {
   };
   const resolveSkills = (node, task) => node.action.id.startsWith('ai-') && resolveContext
     ? contextual(node.action.id, node.resources.writes.length ? node.resources.writes : task.scope).ids
-    : [...resolveAction(node.action.id).skills];
+    : node.action.id.startsWith('check-') ? [] : [...resolveAction(node.action.id).skills];
   const adapters = {
+    dataVersion: 3,
+    learningRunner: createLearningJobAdapter({ root, settings: () => loadProjectProfile(root).ai }),
+    learningSourcePolicy: () => {
+      const current = loadProjectProfile(root);
+      return { denyGlobs: current.aiDenyGlobs ?? [], outputPaths: current.outputPaths };
+    },
+    checkRegistry: () => inspectProjectChecks(root, profile),
     project: profile,
     withReadContext: readContext.run,
     taskContextInventory: () => taskContextInventory(root),
