@@ -164,5 +164,32 @@ test('instruction text stays bounded and no links or extra Markdown paths are fo
   f.write('unapproved.md', 'MUST NOT BE INCLUDED');
   const expectedMetadata = projectInstructionMetadata(f.root, f.node, f.task, f.profile);
   assert.ok(!expectedMetadata.some((file) => file.path === 'unapproved.md'));
-  assert.throws(() => buildProjectInstructionContext({ projectRoot: f.root, node: f.node, task: f.task, profile: f.profile, expectedMetadata }), { code: 'INSTRUCTION_CONTEXT_LIMIT' });
+  const context = buildProjectInstructionContext({ projectRoot: f.root, node: f.node, task: f.task, profile: f.profile, expectedMetadata });
+  assert.ok(context.files.every((file) => file.source && file.source.bytes > 8192));
+  assert.ok(context.files.every((file) => !file.content.includes('MUST NOT BE INCLUDED')));
+  assert.ok(!context.files.some((file) => file.path === 'unapproved.md'));
+});
+
+test('large ignored instructions are pinned privately from projectRoot and readable in a different worktree', (t) => {
+  const f = fixture(t), worktree = path.join(f.root, '.ai-orchestrator/worktrees/large');
+  const text = '# Rules\n' + 'Owner rule.\n'.repeat(30000);
+  f.write('AGENTS.override.md', text);
+  mkdirSync(path.dirname(worktree), { recursive: true }); f.git('worktree', 'add', '--detach', worktree, 'HEAD');
+  const expectedMetadata = projectInstructionMetadata(f.root, f.node, f.task, f.profile);
+  const bundle = buildProjectInstructionContext({ projectRoot: f.root, node: f.node, task: f.task, profile: f.profile, expectedMetadata });
+  const prepared = RUNNER_TESTING.makeAiCommand({ root: f.root, worktree, node: f.node, task: f.task, plan: f.plan, skills: [],
+    priorEvidence: { instructionMetadata: expectedMetadata }, projectInstructions: bundle, reviewBundle: null,
+    profile: f.profile, toolchain: { node: process.execPath, codexEntry: '/trusted/codex.js', digest: hashObject('runner') },
+    dependencyToolchain: { dependencyPaths: [], hash: hashObject('dependencies') } });
+  const copy = prepared.instructionReferences.find((item) => item.sourcePath === 'AGENTS.override.md');
+  try {
+    assert.ok(copy); assert.equal(copy.bytes, Buffer.byteLength(text));
+    assert.ok(prepared.input.includes(copy.hash)); assert.ok(prepared.input.includes(copy.path));
+    assert.ok(!prepared.input.includes(text));
+    const filesystem = prepared.command.args.find((item) => item.startsWith('permissions.') && item.includes('.filesystem='));
+    assert.ok(filesystem.includes(`${JSON.stringify(copy.path)}="read"`));
+    assert.ok(!filesystem.includes(`${JSON.stringify(path.dirname(copy.path))}="read"`));
+    assert.equal(existsSync(path.join(worktree, 'AGENTS.override.md')), false);
+  } finally { RUNNER_TESTING.cleanupPrepared(prepared); }
+  assert.equal(existsSync(copy.path), false);
 });

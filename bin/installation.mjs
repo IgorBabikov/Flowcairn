@@ -1,3 +1,4 @@
+import { scanSourceFile } from '../scripts/ai-graph/lib/source-file-scan.mjs';
 import { gitExecutable } from '../scripts/ai-graph/lib/host-executables.mjs';
 import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
@@ -105,7 +106,7 @@ export function initializeProject(input, options = {}) {
   const profileExists = existsNoFollow(profilePath);
   if (profileExists && existsNoFollow(path.join(root, OWNER_FILE))) {
     let raw;
-    try { raw = JSON.parse(readRegular(profilePath, 32768).toString('utf8')); }
+    try { raw = JSON.parse(readRegular(profilePath).toString('utf8')); }
     catch { fail('PROJECT_PROFILE_INVALID', '.flowcairn.json не соответствует строгому профилю проекта.'); }
     if (!Object.hasOwn(raw, 'checkMode'))
       fail('PROFILE_MIGRATION_REQUIRED', 'Legacy-профиль требует безопасной миграции через npx flowcairn.');
@@ -185,7 +186,7 @@ export function initializeProject(input, options = {}) {
   let pkg = null;
   const readNodeManifest = !importedChecks && existingProfile?.version !== 2 && existsNoFollow(path.join(root, 'package.json'));
   if (readNodeManifest) try {
-    pkg = JSON.parse(readRegular(path.join(root, 'package.json'), 256 * 1024).toString('utf8'));
+    pkg = JSON.parse(readRegular(path.join(root, 'package.json')).toString('utf8'));
   } catch (error) {
     if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
     fail(
@@ -265,7 +266,12 @@ export function initializeProject(input, options = {}) {
         ...(options['codex-path'] ? { codexPath: path.resolve(options['codex-path']) } : {}),
       },
     });
-  for (const file of profile.manifests) readProjectFile(root, file, 16 * 1024 * 1024);
+  for (const file of profile.manifests) {
+    // Account for complete bytes without collecting every lock/manifest in memory.
+    for (let cursor = path.dirname(path.join(root, file)); cursor !== root; cursor = path.dirname(cursor))
+      if (!cursor.startsWith(root + path.sep) || lstatSync(cursor).isSymbolicLink()) fail('UNSAFE_FILE', 'Manifest path must remain inside the project.');
+    scanSourceFile(path.join(root, file));
+  }
   // Project .gitignore belongs to the team. Flowcairn keeps only its own local
   // state invisible through Git's per-checkout exclude file.
   const excludeFile = gitCheckout ? localExcludeFile(root) : null;

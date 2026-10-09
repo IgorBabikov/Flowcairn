@@ -20,12 +20,17 @@ export function isSensitivePath(value) {
   });
 }
 
-export function hasSecretContent(value) {
+export function normalizeSecretText(value) {
   const escapes = { b: '\b', f: '\f', n: '\n', r: '\r', t: '\t', '"': '"', "'": "'", '/': '/', '\\': '\\' };
   const text = String(value).normalize('NFKC')
     .replace(/\\+(?:u([a-f0-9]{4})|(["'\\/bfnrt]))/gi, (_, hex, escaped) =>
       hex ? String.fromCharCode(parseInt(hex, 16)) : escapes[escaped] ?? escaped)
     .normalize('NFKC');
+  return text;
+}
+
+export function hasSecretContent(value) {
+  const text = normalizeSecretText(value);
   return /-----BEGIN (?:[A-Z0-9 ]* )?PRIVATE KEY-----/.test(text)
     || /\bBearer\s+[A-Za-z0-9._~+/-]{12,}/i.test(text)
     || /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/.test(text)

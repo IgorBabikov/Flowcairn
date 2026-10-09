@@ -35,7 +35,6 @@ export function directAdapters(root, profile, base) {
     const excluded = ['.flowcairn.json', ...profile.outputPaths];
     const scopeCandidates = [...new Set(files.filter((file) => !isInstructionPath(file) &&
       !excluded.some((entry) => overlaps(file, entry))).map((file) => file.includes('/') ? file.split('/')[0] : file))].sort();
-    if (scopeCandidates.length > 256) throw new GraphError('INTAKE_SCOPE_LIMIT', 'Уточните область задачи');
     const contextPaths = [...new Set([...projectContextPaths(projectRoot, profile), ...base.instructionPaths()])].filter((file) => files.includes(file)).sort();
     const firstTask = !existsSync(path.join(projectRoot, '.ai-orchestrator', 'graph', 'state.json'));
     const bootstrap = { firstTask, required: false, changedPaths: [], untrackedCandidates: [], requiredUntracked: [],

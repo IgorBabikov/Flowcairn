@@ -70,7 +70,7 @@ test('automatic scope overflow starts bounded discovery without dropping arbitra
   const files = ['package.json', ...Array.from({ length: 65 }, (_, i) => `src/area-${i}/components/entry.ts`)];
   const preview = buildTaskContext(input('Обновить components для новых модулей.', { files }));
   assert.equal(preview.ready, true);
-  assert.deepEqual(preview.scope, ['package.json']);
+  assert.deepEqual(preview.scope, files.slice(1).map((file) => file.slice(0, file.lastIndexOf('/'))).sort());
   const initial = initialTaskContext(preview, { ai: { provider: 'codex' } });
   assert.deepEqual(initial.scope, ['package.json']);
   assert.match(initial.notes.join(' '), /contextRequests/);
@@ -81,25 +81,26 @@ test('natural task can name more than 32 files without requiring a shorter descr
   const request = input(`Обновить ${names.join(', ')}`, { files: ['package.json', ...names] });
   const preview = buildTaskContext(request);
   assert.equal(preview.ready, true);
-  assert.deepEqual(preview.scope, ['package.json']);
-  assert.match(initialTaskContext(preview, { ai: { provider: 'codex' } }).notes.join(' '), /contextRequests/);
+  assert.deepEqual(preview.scope, [...names].sort());
+  assert.equal(preview.references.length, names.length);
+  assert.deepEqual(initialTaskContext(preview, { ai: { provider: 'codex' } }).scope, [...names].sort());
   const confirmed = buildTaskContext({ ...request, selection: { previewHash: preview.previewHash, scope: preview.scope, resolutions: [] } });
   assert.equal(confirmed.ready, true);
-  assert.deepEqual(confirmed.scope, ['package.json']);
+  assert.deepEqual(confirmed.scope, [...names].sort());
 });
 
 test('a missing reference after the first 32 stays visible to intake and analysis', () => {
   const names = Array.from({ length: 32 }, (_, i) => `src/file-${i}.ts`);
   const missing = 'src/missing.ts';
   const preview = buildTaskContext(input(`Обновить ${names.join(', ')} и ${missing}`, { files: ['package.json', ...names] }));
-  assert.equal(preview.ready, true);
-  assert.deepEqual(preview.scope, ['package.json']);
-  assert.match(preview.feedback.join(' '), /src\/missing\.ts/);
+  assert.equal(preview.ready, false);
+  assert.deepEqual(preview.scope, [...names].sort());
+  assert.match(preview.issues.join(' '), /src\/missing\.ts/);
   assert.match(initialTaskContext(preview, { ai: { provider: 'codex' } }).notes.join(' '), /src\/missing\.ts/);
   const confirmed = buildTaskContext({ ...input(`Обновить ${names.join(', ')} и ${missing}`, { files: ['package.json', ...names] }),
     selection: { previewHash: preview.previewHash, scope: preview.scope, resolutions: [] } });
-  assert.equal(confirmed.ready, true);
-  assert.match(confirmed.feedback.join(' '), /src\/missing\.ts/);
+  assert.equal(confirmed.ready, false);
+  assert.match(confirmed.issues.join(' '), /src\/missing\.ts/);
 });
 
 test('one resolved reference does not hide another missing source file', () => {

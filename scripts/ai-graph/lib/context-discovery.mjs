@@ -2,7 +2,6 @@ import path from 'node:path';
 import { z } from 'zod';
 import { GraphError } from './io.mjs';
 import { RelativePath } from './schemas.mjs';
-import { isInstructionPath, isWithin } from './registry.mjs';
 import { isTaskContextPath } from './task-context.mjs';
 
 const Request = z.strictObject({
@@ -11,7 +10,7 @@ const Request = z.strictObject({
   reason: z.string().trim().min(1).max(1000),
 });
 const Descriptor = z.strictObject({
-  path: z.string().min(1).max(512),
+  path: RelativePath,
   hash: z.string().regex(/^[a-f0-9]{64}$/),
   size: z.number().int().min(0),
   mode: z.enum(['100644', '100755']),
@@ -32,7 +31,7 @@ export function resolveContextRequests({ task, requests, files, outputPaths = []
   const parsed = z.array(Request).safeParse(requests);
   if (!parsed.success) invalid('Запрос контекста должен содержать безопасный относительный путь, цель и краткую причину.');
   if (!['codex', 'claude', 'cursor'].includes(provider)) invalid('Неизвестный исполнитель дополнительного контекста.');
-  const inventory = z.array(Descriptor).max(20_000).safeParse(files);
+  const inventory = z.array(Descriptor).safeParse(files);
   if (!inventory.success) invalid('Нужен проверенный список обычных файлов текущего проекта.');
   if (!Array.isArray(task.scope) || !Array.isArray(task.contextPaths)) invalid('У задачи отсутствует исходная область контекста.');
   const policy = { outputPaths, forbiddenPaths: task.forbiddenPaths ?? [] };
@@ -84,14 +83,5 @@ export function resolveContextRequests({ task, requests, files, outputPaths = []
   }
   const nextScope = unique([...scope]);
   const nextContextPaths = unique([...contextPaths]);
-  if (nextScope.length > 64) limit('После уточнения область изменений превышает 64 пути. Нужна более узкая декомпозиция задачи.');
-  if (nextContextPaths.length > 32) limit('После уточнения контекст чтения превышает 32 пути. Нужна более узкая декомпозиция задачи.');
-  if (provider !== 'codex') {
-    const reads = unique([...nextScope, ...nextContextPaths]);
-    const selected = inventory.data.filter((file) => safe(file.path) && reads.some((root) => isWithin(file.path, root)) &&
-      (!isInstructionPath(file.path) || reads.includes(file.path)));
-    if (selected.length > 256 || selected.reduce((sum, file) => sum + file.size, 0) > 512 * 1024)
-      limit('Дополнительный контекст внешнего AI превышает 256 файлов или 512 КиБ. Запросите более узкие пути.');
-  }
   return { scope: nextScope, contextPaths: nextContextPaths, notes };
 }

@@ -1,12 +1,9 @@
+import { scanSourceFile } from './source-file-scan.mjs';
 import { realpathHostSync, sameHostPath } from './host-filesystem.mjs';
-import { lstatHostSync as lstatSync, fstatHostSync as fstatSync } from './host-filesystem.mjs';
+import { lstatHostSync as lstatSync } from './host-filesystem.mjs';
 import { gitExecutable, gitNullDevice } from './host-executables.mjs';
 import { spawnSync } from 'node:child_process';
 import {
-  closeSync,
-  constants,
-  openSync,
-  readFileSync,
   readdirSync,
   realpathSync,
 } from 'node:fs';
@@ -16,15 +13,10 @@ import { GraphError, canonicalJson, sha256 } from './io.mjs';
 import { classifySource, isSensitivePath } from './source-policy.mjs';
 
 const GIT_EXECUTABLE = gitExecutable();
-const MAX_FILES = 20_000;
 const MAX_CHANGED_FILES = 200;
 const MAX_INPUT_PATHS = 512;
-const MAX_PATH_CHARACTERS = 512;
 const MAX_PATH_BYTES = 4_096;
-const MAX_FILE_BYTES = 64 * 1024 * 1024;
-const MAX_TOTAL_BYTES = 512 * 1024 * 1024;
 const MAX_INDEX_BYTES = 8 * 1024 * 1024;
-const MAX_DIRECTORY_DEPTH = 128;
 const MAX_DIFF_BYTES = 32 * 1024;
 const MAX_GIT_DIFF_BYTES = 2 * 1024 * 1024;
 const HASH_PATTERN = /^[a-f0-9]{64}$/;
@@ -54,7 +46,6 @@ function assertSafePath(value, { allowControl = false, allowGit = false } = {}) 
   if (
     typeof value !== 'string' ||
     !value ||
-    value.length > MAX_PATH_CHARACTERS ||
     Buffer.byteLength(value) > MAX_PATH_BYTES ||
     value.includes('\0') ||
     value.includes('\\') ||
@@ -268,38 +259,11 @@ function statIdentity(stat) {
 }
 
 function readRegularFile(absolutePath, relativePath, before) {
-  if (before.nlink !== 1n) {
-    fail('UNSAFE_HARDLINK', `Hardlinked workspace file запрещен: ${relativePath}`);
-  }
-  if (before.size > BigInt(MAX_FILE_BYTES)) {
-    fail('WORKSPACE_LIMIT_EXCEEDED', `Workspace file превышает лимит: ${relativePath}`);
-  }
-  let handle;
+  if (before.nlink !== 1n) fail('UNSAFE_HARDLINK', `Hardlinked workspace file запрещен: ${relativePath}`);
   try {
-    handle = openSync(absolutePath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
-    const opened = fstatSync(handle, { bigint: true });
-    if (!opened.isFile() || statIdentity(opened) !== statIdentity(before)) {
-      fail('WORKSPACE_CHANGED', `Workspace path изменился до чтения: ${relativePath}`);
-    }
-    const data = readFileSync(handle);
-    const after = fstatSync(handle, { bigint: true });
-    const current = lstatSync(absolutePath, { bigint: true });
-    if (
-      statIdentity(opened) !== statIdentity(after) ||
-      statIdentity(after) !== statIdentity(current) ||
-      BigInt(data.length) !== after.size
-    ) {
-      fail('WORKSPACE_CHANGED', `Workspace file изменился во время чтения: ${relativePath}`);
-    }
-    return {
-      path: relativePath,
-      hash: sha256(data),
-      mode: (Number(after.mode) & 0o111) === 0 ? '100644' : '100755',
-      size: data.length,
-    };
-  } finally {
-    if (handle !== undefined) closeSync(handle);
-  }
+    const { hash, mode, size } = scanSourceFile(absolutePath, { expected: before, classify: false });
+    return { path: relativePath, hash, mode, size };
+  } catch { fail('WORKSPACE_CHANGED', `Workspace file изменился во время чтения: ${relativePath}`); }
 }
 
 function validateExcludedRoot(absolutePath, relativePath) {
@@ -323,12 +287,8 @@ function validateExcludedRoot(absolutePath, relativePath) {
 
 function scanWorkspace(root, outputPaths) {
   const files = [];
-  let totalBytes = 0;
 
   const scanDirectory = (absoluteDirectory, relativeDirectory, depth) => {
-    if (depth > MAX_DIRECTORY_DEPTH) {
-      fail('WORKSPACE_LIMIT_EXCEEDED', 'Workspace directory depth превышает лимит');
-    }
     const before = lstatSync(absoluteDirectory, { bigint: true });
     if (!before.isDirectory() || before.isSymbolicLink()) {
       fail('UNSAFE_WORKSPACE_ENTRY', 'Workspace directory была заменена');
@@ -362,14 +322,7 @@ function scanWorkspace(root, outputPaths) {
       if (!stat.isFile()) {
         fail('UNSAFE_WORKSPACE_ENTRY', `Workspace entry имеет недопустимый type: ${relativePath}`);
       }
-      if (files.length >= MAX_FILES) {
-        fail('WORKSPACE_LIMIT_EXCEEDED', 'Workspace содержит слишком много files');
-      }
       const descriptor = readRegularFile(absolutePath, relativePath, stat);
-      totalBytes += descriptor.size;
-      if (totalBytes > MAX_TOTAL_BYTES) {
-        fail('WORKSPACE_LIMIT_EXCEEDED', 'Workspace превышает общий лимит размера');
-      }
       files.push(descriptor);
     }
 
@@ -405,11 +358,10 @@ function validateFingerprint(value, label) {
   if (canonicalJson(keys) !== canonicalJson(['files', 'git', 'hash'])) {
     fail('INVALID_WORKSPACE_FINGERPRINT', `${label} содержит недопустимые поля`);
   }
-  if (!Array.isArray(value.files) || value.files.length > MAX_FILES) {
+  if (!Array.isArray(value.files)) {
     fail('INVALID_WORKSPACE_FINGERPRINT', `${label}.files недопустим`);
   }
   let previous = null;
-  let totalBytes = 0;
   for (const file of value.files) {
     if (!file || typeof file !== 'object' || Array.isArray(file)) {
       fail('INVALID_WORKSPACE_FINGERPRINT', `${label}.files содержит не-object`);
@@ -430,12 +382,8 @@ function validateFingerprint(value, label) {
     if (!HASH_PATTERN.test(file.hash) || !FILE_MODES.has(file.mode)) {
       fail('INVALID_WORKSPACE_FINGERPRINT', `${label}.files содержит недопустимый hash/mode`);
     }
-    if (!Number.isSafeInteger(file.size) || file.size < 0 || file.size > MAX_FILE_BYTES) {
+    if (!Number.isSafeInteger(file.size) || file.size < 0) {
       fail('INVALID_WORKSPACE_FINGERPRINT', `${label}.files содержит недопустимый size`);
-    }
-    totalBytes += file.size;
-    if (totalBytes > MAX_TOTAL_BYTES) {
-      fail('INVALID_WORKSPACE_FINGERPRINT', `${label}.files превышает общий size`);
     }
     previous = file.path;
   }

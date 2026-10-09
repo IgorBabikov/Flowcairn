@@ -39,10 +39,10 @@ export function createLearningApi(read: ReadJson) {
     async learningMaterial(runId: string, materialHash: string, signal?: AbortSignal) {
       return decodeLearningMaterial(await read(materialUrl(runId, materialHash), readOptions(signal)), runId, materialHash);
     },
-    async learningSource(runId: string, materialHash: string, source: SavedSource, startLine = 1, lineCount = 100, signal?: AbortSignal) {
-      assertLearning(id(source.id) && integer(startLine, 1, Math.max(1, source.lineCount)) && integer(lineCount, 1, 200), 'Некорректный диапазон сохраненного исходника.');
-      const url = `${materialUrl(runId, materialHash)}/sources/${encodeURIComponent(source.id)}?startLine=${startLine}&lineCount=${lineCount}`;
-      return decodeLearningSource(await read(url, readOptions(signal)), source, startLine, lineCount);
+    async learningSource(runId: string, materialHash: string, source: SavedSource, startLine = 1, lineCount = 100, signal?: AbortSignal, startColumn = 0) {
+      assertLearning(id(source.id) && integer(startLine, 1, Math.max(1, source.lineCount)) && integer(lineCount, 1, 200) && integer(startColumn), 'Некорректный диапазон сохраненного исходника.');
+      const url = `${materialUrl(runId, materialHash)}/sources/${encodeURIComponent(source.id)}?startLine=${startLine}&lineCount=${lineCount}${startColumn ? `&startColumn=${startColumn}` : ''}`;
+      return decodeLearningSource(await read(url, readOptions(signal)), source, startLine, lineCount, startColumn);
     },
     async learningLesson(runId: string, lessonHash: string, material: LearningMaterialResponse, signal?: AbortSignal) {
       assertLearning(id(runId) && hash(lessonHash) && hash(material.id) && material.lessonHash === lessonHash, 'Разбор не связан с выбранным материалом.');

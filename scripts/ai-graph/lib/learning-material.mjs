@@ -1,8 +1,10 @@
+import { savedLearningSourcePage } from './learning-source-page.mjs';
+import { putLearningSourceCatalog } from './learning-source-storage.mjs';
 import { GraphError, hashObject } from './io.mjs';
 import { Hash, Id } from './schema-primitives.mjs';
 import { GraphPlanSchema, TaskSpecSchema, ReceiptSchema } from './schemas.mjs';
 import { StageMaterialSchema, SourceCatalogSchema } from './learning-schemas.mjs';
-import { LEARNING_SOURCE_LIMITS, readLearningSourceCatalog, readLearningSource, learningSourcePage, exactSourceAnchor, safeLearningGaps } from './learning-sources.mjs';
+import { readLearningSourceCatalog, verifyLearningSource, savedSourceAnchor, safeLearningGaps } from './learning-sources.mjs';
 
 /** @typedef {import('zod').infer<typeof StageMaterialSchema>} StageMaterial */
 /** @typedef {{runId: string, planHash: string, taskHash: string}} MaterialBinding */
@@ -24,7 +26,7 @@ function linkedPlan(store, binding) {
 }
 
 function receiptSet(store, ids, binding, allowedNodes, plan) {
-  if (!Array.isArray(ids) || ids.length > 64 || new Set(ids).size !== ids.length)
+  if (!Array.isArray(ids) || new Set(ids).size !== ids.length)
     fail('LEARNING_RECEIPT_INVALID', 'Некорректный набор receipts.');
   return ids.map((id) => {
     const result = ReceiptSchema.safeParse(store.readObject('receipts', id));
@@ -65,18 +67,15 @@ function mergeCaptures(store, before, after, policy, extraGaps) {
   const previous = captureCatalog(store, before, ['before']);
   const current = captureCatalog(store, after, ['after', 'context']);
   const gaps = safeLearningGaps([...before.gaps, ...after.gaps, ...extraGaps], policy);
-  const sources = []; let bytes = 0;
+  const sources = [];
   // Prefer the final version when the combined catalog exceeds its budget.
   for (const source of [...current.sources, ...previous.sources]) {
-    try { readLearningSource(store, source, policy); }
+    try { verifyLearningSource(store, source, policy); }
     catch (error) {
       if (error.code !== 'LEARNING_SOURCE_DENIED') throw error;
       gaps.push({ code: 'excluded-source', path: null, reason: 'Исходник исключен действующей политикой.' }); continue;
     }
-    if (sources.length >= LEARNING_SOURCE_LIMITS.sources || bytes + source.bytes > LEARNING_SOURCE_LIMITS.totalBytes) {
-      gaps.push({ code: 'size-limit', path: source.path, reason: 'Полная версия исходника не включена: превышен общий лимит материала.' }); continue;
-    }
-    sources.push(source); bytes += source.bytes;
+    sources.push(source);
   }
   if (!sources.length && !gaps.length) gaps.push({ code: 'capture-unavailable', path: null, reason: 'Выбранный набор не содержит сохраненных исходников.' });
   return { catalog: SourceCatalogSchema.parse({ version: 1, sources }), gaps: safeLearningGaps(gaps, policy) };
@@ -131,7 +130,7 @@ export function createLearningMaterial({ store, binding, kind = 'stage', stageId
     contractHash: hashObject(plan.taskContract), stageId, goal: plan.taskContract.goal,
     outcome: stage?.outcome ?? task.goal, requirementIds: stage?.requirementIds ?? plan.taskContract.requirements.map((requirement) => requirement.id),
     beforeHash: before.sourceHash, resultHash: after.sourceHash, createdAt,
-    sourceCatalogHash: store.putObject('learning-sources', merged.catalog), implementationReceiptIds, checkReceiptIds, reviewReceiptIds,
+    sourceCatalogHash: putLearningSourceCatalog(store, merged.catalog), implementationReceiptIds, checkReceiptIds, reviewReceiptIds,
     diffArtifactIds, findingsArtifactIds, status: !merged.catalog.sources.length ? 'unavailable' : merged.gaps.length ? 'partial' : 'complete', gaps: merged.gaps });
   return { id: store.putObject('learning-materials', material), material };
 }
@@ -151,30 +150,28 @@ export function readLearningMaterial({ store, materialHash, binding, policy = {}
     || (material.kind === 'stage' ? !plan.executionStages.stages.some((stage) => stage.id === material.stageId) : material.stageId !== null))
     fail('LEARNING_MATERIAL_DENIED', 'Связь материала с запуском не совпадает.');
   const catalog = readLearningSourceCatalog(store, material.sourceCatalogHash);
-  for (const source of catalog.sources) readLearningSource(store, source, policy);
+  for (const source of catalog.sources) verifyLearningSource(store, source, policy);
   // Do not silently sanitize an immutable object while retaining its hash.
   if (hashObject(safeLearningGaps(material.gaps, policy)) !== hashObject(material.gaps))
     fail('LEARNING_SOURCE_DENIED', 'Контекст материала закрыт действующей политикой.');
-  return { id: materialHash, material, sources: catalog.sources };
-}
-
-function materialSource(options) {
-  const result = readLearningMaterial(options);
-  const source = result.sources.find((item) => item.id === options.sourceId);
-  if (!source) fail('LEARNING_SOURCE_DENIED', 'Исходник не принадлежит материалу.');
-  return { source, text: readLearningSource(options.store, source, options.policy) };
+  const sourceCatalog = store.readObject('learning-sources', material.sourceCatalogHash);
+  return { id: materialHash, material, sources: catalog.sources, ...(sourceCatalog.version === 2 ? { sourceCatalog } : {}) };
 }
 
 /** @param {{store: import('./store.mjs').GraphStore, materialHash: string, binding: ReadBinding, sourceId: string,
- * policy?: SourcePolicy, startLine?: number, lineCount?: number}} options */
+ * policy?: SourcePolicy, startLine?: number, lineCount?: number, startColumn?: number}} options */
 export function readLearningSourcePage(options) {
-  const { source, text } = materialSource(options);
-  return learningSourcePage(source, text, options);
+  const result = readLearningMaterial(options);
+  const source = result.sources.find((item) => item.id === options.sourceId);
+  if (!source) fail('LEARNING_SOURCE_DENIED', 'Исходник не принадлежит материалу.');
+  return savedLearningSourcePage(options.store, source, options);
 }
 
 /** @param {{store: import('./store.mjs').GraphStore, materialHash: string, binding: ReadBinding, policy?: SourcePolicy,
  * anchor: import('zod').infer<typeof import('./learning-schemas.mjs').SourceAnchorSchema>}} options */
 export function validateLearningSourceAnchor(options) {
-  const { source, text } = materialSource({ ...options, sourceId: options.anchor?.sourceId });
-  return exactSourceAnchor(source, text, options.anchor);
+  const result = readLearningMaterial(options);
+  const source = result.sources.find((item) => item.id === options.anchor?.sourceId);
+  if (!source) fail('LEARNING_SOURCE_DENIED', 'Исходник не принадлежит материалу.');
+  return savedSourceAnchor(options.store, source, options.anchor, options.policy);
 }

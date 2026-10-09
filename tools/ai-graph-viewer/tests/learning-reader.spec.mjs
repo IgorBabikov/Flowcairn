@@ -140,3 +140,45 @@ test('a short code page cannot clamp the remembered position in a longer explana
     await expect.poll(() => dialog.evaluate(el => el.scrollTop)).toBe(600);
   }
 });
+
+test('large saved file and a long Unicode line remain readable through explicit continuation', async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 768 });
+  const f = learningFixture(), first = 'Я💡'.repeat(10922), tail = 'LAST_SOURCE_CHARACTER';
+  const text = first.repeat(5) + tail;
+  const source = { ...f.source, path: 'src/large.txt', bytes: Buffer.byteLength(text), lineCount: 1,
+    chunkIndexHash: 'a'.repeat(64) };
+  delete source.chunkHashes;
+  const material = { ...f.response.material, status: 'complete', gaps: [], planHash: snapshot().planHash,
+    sourceCatalogHash: hash({ version: 1, sources: [source] }) };
+  // JSON serialization omits undefined optional chunkHashes just like the runtime DTO.
+  const materialHash = hash(material), response = { ...f.response, id: materialHash, material, sources: [source], lessonHash: null };
+  const state = { ...snapshot(), ...f.snapshot, planHash: material.planHash,
+    approvalExpiresAt: Date.now() + 3600000, continuation: { ...f.snapshot.continuation, materialHash },
+    learning: { ...f.snapshot.learning, stages: [{ ...f.snapshot.learning.stages[0], materialHash, lessonHash: null }] } };
+  const api = await mockApi(page, state);
+  const columns = [];
+  await page.route('**/api/runs/*/learning/**', async route => {
+    const url = new URL(route.request().url());
+    if (url.pathname.endsWith(`/materials/${materialHash}`)) return route.fulfill({ json: response });
+    if (url.pathname.endsWith(`/sources/${source.id}`)) {
+      const startColumn = Number(url.searchParams.get('startColumn') ?? 0); columns.push(startColumn);
+      const value = text.slice(startColumn, startColumn + first.length);
+      const endColumn = startColumn + value.length, partial = endColumn < text.length;
+      return route.fulfill({ json: { sourceId: source.id, fileHash: source.fileHash, text: value, startLine: 1, endLine: 1,
+        totalLines: 1, startColumn, endColumn, partial, next: partial ? { startLine: 1, lineCount: 100, startColumn: endColumn } : null } });
+    }
+    return route.fulfill({ status: 404, json: { error: { code: 'NOT_FOUND', message: 'Test resource missing' } } });
+  });
+  await page.goto(`/#session=${token}`);
+  await page.getByRole('button', { name: 'Карта этапов и разбор', exact: true }).click();
+  await page.getByRole('button', { name: 'Открыть сохраненный материал', exact: true }).click();
+  await expect.poll(() => page.locator('.saved-code').textContent()).toBe(first);
+  await expect(page.getByText(/Строка 1 показана частями/)).toBeVisible();
+  const next = page.getByRole('button', { name: 'Следующие строки', exact: true });
+  for (let i = 0; i < 5; i++) { await next.click(); await expect.poll(() => columns.at(-1)).toBe((i + 1) * first.length); }
+  await expect(page.locator('.saved-code')).toContainText(tail); await expect(next).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Задать вопрос по этому месту', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Предыдущие строки', exact: true }).click();
+  await expect.poll(() => columns.at(-1)).toBe(0);
+  expect(api.calls).toEqual([]);
+});

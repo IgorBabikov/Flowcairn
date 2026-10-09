@@ -1,10 +1,12 @@
-import { closeSync, openSync, readSync, realpathSync } from 'node:fs';
+import { sourceTextPage } from './learning-source-page.mjs';
+import { saveLearningSourceBytes, verifiedSourceText, putLearningSourceCatalog, loadLearningSourceCatalog } from './learning-source-storage.mjs';
+import { realpathSync } from 'node:fs';
 import path from 'node:path';
-import { lstatHostSync as lstatSync, fstatHostSync as fstatSync, crossStatIdentity, noFollowReadFlags, sameHostPath } from './host-filesystem.mjs';
-import { GraphError, hashObject, sha256 } from './io.mjs';
+import { lstatHostSync as lstatSync, crossStatIdentity, sameHostPath } from './host-filesystem.mjs';
+import { GraphError, hashObject, } from './io.mjs';
 import { classifySource, normalizeSourcePath, assertSafeText } from './source-policy.mjs';
 import { Hash, RelativePath } from './schema-primitives.mjs';
-import { MaterialGapSchema, SourceCatalogSchema, SourceChunkSchema, SourceAnchorSchema, LearningSourceResponseSchema } from './learning-schemas.mjs';
+import { MaterialGapSchema, SourceCatalogSchema, SourceAnchorSchema } from './learning-schemas.mjs';
 
 /** @typedef {import('zod').infer<typeof SourceCatalogSchema>} SourceCatalog */
 /** @typedef {import('zod').infer<typeof MaterialGapSchema>} MaterialGap */
@@ -12,7 +14,7 @@ import { MaterialGapSchema, SourceCatalogSchema, SourceChunkSchema, SourceAnchor
 /** @typedef {{sourceHash: string, sourceCatalogHash: string, gaps: MaterialGap[]}} SourceCapture */
 /** @typedef {{path: string, role: 'before'|'after'|'context', expected: {hash: string, size: number, mode: '100644'|'100755'}|null}} SelectedSource */
 
-export const LEARNING_SOURCE_LIMITS = Object.freeze({ sources: 64, fileBytes: 256 * 1024, totalBytes: 2 * 1024 * 1024,
+export const LEARNING_SOURCE_LIMITS = Object.freeze({ sources: null, fileBytes: null, totalBytes: null,
   chunkBytes: 16 * 1024, pageBytes: 64 * 1024, pageLines: 200, quoteBytes: 8 * 1024 });
 /** @returns {never} */
 const fail = (code, message) => { throw new GraphError(code, message); };
@@ -76,7 +78,7 @@ function stableChain(chain) {
   }
 }
 
-function exactBytes(root, entry) {
+function exactBytes(root, entry, storeForCapture) {
   const { chain, absent } = directoryChain(root, entry.path, entry.expected === null), file = path.join(root, entry.path);
   if (absent) return null;
   let stat;
@@ -88,36 +90,10 @@ function exactBytes(root, entry) {
   }
   if (!entry.expected || !stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1n
     || !sameHostPath(realpathSync(file), file)) fail('LEARNING_CAPTURE_UNSAFE', 'Исходник не совпадает с выбранной версией.');
-  if (stat.size > BigInt(LEARNING_SOURCE_LIMITS.fileBytes)) fail('LEARNING_CAPTURE_LIMIT', 'Исходник превышает лимит сохранения.');
   if (Number(stat.size) !== entry.expected.size || (stat.mode & 0o111n ? '100755' : '100644') !== entry.expected.mode)
     fail('LEARNING_CAPTURE_UNSAFE', 'Размер или режим исходника изменился.');
-  const handle = openSync(file, noFollowReadFlags());
-  try {
-    const opened = fstatSync(handle, { bigint: true });
-    if (crossStatIdentity(opened) !== crossStatIdentity(stat)) fail('LEARNING_CAPTURE_UNSAFE', 'Исходник заменен перед чтением.');
-    // A bounded allocation/read also protects against a file growing after stat.
-    const buffer = Buffer.alloc(entry.expected.size + 1);
-    let count = 0, read;
-    while (count < buffer.length && (read = readSync(handle, buffer, count, buffer.length - count, null)) > 0) count += read;
-    const bytes = buffer.subarray(0, count);
-    if (count !== entry.expected.size || crossStatIdentity(fstatSync(handle, { bigint: true })) !== crossStatIdentity(stat)
-      || crossStatIdentity(lstatSync(file, { bigint: true })) !== crossStatIdentity(stat)
-      || !sameHostPath(realpathSync(file), file) || sha256(bytes) !== entry.expected.hash)
-      fail('LEARNING_CAPTURE_UNSAFE', 'Исходник изменился во время чтения.');
-    stableChain(chain);
-    return bytes;
-  } finally { closeSync(handle); }
-}
-
-function chunks(bytes) {
-  const result = [];
-  for (let offset = 0; offset < bytes.length;) {
-    let end = Math.min(bytes.length, offset + LEARNING_SOURCE_LIMITS.chunkBytes);
-    while (end < bytes.length && (bytes[end] & 0xc0) === 0x80) end--;
-    result.push(SourceChunkSchema.parse({ version: 1, text: bytes.subarray(offset, end).toString('utf8') }));
-    offset = end;
-  }
-  return result;
+  const source = saveLearningSourceBytes(storeForCapture, file, entry.expected, { beforePersist: () => stableChain(chain) });
+  return source;
 }
 
 /** Capture only explicit trusted descriptors; expected:null means known absence.
@@ -127,10 +103,10 @@ function chunks(bytes) {
  * @returns {SourceCapture}
  */
 export function captureLearningSources({ store, projectRoot, sourceHash, files, policy = {} }) {
-  if (!Hash.safeParse(sourceHash).success || !Array.isArray(files) || files.length > 128)
+  if (!Hash.safeParse(sourceHash).success || !Array.isArray(files))
     fail('LEARNING_SELECTION_INVALID', 'Некорректный выбранный набор исходников.');
   const rules = learningSourcePolicy(policy), sources = [], gaps = [], aliases = new Set();
-  let total = 0, root;
+  let root;
   try { root = realpathSync(projectRoot); if (lstatSync(path.resolve(projectRoot)).isSymbolicLink()) root = null; } catch { root = null; }
   for (const entry of files) {
     if (!entry || !['before', 'after', 'context'].includes(entry.role) || (entry.expected !== null && (!entry.expected
@@ -142,43 +118,45 @@ export function captureLearningSources({ store, projectRoot, sourceHash, files, 
     if (aliases.has(alias)) fail('LEARNING_SELECTION_INVALID', 'Выбранный набор содержит повторяющиеся пути.');
     aliases.add(alias);
     if (!root) { gap('capture-unavailable', 'Корень проекта недоступен для безопасного чтения.'); continue; }
-    if (entry.expected !== null && (sources.length >= LEARNING_SOURCE_LIMITS.sources || entry.expected.size > LEARNING_SOURCE_LIMITS.fileBytes
-      || total + entry.expected.size > LEARNING_SOURCE_LIMITS.totalBytes)) {
-      gap('size-limit', 'Полный исходник не сохранен: превышен лимит материала.'); continue;
-    }
     let bytes;
-    try { bytes = exactBytes(root, entry); }
+    try { bytes = exactBytes(root, entry, store); }
     catch (error) {
-      gap(error.code === 'LEARNING_CAPTURE_LIMIT' ? 'size-limit' : 'capture-unavailable', 'Выбранную версию не удалось безопасно сохранить.'); continue;
+      if (error.capturePersistenceFailure) throw error;
+      if (error.code === 'LEARNING_SOURCE_DENIED') gap('excluded-source', 'Исходник исключен действующей политикой.', false);
+      else gap('capture-unavailable', 'Выбранную версию не удалось безопасно сохранить.');
+      continue;
     }
     if (bytes === null) {
       if (entry.role === 'context') gap('missing-context', 'Объявленный контекст отсутствует в выбранной версии.');
       continue;
     }
-    if (excluded(entry.path, bytes, rules)) { gap('excluded-source', 'Исходник исключен действующей политикой.', false); continue; }
-    const text = bytes.toString('utf8'), fileHash = sha256(bytes);
-    const source = { id: `source-${hashObject({ path: entry.path, role: entry.role, fileHash, mode: entry.expected.mode })}`,
-      path: entry.path, fileHash, bytes: bytes.length, mode: entry.expected.mode, role: entry.role,
-      chunkHashes: chunks(bytes).map((chunk) => store.putObject('learning-source-chunks', chunk)), lineCount: learningSourceLines(text).length };
-    sources.push(source); total += bytes.length;
+    const fileHash = bytes.fileHash;
+    sources.push({ id: `source-${hashObject({ path: entry.path, role: entry.role, fileHash, mode: entry.expected.mode })}`,
+      path: entry.path, mode: entry.expected.mode, role: entry.role, ...bytes });
   }
   const catalog = SourceCatalogSchema.parse({ version: 1, sources });
-  return { sourceHash, sourceCatalogHash: store.putObject('learning-sources', catalog), gaps };
+  return { sourceHash, sourceCatalogHash: putLearningSourceCatalog(store, catalog), gaps };
 }
 
 /** Read corruption as an error, never as an empty catalog or an ordinary gap. */
 export function readLearningSourceCatalog(store, catalogHash) {
-  const parsed = SourceCatalogSchema.safeParse(store.readObject('learning-sources', catalogHash));
+  const parsed = SourceCatalogSchema.safeParse(loadLearningSourceCatalog(store, catalogHash));
   if (!parsed.success) fail('LEARNING_SOURCE_INTEGRITY', 'Каталог исходников поврежден.');
   const catalog = parsed.data, ids = new Set(), paths = new Set();
-  let bytes = 0;
   for (const source of catalog.sources) {
     const key = `${source.role}:${normalizeSourcePath(source.path)}`;
     if (ids.has(source.id) || paths.has(key)) fail('LEARNING_SOURCE_INTEGRITY', 'Каталог содержит неоднозначные исходники.');
-    ids.add(source.id); paths.add(key); bytes += source.bytes;
+    ids.add(source.id); paths.add(key);
   }
-  if (bytes > LEARNING_SOURCE_LIMITS.totalBytes) fail('LEARNING_SOURCE_INTEGRITY', 'Каталог превышает лимит материала.');
   return catalog;
+}
+
+/** Verify saved bytes with bounded working memory before exposing metadata/pages. */
+export function verifyLearningSource(store, source, policy = {}) {
+  const rules = learningSourcePolicy(policy);
+  for (const _text of verifiedSourceText(store, source)) { /* Exhaust full integrity/policy validation. */ }
+  if (excluded(source.path, undefined, rules)) fail('LEARNING_SOURCE_DENIED', 'Исходник закрыт действующей политикой доступа.');
+  return source;
 }
 
 /** Reassemble and verify the entire file before returning any page or anchor.
@@ -190,36 +168,30 @@ export function readLearningSourceCatalog(store, catalogHash) {
 export function readLearningSource(store, source, policy = {}) {
   const rules = learningSourcePolicy(policy);
   // Integrity is checked even for a newly denied path; policy never masks corruption.
-  const text = source.chunkHashes.map((id) => {
-    const chunk = SourceChunkSchema.safeParse(store.readObject('learning-source-chunks', id));
-    if (!chunk.success) fail('LEARNING_SOURCE_INTEGRITY', 'Сохраненный фрагмент исходника поврежден.');
-    return chunk.data.text;
-  }).join('');
+  const text = [...verifiedSourceText(store, source)].join('');
   const bytes = Buffer.from(text, 'utf8');
-  if (bytes.length !== source.bytes || sha256(bytes) !== source.fileHash || learningSourceLines(text).length !== source.lineCount)
-    fail('LEARNING_SOURCE_INTEGRITY', 'Сохраненные bytes не соответствуют исходнику.');
   if (excluded(source.path, bytes, rules)) fail('LEARNING_SOURCE_DENIED', 'Исходник закрыт действующей политикой доступа.');
   return text;
 }
 
 /** Shared line pagination over already verified saved bytes. No live reads. */
-export function learningSourcePage(source, text, { startLine = 1, lineCount = 100 } = {}) {
-  const lines = learningSourceLines(text);
-  if (!Number.isSafeInteger(startLine) || startLine < 1 || startLine > Math.max(1, lines.length)
-    || !Number.isSafeInteger(lineCount) || lineCount < 1 || lineCount > LEARNING_SOURCE_LIMITS.pageLines)
-    fail('LEARNING_PAGE_INVALID', 'Неверные границы страницы исходника.');
-  const selected = []; let size = 0;
-  for (const line of lines.slice(startLine - 1, startLine - 1 + lineCount)) {
-    const added = Buffer.byteLength(line, 'utf8') + (selected.length ? 1 : 0);
-    if (size + added > LEARNING_SOURCE_LIMITS.pageBytes) {
-      if (!selected.length) fail('LEARNING_PAGE_LIMIT', 'Строка превышает лимит страницы; исходник сохранен полностью.');
-      break;
-    }
-    size += added; selected.push(line);
-  }
-  const endLine = startLine - 1 + selected.length;
-  return LearningSourceResponseSchema.parse({ sourceId: source.id, fileHash: source.fileHash, text: selected.join('\n'), startLine, endLine,
-    totalLines: lines.length, next: endLine < lines.length ? { startLine: endLine + 1, lineCount } : null });
+export function learningSourcePage(source, text, options = {}) {
+  return sourceTextPage(source, [text], options);
+}
+
+/** Validate a saved whole-line citation without reassembling its complete file. */
+export function savedSourceAnchor(store, source, anchor, policy = {}) {
+  const parsed = SourceAnchorSchema.safeParse(anchor);
+  if (!parsed.success) fail('LEARNING_ANCHOR_INVALID', 'Некорректная ссылка на исходник.');
+  const value = parsed.data;
+  if (value.sourceId !== source.id || value.fileHash !== source.fileHash || value.endLine > source.lineCount)
+    fail('LEARNING_ANCHOR_INVALID', 'Ссылка не соответствует сохраненному исходнику.');
+  const page = sourceTextPage(source, verifiedSourceText(store, source), { startLine: value.startLine,
+    lineCount: value.endLine - value.startLine + 1 }, { maximumLines: Number.MAX_SAFE_INTEGER });
+  if (excluded(source.path, undefined, learningSourcePolicy(policy))) fail('LEARNING_SOURCE_DENIED', 'Исходник закрыт действующей политикой доступа.');
+  if (page.partial || page.endLine !== value.endLine || page.text !== value.quote.replace(/\r\n/g, '\n'))
+    fail('LEARNING_ANCHOR_INVALID', 'Цитата не совпадает с полными сохраненными строками.');
+  return value;
 }
 
 /** Exact whole-line quote, with CRLF normalized to LF and no trimming. */
@@ -235,7 +207,7 @@ export function exactSourceAnchor(source, text, anchor) {
 
 /** Redact newly forbidden gap paths without exposing names or arbitrary text. */
 export function safeLearningGaps(gaps, policy = {}) {
-  if (!Array.isArray(gaps) || gaps.length > 128) fail('LEARNING_GAPS_INVALID', 'Слишком много пробелов в материале.');
+  if (!Array.isArray(gaps)) fail('LEARNING_GAPS_INVALID', 'Слишком много пробелов в материале.');
   const rules = learningSourcePolicy(policy);
   return gaps.map((gap) => {
     const parsed = MaterialGapSchema.safeParse(gap);

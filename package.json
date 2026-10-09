@@ -1,6 +1,6 @@
 {
   "name": "flowcairn",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Выполнение задач и изучение своего кода в 2D-мире",
   "type": "module",
   "license": "MIT",

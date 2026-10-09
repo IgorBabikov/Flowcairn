@@ -84,11 +84,12 @@ export async function learningRead(service, response, url) {
   );
   if (material) {
     const [, runId, materialHash, sourceId] = material;
-    learningQuery(url, sourceId ? ['startLine', 'lineCount'] : []);
+    learningQuery(url, sourceId ? ['startLine', 'lineCount', 'startColumn'] : []);
     const result = sourceId
       ? await service.learningSource(runId, materialHash, sourceId, {
         startLine: sourcePageParameter(url, 'startLine', 1),
         lineCount: sourcePageParameter(url, 'lineCount', 100, 200),
+        ...(url.searchParams.has('startColumn') ? { startColumn: sourcePageParameter(url, 'startColumn', 0) } : {}),
       })
       : await service.learningMaterial(runId, materialHash);
     send(response, 200, result);

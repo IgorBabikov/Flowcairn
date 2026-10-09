@@ -127,29 +127,27 @@ test('registered check names cannot collide with internal stage nodes', () => {
   assert.equal(plan.nodes.every((node) => node.id.length <= 80), true);
 });
 
-test('64 nodes fit exactly; 65 are rejected before compilation rather than truncated', () => {
+test('plans continue beyond former 12-step/64-node ceilings without dropping mandatory checks', () => {
   const checkIds = ['tests', 'lint', 'typecheck'];
-  const pieces = Array.from({ length: 12 }, (_, index) => ({ ...steps[index % 2], id: `piece-${index + 1}`, needs: [] }));
-  const manual = fixture(checkIds);
-  assert.equal(manual.compile(pieces).plan.nodes.length, 64);
-  const externalManual = fixture(checkIds, { provider: 'claude' });
-  assert.equal(planningStepLimit(externalManual.task, externalManual.context), 11);
-  assert.throws(() => externalManual.compile(pieces), { code: 'PLANNING_NODE_BUDGET' });
-  const externalAutonomous = fixture(checkIds, { provider: 'claude', workflow: 'autonomous' });
-  assert.equal(externalAutonomous.compile(pieces).plan.nodes.length, 64);
-  const six = fixture(['tests', 'lint', 'typecheck', 'build', 'graph-tests', 'shared-build'], { workflow: 'autonomous' });
-  assert.equal(planningStepLimit(six.task, six.context), 7);
-  assert.throws(() => six.compile(pieces.slice(0, 8)), { code: 'PLANNING_NODE_BUDGET' });
-  assert.throws(() => manual.compile([...pieces, { ...steps[0], id: 'piece-13' }]), { code: 'PLANNING_SCHEMA' });
+  const pieces = Array.from({ length: 30 }, (_, index) => ({ ...steps[index % 2], id: `piece-${index + 1}`, needs: [] }));
+  for (const extra of [{}, { provider: 'claude' }, { provider: 'claude', workflow: 'autonomous' }]) {
+    const current = fixture(checkIds, extra);
+    assert.equal(planningStepLimit(current.task, current.context), null);
+    const plan = current.compile(pieces).plan;
+    assert.equal(plan.executionStages.stages.length, 30);
+    assert.ok(plan.nodes.length > 64);
+    for (const stage of plan.executionStages.stages) assert.equal(stage.checkNodeIds.length, checkIds.length);
+    assert.equal(validatePlan(plan, current.task, current.context).hash, hashObject(plan));
+  }
 });
 
 test('provider schema and prompt receive the calculated stage limit before a provider call', () => {
   const { task, context } = fixture(['tests', 'lint', 'typecheck'], { provider: 'cursor' });
   const plan = compilePlanningPlan(task, context).plan;
   const planner = plan.nodes.find((node) => node.action.id === 'ai-plan');
-  assert.equal(aiResponseSchema(planner, plan, task).properties.steps.maxItems, 11);
+  assert.equal(aiResponseSchema(planner, plan, task).properties.steps.maxItems, undefined);
   const prompt = buildPrompt({ task, plan, nodeId: planner.id, skills: [], priorEvidence: {} });
-  assert.match(prompt, /от 1 до 11 task-specific/);
+  assert.match(prompt, /необходимые task-specific/);
   assert.match(prompt, /все обязательные проверки до следующего шага/);
   assert.equal(plan.executionStages, null);
 });
@@ -170,7 +168,7 @@ test('V2 current and historical plans preserve the previous graph and planner li
   assert.deepEqual(plan.nodes.map((node) => node.id), ['approve-plan', 'step-format', 'step-export', 'workspace-check', 'tests', 'review', 'handoff', 'accept-result']);
   assert.deepEqual(plan.nodes.find((node) => node.id === 'step-export').needs, ['step-format']);
   assert.equal('executionStages' in plan, false);
-  assert.equal(planningStepLimit(task, context), 12);
+  assert.equal(planningStepLimit(task, context), null);
   assert.equal(validatePlan(plan, task, context).hash, planHash);
   assert.equal(validatePlan(plan, task, { ...context, mode: 'historical', runtimeHash: 'b'.repeat(64) }).hash, planHash);
   const baseline = compilePlan(task, context).plan;

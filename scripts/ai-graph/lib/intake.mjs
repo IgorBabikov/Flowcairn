@@ -1,8 +1,10 @@
+import { readGitPathInventory } from './git-path-inventory.mjs';
+import { scanSourceFile } from './source-file-scan.mjs';
 import { gitExecutable, gitNullDevice, hostSystemEnvironment } from './host-executables.mjs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readFileSync } from 'node:fs';
-import { GraphError, hashObject, sha256 } from './io.mjs';
+import { existsSync, lstatSync } from 'node:fs';
+import { GraphError, hashObject } from './io.mjs';
 import { RelativePath } from './schemas.mjs';
 import { isSensitivePath, isInstructionPath, overlaps } from './registry.mjs';
 import { loadProjectProfile, projectContextPaths } from './project.mjs';
@@ -30,14 +32,8 @@ function sourceIdentity(root, file) {
     if (!cursor.startsWith(root + path.sep) || lstatSync(cursor).isSymbolicLink()) throw new GraphError('SNAPSHOT_UNSAFE', 'Snapshot path содержит ссылку');
   }
   if (!existsSync(target)) return { path: file, hash: null, size: 0 };
-  const fd = openSync(target, constants.O_RDONLY | constants.O_NOFOLLOW);
-  try {
-    const stat = fstatSync(fd);
-    if (!stat.isFile() || stat.nlink !== 1 || stat.size > 8 * 1024 * 1024) throw new GraphError('SNAPSHOT_LIMIT', 'Snapshot candidate должен быть обычным файлом до 8 MiB');
-    const bytes = readFileSync(fd);
-    if (bytes.length !== stat.size) throw new GraphError('STALE_CONTEXT', 'Snapshot candidate изменился');
-    return { path: file, hash: sha256(bytes), size: bytes.length };
-  } finally { closeSync(fd); }
+  const data = scanSourceFile(target, { classify: false });
+  return { path: file, hash: data.hash, size: data.size };
 }
 
 /** Bounded metadata/hash preview. Source bytes stay local until a separate planning gate. */
@@ -47,21 +43,18 @@ export function projectSummary(service) {
   const inventory = taskContextInventory(service.root, profile);
   const files = inventory.files;
   const available = new Set(files);
-  const changed = git(service.root, ['diff', 'HEAD', '--name-only', '-z']).split('\0').filter(Boolean);
-  const untracked = git(service.root, ['ls-files', '--others', '--exclude-standard', '-z']).split('\0').filter(Boolean);
-  if (changed.length + untracked.length > 128) throw new GraphError('SNAPSHOT_LIMIT', 'Слишком много измененных файлов для первого snapshot');
+  const changed = readGitPathInventory(service.root, ['diff', 'HEAD', '--name-only', '-z']);
+  const untracked = readGitPathInventory(service.root, ['ls-files', '--others', '--exclude-standard', '-z']);
   const firstTask = !existsSync(path.join(service.root, '.ai-orchestrator/state.json'));
   const requiredUntracked = firstTask ? ownedBootstrapFiles(service.root).filter((file) => untracked.includes(file.path)) : [];
   const requiredPaths = new Set(requiredUntracked.map((file) => file.path));
   const changedPaths = changed.filter((file) => safe(file) && available.has(file)).sort(), untrackedCandidates = untracked.filter((file) => safe(file) && available.has(file)).filter((file) => !requiredPaths.has(file)).sort();
   const identities = [...new Set([...changedPaths, ...untrackedCandidates, ...requiredPaths])].map((file) => sourceIdentity(service.root, file));
-  if (identities.reduce((sum, file) => sum + file.size, 0) > 32 * 1024 * 1024) throw new GraphError('SNAPSHOT_LIMIT', 'Snapshot preview превышает 32 MiB');
   const bootstrap = { firstTask, required: firstTask && identities.length > 0, changedPaths, untrackedCandidates, requiredUntracked,
     snapshotHash: hashObject({ firstTask, identities, requiredUntracked, head: git(service.root, ['rev-parse', 'HEAD']).trim() }) };
   const excluded = ['.flowcairn.json', '.agents', '.codex', '.cursor', '.claude', ...profile.outputPaths];
   const scopeCandidates = [...new Set(files.filter((file) => !isInstructionPath(file) && !excluded.some((entry) => overlaps(file, entry)))
     .map((file) => file.includes('/') ? file.split('/')[0] : file))].sort();
-  if (scopeCandidates.length > 256) throw new GraphError('INTAKE_SCOPE_LIMIT', 'Inventory превышает 256 корневых областей; требуется более узкий проект');
   const contextPaths = [...new Set([...projectContextPaths(service.root, profile), ...(service.adapters.instructionPaths?.() ?? [])])].filter((file) => available.has(file)).sort();
   const contextHash = hashObject({ runtimeHash: service.adapters.identity(), files, contextPaths, scopeCandidates, profile, snapshotHash: bootstrap.snapshotHash, safeSourceHash: inventory.sourceHash });
   // The source snapshot withholds these files entirely; their local edits are not AI inputs.

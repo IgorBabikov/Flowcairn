@@ -6,7 +6,6 @@ export const Text = z.string().min(1).max(4000);
 export const RelativePath = z
   .string()
   .min(1)
-  .max(512)
   // Keep the basic boundary visible in provider JSON Schema as well as in Zod.
   // A simple provider-compatible pattern rejects root and absolute paths;
   // the refinement below remains the full trusted path check.

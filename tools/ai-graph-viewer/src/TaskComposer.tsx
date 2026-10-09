@@ -42,7 +42,7 @@ export function TaskComposer({ capability, busy, pending, error, onSubmit, onRet
           value={title} disabled={busy || pending} onChange={event => setTitle(event.target.value)} />
         <p className="field-hint">Например: «Добавить локализацию для модуля платежей».</p>
         <label htmlFor="task-description">Полное описание задачи</label>
-        <textarea id="task-description" name="description" required minLength={3} maxLength={16000}
+        <textarea id="task-description" name="description" required minLength={3}
           placeholder="Опишите задачу, цели и важные детали…"
           value={description} disabled={busy || pending} onChange={event => setDescription(event.target.value)} />
         <p className="field-hint">Укажите, что нужно изменить, где находятся файлы и какие есть ограничения.</p>

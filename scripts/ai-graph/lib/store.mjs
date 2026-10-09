@@ -29,7 +29,6 @@ const MAX_REVISIONS = 10_000;
 const MAX_HISTORY_LIMIT = 1_000;
 const MAX_UPDATER_MS = 1_000;
 const FINGERPRINT_VERSION = 1;
-const MAX_FINGERPRINT_FILES = 20_000;
 const MAX_FINGERPRINT_CHUNK_BYTES = 1024 * 1024;
 const HASH_PATTERN = /^[a-f0-9]{64}$/;
 const OWNER_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
@@ -45,6 +44,8 @@ const OBJECT_KINDS = new Set([
   'learning-materials',
   'learning-sources',
   'learning-source-chunks',
+  'learning-source-indexes',
+  'learning-source-pages',
   'lessons',
   'learning-events',
   'learning-jobs',
@@ -99,7 +100,7 @@ function fingerprintChunks(files) {
     const encoded = canonicalJson(file);
     if (typeof encoded !== 'string') fail('INVALID_FINGERPRINT', 'Fingerprint содержит не-JSON файл');
     const next = Buffer.byteLength(encoded) + (current.length ? 1 : 0);
-    if (current.length && bytes + next > MAX_FINGERPRINT_CHUNK_BYTES) {
+    if (current.length && (bytes + next > MAX_FINGERPRINT_CHUNK_BYTES || current.length >= 1000)) {
       chunks.push(current);
       current = [];
       bytes = 0;
@@ -114,7 +115,7 @@ function fingerprintChunks(files) {
 function validateFingerprint(value, label) {
   if (!isPlainObject(value)) fail('INVALID_FINGERPRINT', `${label} должен быть plain JSON object`);
   exactKeys(value, ['files', 'git', 'hash'], label, 'INVALID_FINGERPRINT');
-  if (!Array.isArray(value.files) || value.files.length > MAX_FINGERPRINT_FILES)
+  if (!Array.isArray(value.files))
     fail('INVALID_FINGERPRINT', `${label}.files превышает лимит`);
   if (!isPlainObject(value.git)) fail('INVALID_FINGERPRINT', `${label}.git должен быть object`);
   assertHash(value.hash);
@@ -128,14 +129,14 @@ function normalizedKey(key) {
   return key.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
-function inspectJson(value, label, { requireObject = true } = {}) {
+function inspectJson(value, label, { requireObject = true, longStrings = undefined } = {}) {
   if (requireObject && !isPlainObject(value)) {
     fail('INVALID_STORE_DATA', `${label} должен быть plain JSON object`);
   }
   const ancestors = new WeakSet();
   let values = 0;
 
-  const visit = (current, depth, currentLabel) => {
+  const visit = (current, depth, currentLabel, segments = []) => {
     values += 1;
     if (values > MAX_TOTAL_VALUES) {
       fail('STORE_LIMIT_EXCEEDED', `${label} содержит слишком много JSON values`);
@@ -147,7 +148,7 @@ function inspectJson(value, label, { requireObject = true } = {}) {
       return;
     }
     if (typeof current === 'string') {
-      if (Buffer.byteLength(current) > MAX_STRING_BYTES) {
+      if (Buffer.byteLength(current) > MAX_STRING_BYTES && !(typeof longStrings === 'function' && longStrings(segments))) {
         fail('STORE_LIMIT_EXCEEDED', `${currentLabel} превышает string limit`);
       }
       if (/-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(current)) {
@@ -169,7 +170,7 @@ function inspectJson(value, label, { requireObject = true } = {}) {
           if (!Object.hasOwn(current, index)) {
             fail('INVALID_STORE_DATA', `${currentLabel} содержит sparse array`);
           }
-          visit(current[index], depth + 1, `${currentLabel}[${index}]`);
+          visit(current[index], depth + 1, `${currentLabel}[${index}]`, [...segments, index]);
         }
         return;
       }
@@ -198,7 +199,7 @@ function inspectJson(value, label, { requireObject = true } = {}) {
         if (!descriptor?.enumerable || !Object.hasOwn(descriptor, 'value')) {
           fail('INVALID_STORE_DATA', `${currentLabel}.${key} должен быть data field`);
         }
-        visit(descriptor.value, depth + 1, `${currentLabel}.${key}`);
+        visit(descriptor.value, depth + 1, `${currentLabel}.${key}`, [...segments, key]);
       }
     } finally {
       ancestors.delete(current);
@@ -206,6 +207,14 @@ function inspectJson(value, label, { requireObject = true } = {}) {
   };
 
   visit(value, 0, label);
+}
+
+function longTaskField(kind, segments) {
+  if (kind === 'tasks') return segments.length === 1 && segments[0] === 'instructions'
+    || segments.length === 2 && segments[0] === 'acceptance' && Number.isInteger(segments[1]);
+  if (kind === 'plans') return segments[0] === 'taskContract' && segments[1] === 'requirements' && Number.isInteger(segments[2])
+    && (segments.length === 4 && segments[3] === 'title' || segments.length === 5 && segments[3] === 'verification' && segments[4] === 'criterion');
+  return false;
 }
 
 function validatedClone(value, label, options) {
@@ -523,7 +532,7 @@ export class GraphStore {
 
   putObject(kind, data) {
     assertKind(kind);
-    const clone = validatedClone(data, `${kind} object`);
+    const clone = validatedClone(data, `${kind} object`, { longStrings: (segments) => longTaskField(kind, segments) });
     const hash = sha256(canonicalJson(clone));
     const graphDirectory = this.#ensureGraphDirectory();
     const kindDirectory = ensurePrivateChild(graphDirectory, kind);
@@ -720,8 +729,6 @@ export class GraphStore {
           sha256(canonicalJson({ files: chunk.files })) !== chunkHash)
         fail('FINGERPRINT_TAMPERED', 'Fingerprint chunk поврежден');
       files.push(...chunk.files);
-      if (files.length > MAX_FINGERPRINT_FILES)
-        fail('FINGERPRINT_TAMPERED', 'Fingerprint содержит слишком много files');
     }
     const fingerprint = { hash, files, git: manifest.git };
     validateFingerprint(fingerprint, 'Fingerprint');
@@ -815,7 +822,7 @@ export class GraphStore {
     if (wrapper.version !== STORE_VERSION || wrapper.kind !== kind || wrapper.hash !== hash) {
       fail('OBJECT_TAMPERED', 'Stored object identity не совпадает');
     }
-    const data = validatedClone(wrapper.data, `${kind} object`);
+    const data = validatedClone(wrapper.data, `${kind} object`, { longStrings: (segments) => longTaskField(kind, segments) });
     if (sha256(canonicalJson(data)) !== hash)
       fail('OBJECT_TAMPERED', 'Stored object hash не совпадает');
     return data;

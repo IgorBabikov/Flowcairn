@@ -485,7 +485,8 @@ export interface SavedSource {
   bytes: number;
   mode: '100644' | '100755';
   role: 'before' | 'after' | 'context';
-  chunkHashes: string[];
+  chunkHashes?: string[];
+  chunkIndexHash?: string;
   lineCount: number;
 }
 export interface SourceCatalog { version: 1; sources: SavedSource[] }
@@ -580,6 +581,7 @@ export interface LearningMaterialResponse {
   id: string;
   material: StageMaterial;
   sources: SavedSource[];
+  sourceCatalog?: { version: 2; pageHashes: string[] };
   progress: LearningProgress;
   freshness: { state: SourceFreshness; reason: string | null };
   lessonHash: string | null;
@@ -592,7 +594,10 @@ export interface LearningSourceResponse {
   startLine: number;
   endLine: number;
   totalLines: number;
-  next: { startLine: number; lineCount: number } | null;
+  startColumn?: number;
+  endColumn?: number;
+  partial?: boolean;
+  next: { startLine: number; lineCount: number; startColumn?: number } | null;
 }
 export interface LearningLessonResponse { id: string; lesson: LessonMaterial }
 export interface LearningJob {

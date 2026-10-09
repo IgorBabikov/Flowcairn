@@ -1,11 +1,13 @@
-import { lstatHostSync as lstatSync, fstatHostSync as fstatSync } from './host-filesystem.mjs';
-import { constants, closeSync, openSync, opendirSync, readSync, realpathSync } from 'node:fs';
+import { lstatHostSync as lstatSync } from './host-filesystem.mjs';
+import { opendirSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { TextDecoder } from 'node:util';
-import { GraphError, hashObject, sha256 } from './io.mjs';
+import { GraphError, hashObject } from './io.mjs';
+import { streamInstructionFile, collectInstructionFile } from './instruction-reader.mjs';
 import { CORE_SKILL_ROUTES, DOMAIN_SKILLS } from './config.mjs';
 
-export const INSTRUCTION_LIMITS = Object.freeze({ maxDepth: 32, maxEntries: 12000, maxFiles: 256, maxFileBytes: 65536, maxTotalBytes: 1048576 });
+// Локальный учет файлов не расширяет отдельный лимит AI-контекста действия.
+export const INSTRUCTION_LIMITS = Object.freeze({ maxDepth: null, maxEntries: null, maxFiles: null, maxFileBytes: null, maxTotalBytes: null });
 export const WORKFLOW_PRECEDENCE = Object.freeze({
   version: 1,
   scope: 'flowcairn orchestration only',
@@ -24,7 +26,7 @@ export function canonicalInstructionRoot(projectRoot) {
   return realpathSync(requested);
 }
 export function instructionPath(root, relative) {
-  if (typeof relative !== 'string' || relative.length > 1024 || (relative.includes('\\') || [...relative].some((character) => character.charCodeAt(0) < 32)) || path.isAbsolute(relative)) instructionError('INSTRUCTION_UNSAFE_PATH', 'Invalid project-relative instruction path.');
+  if (typeof relative !== 'string' || (relative.includes('\\') || [...relative].some((character) => character.charCodeAt(0) < 32)) || path.isAbsolute(relative)) instructionError('INSTRUCTION_UNSAFE_PATH', 'Invalid project-relative instruction path.');
   const parts = relative.split('/');
   if (parts.some((part) => !part || part === '.' || part === '..')) instructionError('INSTRUCTION_UNSAFE_PATH', 'Invalid instruction path segment.');
   let cursor = root;
@@ -35,25 +37,21 @@ export function instructionPath(root, relative) {
   }
   return path.join(root, ...parts);
 }
-export function readInstructionFile(root, relative, maxBytes = 65536) {
+function checkedInstructionTarget(root, relative) {
   if (relative.split('/').some((part) => sensitive(part) || ['.git', '.npmrc', '.netrc', '.pypirc', 'id_rsa', 'id_ed25519'].includes(part))) instructionError('INSTRUCTION_SENSITIVE_PATH', 'Sensitive files are not instruction input.');
-  const target = instructionPath(root, relative);
-  const before = lstatSync(target);
-  if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1 || before.size > maxBytes) instructionError('INSTRUCTION_UNSAFE_FILE', 'Instruction file must be bounded, regular, and have one link.');
-  const fd = openSync(target, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
-  try {
-    const stat = fstatSync(fd);
-    if (!stat.isFile() || stat.nlink !== 1 || stat.dev !== before.dev || stat.ino !== before.ino || stat.size > maxBytes) instructionError('INSTRUCTION_CHANGED', 'Instruction file changed before reading.');
-    const buffer = Buffer.alloc(maxBytes + 1);
-    let length = 0, count;
-    do { count = readSync(fd, buffer, length, buffer.length - length, null); length += count; } while (count && length < buffer.length);
-    if (length > maxBytes) instructionError('INSTRUCTION_LIMIT', 'Instruction file exceeds byte limit.');
-    const after = fstatSync(fd), current = lstatSync(instructionPath(root, relative));
-    if (after.size !== stat.size || after.mtimeMs !== stat.mtimeMs || after.ctimeMs !== stat.ctimeMs || current.dev !== stat.dev || current.ino !== stat.ino || current.nlink !== 1) instructionError('INSTRUCTION_CHANGED', 'Instruction file changed during reading.');
-    const bytes = buffer.subarray(0, length);
-    return { bytes, sha256: sha256(bytes), mode: stat.mode & 0o777, identity: `${stat.dev}:${stat.ino}:${stat.ctimeMs}` };
-  } finally { closeSync(fd); }
+  return instructionPath(root, relative);
 }
+export function inspectInstructionFile(root, relative, options = {}) {
+  return streamInstructionFile(checkedInstructionTarget(root, relative), {
+    ...options, currentPath: () => checkedInstructionTarget(root, relative),
+  });
+}
+export function readInstructionFile(root, relative, maxBytes = undefined) {
+  return collectInstructionFile(checkedInstructionTarget(root, relative), {
+    maxBytes, currentPath: () => checkedInstructionTarget(root, relative),
+  });
+}
+
 function kindOf(relative) {
   const base = path.posix.basename(relative);
   if (base === 'AGENT.md') return 'agent-custom';
@@ -74,56 +72,61 @@ function scopeOf(relative, kind) {
 }
 function sensitive(name) { return /(?:^|[._-])(?:secrets?|credentials?)(?:[._-]|$)|^\.env(?:\.|$)|\.(?:pem|key|p12|pfx)$/i.test(name); }
 /** Metadata only: no content or prompt is returned, and no project code is executed. */
-export function inspectInstructions({ projectRoot, limits = {} }) {
+export function inspectInstructions({ projectRoot, limits = {}, signal = undefined }) {
   const root = canonicalInstructionRoot(projectRoot);
   const cap = { ...INSTRUCTION_LIMITS };
   for (const [key, value] of Object.entries(limits)) {
-    if (!(key in cap) || !Number.isSafeInteger(value) || value < 1 || value > cap[key]) instructionError('INSTRUCTION_LIMIT', 'Limits can only reduce the documented bounds.');
+    if (!(key in cap) || !Number.isSafeInteger(value) || value < 1) instructionError('INSTRUCTION_LIMIT', 'Explicit scan budgets must be positive safe integers.');
     cap[key] = value;
   }
-  const files = [], issues = [];
+  const files = [], issues = [], pending = [{ relative: '', depth: 0 }];
   let entries = 0, bytes = 0, stopped = false;
   const issue = (code, file, severity = 'warning') => issues.push({ code, path: file, severity });
-  function visit(relative, depth) {
-    if (stopped) return;
-    const directory = relative ? instructionPath(root, `${relative}/placeholder`) : root;
-    const actual = relative ? path.dirname(directory) : root;
-    if (depth > cap.maxDepth) { issue('DEPTH_LIMIT', relative, 'error'); return; }
+  const over = (key, value) => cap[key] !== null && value > cap[key];
+  while (pending.length && !stopped) {
+    const { relative, depth } = pending.pop();
+    if (signal?.aborted) { issue('INSTRUCTION_CANCELLED', relative, 'error'); break; }
+    if (over('maxDepth', depth)) { issue('DEPTH_LIMIT', relative, 'error'); continue; }
     let dir;
-    try { dir = opendirSync(actual); } catch { issue('DIRECTORY_UNREADABLE', relative, 'error'); return; }
     try {
+      const actual = relative ? path.dirname(instructionPath(root, `${relative}/placeholder`)) : root;
+      const before = lstatSync(actual);
+      if (!before.isDirectory() || before.isSymbolicLink()) instructionError('DIRECTORY_UNSAFE', 'Instruction directory must be regular.');
+      dir = opendirSync(actual);
       let entry;
       while (!stopped && (entry = dir.readSync())) {
-        if (++entries > cap.maxEntries) { issue('ENTRY_LIMIT', relative, 'error'); stopped = true; break; }
+        if (signal?.aborted) { issue('INSTRUCTION_CANCELLED', relative, 'error'); stopped = true; break; }
+        if (over('maxEntries', ++entries)) { issue('ENTRY_LIMIT', relative, 'error'); stopped = true; break; }
         const file = relative ? `${relative}/${entry.name}` : entry.name;
         const kind = kindOf(file);
         if (sensitive(entry.name) || SKIP.has(entry.name)) continue;
         if (entry.isSymbolicLink()) { if (kind || HIDDEN.has(entry.name)) issue('LINK_SKIPPED', file, 'error'); continue; }
         if (entry.isDirectory()) {
           if (entry.name.startsWith('.') && !HIDDEN.has(entry.name) && entry.name !== '.skills') continue;
-          try { visit(file, depth + 1); } catch { issue('DIRECTORY_UNSAFE', file, 'error'); }
+          pending.push({ relative: file, depth: depth + 1 });
           continue;
         }
         if (!kind) continue;
-        if (files.length >= cap.maxFiles) { issue('FILE_LIMIT', file, 'error'); stopped = true; break; }
+        if (over('maxFiles', files.length + 1)) { issue('FILE_LIMIT', file, 'error'); stopped = true; break; }
         try {
-          const data = readInstructionFile(root, file, Math.min(cap.maxFileBytes, cap.maxTotalBytes - bytes));
-          bytes += data.bytes.length;
-          let content;
-          try { content = decoder.decode(data.bytes); } catch { issue('INVALID_UTF8', file, 'error'); continue; }
-          if (content.includes('\0')) { issue('BINARY_INSTRUCTION', file, 'error'); continue; }
-          const record = { path: file, kind, sha256: data.sha256, bytes: data.bytes.length, scope: scopeOf(file, kind), scopeResolution: ['agents', 'agent-custom', 'claude', 'cursor-legacy'].includes(kind) ? 'directory' : 'client-defined', applicability: kind === 'agent-custom' ? 'explicit-context-only; native activation not verified' : 'client-defined; not evaluated' };
-          files.push(record);
-          if (content.includes('<!-- FLOWCAIRN:')) issue('MANAGED_MARKER_PRESENT', file, 'info');
-          if (bytes >= cap.maxTotalBytes) { issue('TOTAL_BYTE_LIMIT', file, 'error'); stopped = true; }
-        } catch (error) { issue(error.code || 'INSTRUCTION_UNREADABLE', file, 'error'); }
+          const remaining = cap.maxTotalBytes === null ? undefined : cap.maxTotalBytes - bytes;
+          const maxBytes = cap.maxFileBytes === null ? remaining : remaining === undefined ? cap.maxFileBytes : Math.min(cap.maxFileBytes, remaining);
+          const data = inspectInstructionFile(root, file, { maxBytes, signal });
+          bytes += data.size;
+          files.push({ path: file, kind, sha256: data.sha256, bytes: data.size, scope: scopeOf(file, kind), scopeResolution: ['agents', 'agent-custom', 'claude', 'cursor-legacy'].includes(kind) ? 'directory' : 'client-defined', applicability: kind === 'agent-custom' ? 'explicit-context-only; native activation not verified' : 'client-defined; not evaluated' });
+          if (data.managedMarker) issue('MANAGED_MARKER_PRESENT', file, 'info');
+        } catch (error) { issue(error.code || 'INSTRUCTION_UNREADABLE', file, 'error'); if (signal?.aborted) stopped = true; }
       }
-    } finally { dir.closeSync(); }
+      const after = lstatSync(actual);
+      if (after.dev !== before.dev || after.ino !== before.ino || after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs)
+        issue('DIRECTORY_CHANGED', relative, 'error');
+    } catch (error) { issue(error.code?.startsWith('INSTRUCTION_') ? error.code : 'DIRECTORY_UNREADABLE', relative, 'error'); }
+    finally { if (dir) dir.closeSync(); }
   }
-  visit('', 0);
   files.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+  const paths = new Set(files.map((file) => file.path));
   for (const file of files.filter((item) => item.path.endsWith('AGENTS.override.md'))) {
-    if (files.some((item) => item.path === file.path.replace('AGENTS.override.md', 'AGENTS.md'))) issue('AGENTS_SHADOWED_BY_OVERRIDE', file.path, 'warning');
+    if (paths.has(file.path.replace('AGENTS.override.md', 'AGENTS.md'))) issue('AGENTS_SHADOWED_BY_OVERRIDE', file.path, 'warning');
   }
   if (new Set(files.map((file) => file.kind)).size > 1) issue('MULTIPLE_CLIENT_SURFACES', '', 'info');
   issues.sort((a, b) => `${a.path}:${a.code}`.localeCompare(`${b.path}:${b.code}`));
@@ -149,11 +152,19 @@ export function effectiveInstructionFiles(manifest, { provider = null, scope = n
 /** Explicit content read for the trusted runtime after its context/egress consent check.
  * Scoped metadata is retained; this does not pretend to evaluate client glob semantics.
  */
+function requireCompleteInstructionManifest(manifest) {
+  if (manifest?.complete === true && Array.isArray(manifest.files)) return;
+  const issues = (manifest?.audit?.issues ?? []).filter((item) => item.severity === 'error');
+  const detail = issues.slice(0, 8).map((item) => `${item.code}: ${JSON.stringify(item.path)}`).join('; ');
+  instructionError('INSTRUCTION_INCOMPLETE', `Не удалось полностью проверить инструкции.${detail ? ` ${detail}` : ' Полный список инструкций отсутствует.'}`);
+}
+
 export function readInstructionBundle({ projectRoot, expectedFingerprint, paths }) {
   const root = canonicalInstructionRoot(projectRoot);
   const before = inspectInstructions({ projectRoot: root });
-  if (!before.complete || before.fingerprint !== expectedFingerprint) instructionError('INSTRUCTION_CHANGED', 'Instruction discovery is incomplete or its approved fingerprint changed.');
-  if (!Array.isArray(paths) || paths.length > INSTRUCTION_LIMITS.maxFiles || new Set(paths).size !== paths.length) instructionError('INSTRUCTION_PATHS', 'Explicit unique instruction paths are required.');
+  requireCompleteInstructionManifest(before);
+  if (before.fingerprint !== expectedFingerprint) instructionError('INSTRUCTION_CHANGED', 'Approved instruction fingerprint changed.');
+  if (!Array.isArray(paths) || new Set(paths).size !== paths.length) instructionError('INSTRUCTION_PATHS', 'Explicit unique instruction paths are required.');
   const known = new Map(before.files.map((file) => [file.path, file]));
   const files = paths.map((relative) => {
     const record = known.get(relative);
@@ -168,18 +179,21 @@ export function readInstructionBundle({ projectRoot, expectedFingerprint, paths 
 
 /** Локальная проверка наблюдаемых свойств. Не сертифицирует качество и не активирует инструкции. */
 export function assessProjectInstructions(projectRoot, { instructionManifest } = { instructionManifest: undefined }) {
-  if (!instructionManifest || instructionManifest.complete !== true || !Array.isArray(instructionManifest.files))
-    instructionError('INSTRUCTION_CHANGED', 'Для рекомендаций нужен полный актуальный список инструкций.');
-  const bundle = readInstructionBundle({ projectRoot, expectedFingerprint: instructionManifest.fingerprint,
-    paths: instructionManifest.files.map((file) => file.path) });
+  requireCompleteInstructionManifest(instructionManifest);
+  const root = canonicalInstructionRoot(projectRoot);
+  const current = inspectInstructions({ projectRoot: root });
+  requireCompleteInstructionManifest(current);
+  if (current.fingerprint !== instructionManifest.fingerprint) instructionError('INSTRUCTION_CHANGED', 'Instruction inventory changed before assessment.');
   const findings = [];
   const add = (code, file, message) => findings.push({ code, path: file.path, severity: 'suggestion', message });
-  for (const file of bundle.files) {
-    if (!file.content.trim()) add('EMPTY_INSTRUCTION', file, 'Файл пуст. Предлагаем добавить правила проекта или подключить базовые skills flowcairn.');
+  for (const file of current.files) {
+    const data = inspectInstructionFile(root, file.path, { collectFrontmatter: file.kind === 'project-skill' });
+    if (data.sha256 !== file.sha256) instructionError('INSTRUCTION_CHANGED', 'Instruction changed during assessment.');
+    if (!data.nonempty) add('EMPTY_INSTRUCTION', file, 'Файл пуст. Предлагаем добавить правила проекта или подключить базовые skills flowcairn.');
     if (file.kind === 'project-skill') {
-      const header = /^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/.exec(file.content);
+      const header = data.frontmatter;
       if (!header) add('SKILL_METADATA_MISSING', file, 'Не найден заголовок Skill. Проверьте name и description перед подключением.');
-      else if (!file.content.slice(header[0].length).trim()) add('SKILL_BODY_MISSING', file, 'В Skill есть описание, но нет рабочих инструкций. Предлагаем дополнить его перед подключением.');
+      else if (!data.bodyNonempty) add('SKILL_BODY_MISSING', file, 'В Skill есть описание, но нет рабочих инструкций. Предлагаем дополнить его перед подключением.');
     }
     if (file.bytes > 12 * 1024) add('INSTRUCTION_CONTEXT_COST', file, 'Большой файл увеличивает контекст. Предлагаем оставить основные правила и вынести детали в отдельные материалы.');
     if (file.kind === 'agent-custom') add('CUSTOM_AGENT_FILENAME', file, 'AGENT.md сохранен как контекст проекта. Его автоматическое чтение AI-клиентом не подтверждено.');
@@ -188,9 +202,12 @@ export function assessProjectInstructions(projectRoot, { instructionManifest } =
     if (issue.code === 'AGENTS_SHADOWED_BY_OVERRIDE')
       add(issue.code, { path: issue.path }, 'AGENTS.override.md перекрывает соседний AGENTS.md в Codex. Проверьте, что нужные правила доступны в действующем файле.');
   }
+  const after = inspectInstructions({ projectRoot: root });
+  requireCompleteInstructionManifest(after);
+  if (after.fingerprint !== current.fingerprint) instructionError('INSTRUCTION_CHANGED', 'Instruction inventory changed during assessment.');
   return {
-    version: 1, instructionFingerprint: bundle.fingerprint, quality: 'not-certified', semanticConflicts: 'not-assessed',
-    recommendation: bundle.files.length ? 'preserve-and-supplement' : 'activate-bundled', findings,
+    version: 1, instructionFingerprint: current.fingerprint, quality: 'not-certified', semanticConflicts: 'not-assessed',
+    recommendation: current.files.length ? 'preserve-and-supplement' : 'activate-bundled', findings,
     explanation: 'Сохраняем выбранные правила владельца. Проверка структуры не доказывает качество; смысловые противоречия требуют разбора и решения до автономной работы.',
     bundledSkills: { source: 'flowcairn-package', requiresActivation: true, copiesProjectFiles: false,
       actions: CORE_SKILL_ROUTES, domains: DOMAIN_SKILLS,

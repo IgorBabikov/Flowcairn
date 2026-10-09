@@ -32,7 +32,7 @@ export const MaterialGapSchema = z.strictObject({
   path: RelativePath.nullable(), reason: Text,
 });
 export const SourceCaptureReferenceSchema = z.strictObject({
-  sourceHash: Hash, sourceCatalogHash: Hash, gaps: z.array(MaterialGapSchema).max(128),
+  sourceHash: Hash, sourceCatalogHash: Hash, gaps: z.array(MaterialGapSchema),
 });
 export const SourceChunkSchema = z.strictObject({
   version: z.literal(1),
@@ -41,22 +41,22 @@ export const SourceChunkSchema = z.strictObject({
       'Chunk must contain at most 16 KiB of exact UTF-8'),
 });
 export const SavedSourceSchema = z.strictObject({
-  id: Id, path: RelativePath, fileHash: Hash, bytes: z.number().int().min(0).max(256 * 1024),
+  id: Id, path: RelativePath, fileHash: Hash, bytes: z.number().int().min(0),
   mode: z.enum(['100644', '100755']), role: z.enum(['before', 'after', 'context']),
-  chunkHashes: z.array(Hash).max(256), lineCount: z.number().int().min(0),
-});
+  chunkHashes: z.array(Hash).optional(), chunkIndexHash: Hash.optional(), lineCount: z.number().int().min(0),
+}).refine((source) => (source.chunkHashes !== undefined) !== (source.chunkIndexHash !== undefined), 'Exactly one chunk reference form is required');
 export const SourceCatalogSchema = z.strictObject({
-  version: z.literal(1), sources: z.array(SavedSourceSchema).max(64),
+  version: z.literal(1), sources: z.array(SavedSourceSchema),
 });
 export const StageMaterialSchema = z.strictObject({
   version: z.literal(1), kind: z.enum(['stage', 'task']),
   runId: Id, planHash: Hash, taskHash: Hash, contractHash: Hash,
-  stageId: Id.nullable(), goal: Text, outcome: Text, requirementIds: z.array(Id).max(40),
+  stageId: Id.nullable(), goal: Text, outcome: Text, requirementIds: z.array(Id),
   beforeHash: Hash, resultHash: Hash, createdAt: z.iso.datetime(), sourceCatalogHash: Hash,
-  implementationReceiptIds: z.array(Hash).max(64), checkReceiptIds: z.array(Hash).max(64),
-  reviewReceiptIds: z.array(Hash).max(64), diffArtifactIds: z.array(Hash).max(64),
-  findingsArtifactIds: z.array(Hash).max(64), status: z.enum(['complete', 'partial', 'unavailable']),
-  gaps: z.array(MaterialGapSchema).max(128),
+  implementationReceiptIds: z.array(Hash), checkReceiptIds: z.array(Hash),
+  reviewReceiptIds: z.array(Hash), diffArtifactIds: z.array(Hash),
+  findingsArtifactIds: z.array(Hash), status: z.enum(['complete', 'partial', 'unavailable']),
+  gaps: z.array(MaterialGapSchema),
 });
 export const SourceAnchorSchema = z.strictObject({
   sourceId: Id, fileHash: Hash, startLine: z.number().int().min(1), endLine: z.number().int().min(1),
@@ -80,13 +80,13 @@ export const LessonMaterialSchema = z.strictObject({
 export const LearningSnapshotSchema = z.strictObject({
   version: z.literal(1), mode: LearningModeSchema,
   stages: z.array(z.strictObject({
-    id: Id, title: z.string().min(1).max(160), outcome: Text, requirementIds: z.array(Id).max(40),
+    id: Id, title: z.string().min(1).max(160), outcome: Text, requirementIds: z.array(Id),
     status: z.enum(['pending', 'running', 'verified', 'failed', 'uncertain']), checkedResultHash: Hash.nullable(),
     freshness: FreshnessSchema, materialHash: Hash.nullable(),
     materialStatus: z.enum(['pending', 'complete', 'partial', 'unavailable']), lessonHash: Hash.nullable(),
     lessonStatus: z.enum(['absent', 'generating', 'ready', 'failed', 'uncertain']),
     progress: LearningProgressSchema, reason: Text.nullable(),
-  })).max(12),
+  })),
   finalMaterialHash: Hash.nullable(),
   activeJob: z.strictObject({ id: Id, kind: z.enum(['lesson', 'question']), materialHash: Hash }).nullable(),
 });
@@ -110,7 +110,8 @@ export const LessonAnswerSchema = z.strictObject({
 });
 const CapabilitySchema = z.strictObject({ label: z.string().max(160).optional(), allowed: z.boolean(), reason: Text.nullable() });
 export const LearningMaterialResponseSchema = z.strictObject({
-  id: Hash, material: StageMaterialSchema, sources: z.array(SavedSourceSchema).max(64),
+  id: Hash, material: StageMaterialSchema, sources: z.array(SavedSourceSchema),
+  sourceCatalog: z.strictObject({ version: z.literal(2), pageHashes: z.array(Hash) }).optional(),
   progress: LearningProgressSchema,
   freshness: z.strictObject({ state: FreshnessSchema, reason: Text.nullable() }), lessonHash: Hash.nullable(),
   capabilities: z.strictObject({ generateLesson: CapabilitySchema, askLesson: CapabilitySchema, setLearningProgress: CapabilitySchema }),
@@ -118,6 +119,7 @@ export const LearningMaterialResponseSchema = z.strictObject({
 export const LearningSourceResponseSchema = z.strictObject({
   sourceId: Id, fileHash: Hash, text: z.string().max(65536),
   startLine: z.number().int().min(1), endLine: z.number().int().min(0), totalLines: z.number().int().min(0),
-  next: z.strictObject({ startLine: z.number().int().min(1), lineCount: z.number().int().min(1).max(200) }).nullable(),
+  startColumn: z.number().int().nonnegative().optional(), endColumn: z.number().int().nonnegative().optional(), partial: z.boolean().optional(),
+  next: z.strictObject({ startLine: z.number().int().min(1), lineCount: z.number().int().min(1).max(200), startColumn: z.number().int().nonnegative().optional() }).nullable(),
 });
 export const LearningLessonResponseSchema = z.strictObject({ id: Hash, lesson: LessonMaterialSchema });

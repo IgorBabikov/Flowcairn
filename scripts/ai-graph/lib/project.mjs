@@ -1,3 +1,4 @@
+import { collectInstructionFile } from './instruction-reader.mjs';
 import { isPrivateMode } from './host-filesystem.mjs';
 import { lstatSync, readFileSync, realpathSync, existsSync, openSync, closeSync, fstatSync, constants } from 'node:fs';
 import { parseDocument } from 'yaml';
@@ -31,7 +32,6 @@ const safeProfilePath = RelativePath.refine(
 );
 const paths = z
   .array(safeProfilePath)
-  .max(32)
   .refine((values) => new Set(values).size === values.length, 'Duplicate paths');
 const branch = z
   .string()
@@ -113,7 +113,7 @@ export const ProjectProfileV1Schema = z.strictObject({
     scope: z.array(z.union([z.literal('.'), safeProfilePath])).min(1).max(8),
     actions: z.array(z.enum(['ai-plan', 'ai-analyze', 'ai-implement', 'ai-review'])).min(1).max(4)
       .refine((values) => new Set(values).size === values.length),
-  })).max(4).refine((values) => new Set(values.map((item) => item.id)).size === values.length).optional(),
+  })).refine((values) => new Set(values.map((item) => item.id)).size === values.length).optional(),
   onboarding: z.strictObject({
     version: z.literal(1),
     readConsent: z.boolean(),
@@ -294,14 +294,14 @@ export function loadProjectProfile(root) {
   } catch {
     throw new GraphError('PROJECT_PROFILE_MISSING', 'Run flowcairn init to create .flowcairn.json');
   }
-  if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || stat.size > 32768) {
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1) {
     throw new GraphError(
       'PROJECT_PROFILE_UNSAFE',
       '.flowcairn.json must be a bounded regular file without links',
     );
   }
   try {
-    return ProjectProfileSchema.parse(JSON.parse(readFileSync(file, 'utf8')));
+    return ProjectProfileSchema.parse(JSON.parse(collectInstructionFile(file).bytes.toString('utf8')));
   } catch {
     throw new GraphError(
       'PROJECT_PROFILE_INVALID',

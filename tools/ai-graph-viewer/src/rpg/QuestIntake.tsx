@@ -23,7 +23,7 @@ export function QuestIntake({ controller: c, onClose }: { controller: WorkflowCo
         disabled={locked} placeholder="Что нужно изменить?" />
       <label htmlFor="quest-description">Что нужно сделать</label>
       <textarea id="quest-description" name="description" value={fields.description} onChange={event => update('description', event.target.value)}
-        required minLength={3} maxLength={16000} disabled={locked} placeholder="Цель, нужные файлы и ограничения" />
+        required minLength={3} disabled={locked} placeholder="Цель, нужные файлы и ограничения" />
       <label htmlFor="quest-number">Номер задачи</label>
       <input id="quest-number" name="taskNumber" value={fields.taskNumber} onChange={event => update('taskNumber', event.target.value)}
         required maxLength={80} disabled={locked} placeholder="Например, PROJ-123" />

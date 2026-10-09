@@ -12,13 +12,12 @@ export function useBoundRead<T>(key: string | null, read: (signal: AbortSignal) 
     if (key === null || !enabled) return;
     let active = true;
     const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), 15000);
     void read(controller.signal).then(data => {
       if (active) setSettled({ key, attempt, result: { state: 'ready', data, error: null } });
     }).catch((reason: unknown) => {
       if (active) setSettled({ key, attempt, result: { state: 'failed', data: null, error: normalizeReadError(reason) } });
-    }).finally(() => window.clearTimeout(timeout));
-    return () => { active = false; controller.abort(); window.clearTimeout(timeout); };
+    });
+    return () => { active = false; controller.abort(); };
   }, [key, attempt, read, enabled]);
   const result = boundReadResult(key, attempt, enabled, settled);
   const reload = useCallback(() => setAttempt(value => value + 1), []);

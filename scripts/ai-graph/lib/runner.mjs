@@ -1,3 +1,4 @@
+import { verifyInstructionReference } from './instruction-references.mjs';
 import { inspectHostProcess, stopHostGroup } from './host-process.mjs';
 import { isPrivateMode, isTrustedMode, isPathWithin } from './host-filesystem.mjs';
 import { assertSafeText } from './source-policy.mjs';
@@ -96,7 +97,7 @@ function parseInputs({ node, task, plan, skills, priorEvidence, reviewEvidence }
   ) {
     fail('RUNNER_PLAN_MISMATCH', 'Task и plan не совпадают');
   }
-  if (!Array.isArray(skills) || skills.length > 20) {
+  if (!Array.isArray(skills)) {
     fail('INVALID_RUNNER_SKILLS', 'Некорректный список Skills');
   }
   const expected = [...approvedNode.skills].sort();
@@ -108,12 +109,12 @@ function parseInputs({ node, task, plan, skills, priorEvidence, reviewEvidence }
       !RelativePath.safeParse(skill.path).success ||
       !/^[a-f0-9]{64}$/.test(skill.hash) ||
       typeof skill.text !== 'string' ||
-      Buffer.byteLength(skill.text) > 12 * 1024 ||
+      Buffer.byteLength(skill.text) > 64 * 1024 ||
       sha256(skill.text) !== skill.hash
     ) {
       fail('INVALID_RUNNER_SKILLS', 'Skill manifest/content не прошел проверку');
     }
-    return { name: skill.name, path: skill.path, hash: skill.hash, text: skill.text };
+    return { name: skill.name, path: skill.path, hash: skill.hash, text: skill.text, ...(skill.source ? { source: skill.source } : {}) };
   });
   if (normalizedSkills.some((skill) => !parsedPlan.data.skills.some((approved) => approved.id === skill.name && approved.path === skill.path && approved.hash === skill.hash)))
     fail('RUNNER_SKILLS_MISMATCH', 'Skill bytes/path не совпадают с approved plan');
@@ -1050,6 +1051,7 @@ export async function runRegisteredAction({
       maxOutputBytes: prepared.maxOutputBytes, signal,
       onStart: (metadata) => { startObserved = true; return onStart(metadata); },
       beforeGo: ({ commandHash }) => {
+        for (const reference of prepared.instructionReferences ?? []) verifyInstructionReference(reference);
         if (prepared.reviewFile) verifyReviewEvidenceFile(prepared.reviewFile);
         if (localCheck) {
           const currentProfile = loadProjectProfile(root);
@@ -1071,6 +1073,7 @@ export async function runRegisteredAction({
     let output = completion.output, failureReason = completion.failureReason, exitCode = completion.exitCode;
     if (action.id.startsWith('ai-') && exitCode === 0 && !failureReason) {
       try {
+        for (const reference of prepared.instructionReferences ?? []) verifyInstructionReference(reference);
         if (prepared.reviewFile) verifyReviewEvidenceFile(prepared.reviewFile);
         output = parseAiOutput(prepared.resultFile);
         if (prepared.reviewFile && AIReviewResultSchema.parse(output).reviewEvidenceHash !== prepared.reviewFile.hash)
@@ -1079,7 +1082,10 @@ export async function runRegisteredAction({
         failureReason = errorReason(error, 'AI_OUTPUT_INVALID'); exitCode = 1; output = null;
       }
     }
-    try { if (prepared.reviewFile) verifyReviewEvidenceFile(prepared.reviewFile); }
+    try {
+      for (const reference of prepared.instructionReferences ?? []) verifyInstructionReference(reference);
+      if (prepared.reviewFile) verifyReviewEvidenceFile(prepared.reviewFile);
+    }
     catch (error) { failureReason = errorReason(error, 'REVIEW_EVIDENCE_INVALID'); exitCode = 1; output = null; }
     const { usage, ...result } = completion;
     return { ...result, exitCode, failureReason, output,

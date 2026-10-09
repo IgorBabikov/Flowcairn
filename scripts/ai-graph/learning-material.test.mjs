@@ -163,15 +163,15 @@ test('final task material captures the current final version, not old stage code
   assert.throws(() => fx.create({ kind: 'task', stageId: null, after: fx.after, implementationReceiptIds, checkReceiptIds, reviewReceiptIds }), { code: 'LEARNING_RECEIPT_INVALID' });
 });
 
-test('combined before+after limits produce explicit partial material; excluded context produces unavailable', (t) => {
+test('combined before+after versions remain complete beyond old volume/count ceilings; excluded context stays unavailable', (t) => {
   const fx = fixture(t);
   const before = fx.capture(Array.from({ length: 5 }, (_, index) => fx.save(`large-${index}.txt`, 'a'.repeat(256 * 1024), 'before')), hash);
   const after = fx.capture(Array.from({ length: 5 }, (_, index) => fx.save(`large-${index}.txt`, 'b'.repeat(256 * 1024), 'after')), fx.resultHash);
   const saved = fx.create({ before, after });
   const material = readLearningMaterial(fx.options(saved));
-  assert.equal(material.material.status, 'partial'); assert.equal(material.sources.length, 8);
-  assert.equal(material.sources.reduce((sum, source) => sum + source.bytes, 0), 2 * 1024 * 1024);
-  assert.equal(material.material.gaps.length, 2); assert.ok(material.material.gaps.every((gap) => gap.code === 'size-limit'));
+  assert.equal(material.material.status, 'complete'); assert.equal(material.sources.length, 10);
+  assert.equal(material.sources.reduce((sum, source) => sum + source.bytes, 0), 10 * 256 * 1024);
+  assert.deepEqual(material.material.gaps, []);
   const hidden = fx.create({ policy: { denyGlobs: ['**'] } });
   assert.equal(hidden.material.status, 'unavailable'); assert.ok(hidden.material.gaps.every((gap) => gap.path === null));
   const incomplete = fx.create({ gaps: [{ code: 'missing-context', path: 'dependency.custom', reason: 'Зависимость не входит в объявленный контекст.' }] });
@@ -179,8 +179,8 @@ test('combined before+after limits produce explicit partial material; excluded c
   const manyBefore = fx.capture(Array.from({ length: 33 }, (_, index) => fx.save(`small-${index}.txt`, 'old', 'before')), hash);
   const manyAfter = fx.capture(Array.from({ length: 33 }, (_, index) => fx.save(`small-${index}.txt`, 'new', 'after')), fx.resultHash);
   const many = fx.create({ before: manyBefore, after: manyAfter });
-  assert.equal(readLearningMaterial(fx.options(many)).sources.length, 64);
-  assert.equal(many.material.status, 'partial'); assert.equal(many.material.gaps.length, 2);
+  assert.equal(readLearningMaterial(fx.options(many)).sources.length, 66);
+  assert.equal(many.material.status, 'complete'); assert.deepEqual(many.material.gaps, []);
 });
 
 test('lesson validation checks every saved anchor and distinguishes source fixtures from invented runtime evidence', (t) => {

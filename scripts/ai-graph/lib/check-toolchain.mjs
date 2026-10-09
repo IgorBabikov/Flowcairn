@@ -1,17 +1,18 @@
-import { closeSync, fstatSync, lstatSync, openSync, readFileSync, readSync, readdirSync, readlinkSync, realpathSync } from 'node:fs';
+import { closeSync, fstatSync, lstatSync, openSync, readSync, readdirSync, readlinkSync, realpathSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { noFollowReadFlags, lstatHostSync, crossStatIdentity } from './host-filesystem.mjs';
-import { GraphError, hashObject, sha256 } from './io.mjs';
-import { isSensitivePath, hasSecretContent } from './source-policy.mjs';
+import { GraphError, hashObject } from './io.mjs';
+import { createSecretContentScanner } from './stream-secret-policy.mjs';
+import { isSensitivePath } from './source-policy.mjs';
 
 const fail = (code, message) => { throw new GraphError(code, message); };
 const identity = (s) => [s.dev, s.ino, s.mode, s.nlink, s.size, s.mtimeNs, s.ctimeNs].join(':');
 const within = (root, file) => file === root || file.startsWith(root + path.sep);
-const MAX_EXECUTABLE_BYTES = 512 * 1024 * 1024;
 
-function executableDigest(fd, size) {
+function executableDigest(fd, size, inspectText = false) {
   const hash = createHash('sha256'), buffer = Buffer.alloc(256 * 1024);
+  const scanner = createSecretContentScanner(), decoder = new TextDecoder('utf-8');
   let bytes = 0;
   while (true) {
     // Read at most the pinned size plus one byte: growth cannot make this loop unbounded.
@@ -20,9 +21,11 @@ function executableDigest(fd, size) {
     bytes += count;
     if (bytes > size) fail('CHECK_INPUT_DRIFT', 'Инструмент проверки вырос во время чтения.');
     hash.update(buffer.subarray(0, count));
+    if (inspectText) scanner.update(decoder.decode(buffer.subarray(0, count), { stream: true }));
   }
   if (bytes !== size) fail('CHECK_INPUT_DRIFT', 'Размер инструмента проверки изменился во время чтения.');
-  return { hash: hash.digest('hex'), bytes };
+  if (inspectText) scanner.update(decoder.decode());
+  return { hash: hash.digest('hex'), bytes, privateContent: inspectText && scanner.finish() };
 }
 
 function comparablePathStat(file, raw) {
@@ -35,8 +38,7 @@ function comparablePathStat(file, raw) {
 }
 
 /** Inspect bytes only. An executable --version is a command, never a discovery probe. */
-export function checkFileIdentity(file, { executable = false, opaque = false, maxBytes = 16 * 1024 * 1024 } = {}) {
-  if (executable) maxBytes = Math.min(maxBytes, MAX_EXECUTABLE_BYTES);
+export function checkFileIdentity(file, { executable = false, opaque = false, maxBytes = undefined } = {}) {
   const before = lstatSync(file, { bigint: true });
   if (before.isSymbolicLink())
     fail('CHECK_INPUT_UNSAFE', 'Инструмент или вход проверки не может быть символической ссылкой.');
@@ -44,7 +46,7 @@ export function checkFileIdentity(file, { executable = false, opaque = false, ma
     fail('CHECK_INPUT_UNSAFE', 'Инструмент или вход проверки должен быть обычным файлом.');
   if (!executable && before.nlink !== 1n)
     fail('CHECK_INPUT_UNSAFE', 'Вход проверки должен иметь ровно одну жесткую ссылку.');
-  if (before.size > BigInt(maxBytes))
+  if (maxBytes !== undefined && before.size > BigInt(maxBytes))
     fail('CHECK_INPUT_UNSAFE', `Размер инструмента или входа проверки превышает лимит: ${before.size} байт > ${maxBytes} байт.`);
   if (executable && process.platform !== 'win32' && (!(before.mode & 0o111n) || (before.mode & 0o002n) ||
       process.getuid?.() !== undefined && before.uid !== 0n && before.uid !== BigInt(process.getuid())))
@@ -54,14 +56,14 @@ export function checkFileIdentity(file, { executable = false, opaque = false, ma
   try {
     const opened = fstatSync(fd, { bigint: true });
     if (crossStatIdentity(opened) !== crossStatIdentity(comparable)) fail('CHECK_INPUT_DRIFT', 'Вход проверки изменился до чтения.');
-    const bytes = executable ? null : readFileSync(fd);
-    const digest = executable ? executableDigest(fd, Number(before.size)) : { hash: sha256(bytes), bytes: bytes.length };
+    if (!Number.isSafeInteger(Number(before.size))) fail('CHECK_INPUT_UNSAFE', 'Размер входа нельзя представить точно.');
+    const { privateContent, ...digest } = executableDigest(fd, Number(before.size), !executable && !opaque);
     const after = fstatSync(fd, { bigint: true }), live = lstatSync(file, { bigint: true });
     // Same-origin comparisons retain every raw device bit and timestamp.
     if (BigInt(digest.bytes) !== before.size || identity(after) !== identity(opened) || identity(live) !== identity(before) ||
         crossStatIdentity(comparablePathStat(file, live)) !== crossStatIdentity(opened))
       fail('CHECK_INPUT_DRIFT', 'Вход проверки изменился во время чтения.');
-    if (!executable && !opaque && hasSecretContent(bytes.toString('utf8'))) fail('CHECK_INPUT_UNSAFE', 'Вход проверки исключен политикой секретов.');
+    if (privateContent) fail('CHECK_INPUT_UNSAFE', 'Вход проверки исключен политикой секретов.');
     return { ...digest, mode: Number(before.mode & 0o777n) };
   } finally { closeSync(fd); }
 }
@@ -132,7 +134,7 @@ export function resolveCheckExecutable(root, requested, env = process.env) {
     let before;
     try { before = executablePathIdentity(candidate); } catch (error) { if (['ENOENT', 'ENOTDIR'].includes(error.code)) continue; throw error; }
     if (/\.(?:cmd|bat|ps1)$/i.test(before.canonicalPath)) fail('CHECK_EXECUTABLE_UNSAFE', 'Shell launcher не поддерживается.');
-    const file = checkFileIdentity(before.canonicalPath, { executable: true, maxBytes: MAX_EXECUTABLE_BYTES });
+    const file = checkFileIdentity(before.canonicalPath, { executable: true });
     if (hashObject(executablePathIdentity(candidate)) !== hashObject(before) || realpathSync(candidate) !== before.canonicalPath)
       fail('CHECK_INPUT_DRIFT', 'Цепочка ссылок инструмента изменилась во время проверки.');
     return { executable: path.resolve(candidate), canonicalPath: before.canonicalPath,
@@ -142,9 +144,8 @@ export function resolveCheckExecutable(root, requested, env = process.env) {
 }
 
 export function inspectCheckInputs(root, inputPaths) {
-  const entries = []; let bytes = 0;
+  const entries = [];
   const visit = (relative, depth = 0) => {
-    if (depth > 24 || entries.length >= 2048) fail('CHECK_INPUT_LIMIT', 'Входы проверки превышают лимит.');
     const file = containedCheckPath(root, relative), stat = lstatSync(file);
     if (stat.isDirectory()) {
       const before = lstatSync(file, { bigint: true });
@@ -152,8 +153,7 @@ export function inspectCheckInputs(root, inputPaths) {
       for (const name of readdirSync(file).sort()) visit(`${relative}/${name}`, depth + 1);
       if (identity(lstatSync(file, { bigint: true })) !== identity(before)) fail('CHECK_INPUT_DRIFT', 'Каталог входов проверки изменился.');
     } else {
-      const record = checkFileIdentity(file); bytes += record.bytes;
-      if (bytes > 32 * 1024 * 1024) fail('CHECK_INPUT_LIMIT', 'Входы проверки превышают 32 MiB.');
+      const record = checkFileIdentity(file);
       entries.push({ path: relative, ...record });
     }
   };
