@@ -3,6 +3,7 @@ import { api } from '../api';
 import type { SourceAnchor } from '../contracts';
 import type { WorkflowController } from '../workflow-controller-types';
 import { LearningCodex } from '../rpg/LearningCodex';
+import type { CodexNavigation } from '../rpg/use-codex-reading';
 import { RuntimeNotices } from '../rpg/RuntimeNotices';
 import { LearningActions } from './LearningActions';
 import { LessonQuestion } from './LessonQuestion';
@@ -11,6 +12,7 @@ import { LearningControls } from './LearningControls';
 import { LessonExplanation } from './LessonExplanation';
 import { MaterialOverview } from './MaterialOverview';
 import { SavedSourcePanel, type SourceSelection } from './SavedSourcePanel';
+import { sourceSelectionForAnchor } from './source-page';
 import { freshnessLabels, learningCapability, learningRun, materialFreshness } from './learning-projection';
 import { learningReadMessage, useBoundRead } from './use-bound-read';
 
@@ -54,14 +56,18 @@ export function LearningReader({ controller: c, binding, onMap, onClose }: {
   }, [material.data, answerHash, binding.runId, expectedQuestion]);
   const answer = useBoundRead(answerHash ? `${binding.runId}:${binding.materialHash}:${answerHash}` : null, readAnswer, canRead && Boolean(material.data));
   const [stepIndex, setStepIndex] = useState(0);
+  const [navigation, setNavigation] = useState<CodexNavigation>({ id: 0, page: 'explanation' });
   const [selection, setSelection] = useState<SourceSelection | null>(null);
   const selectedStep = lesson.data?.lesson.steps[Math.min(stepIndex, lesson.data.lesson.steps.length - 1)];
   const firstAnchor = selectedStep?.anchors[0];
-  const selectedSource = selection ?? (firstAnchor ? { sourceId: firstAnchor.sourceId, startLine: firstAnchor.startLine, anchor: firstAnchor } : null);
-  const onAnchor = (anchor: SourceAnchor) => setSelection({ sourceId: anchor.sourceId, startLine: anchor.startLine, anchor });
+  const selectedSource = selection ?? (firstAnchor ? sourceSelectionForAnchor(firstAnchor) : null);
+  const onAnchor = (anchor: SourceAnchor) => {
+    setSelection(sourceSelectionForAnchor(anchor));
+    setNavigation(previous => ({ id: previous.id + 1, page: 'source' }));
+  };
   const freshness = materialFreshness(current, material.data?.material ?? null, binding.runId, c.snapshotUnavailable);
   const title = lesson.data?.lesson.title || (material.data?.material.kind === 'task' ? 'Итоговый материал' : 'Сохраненный материал');
-  return <LearningCodex title={title} onClose={onClose} notices={<RuntimeNotices controller={c} />}
+  return <LearningCodex title={title} navigation={navigation} onClose={onClose} notices={<RuntimeNotices controller={c} />}
     footer={<LearningControls controller={c} materialBinding={binding} compact />}
     explanation={<>
       <button className="game-text-action" type="button" onClick={onMap}>К карте этапов</button>
@@ -77,7 +83,8 @@ export function LearningReader({ controller: c, binding, onMap, onClose }: {
         onAnchor={onAnchor} onStep={index => {
           setStepIndex(index);
           const anchor = lesson.data.lesson.steps[index]?.anchors[0];
-          setSelection(anchor ? { sourceId: anchor.sourceId, startLine: anchor.startLine, anchor } : null);
+          setSelection(anchor ? sourceSelectionForAnchor(anchor) : null);
+          setNavigation(previous => ({ id: previous.id + 1, page: 'explanation' }));
         }} />}
       {material.data && <>
         <LearningActions controller={c} runId={binding.runId} material={material.data} job={job} {...(activity ? { kind: activity.kind } : {})} />

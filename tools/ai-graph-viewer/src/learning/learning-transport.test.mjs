@@ -61,6 +61,30 @@ test('long-line error stays explicit; partial anchor pages never claim a complet
   assert.equal(m.anchorPageMatch({...f.page,text:'wrong\n<script>x</script>'},f.anchor).matches,false);
 });
 
+test('opening an anchor includes preceding context without changing the source or exact quote', () => {
+  const f=fixture();
+  const anchor={...f.anchor,startLine:9,endLine:12,quote:'catch\ncheck\nshow\nend'};
+  const selection=m.sourceSelectionForAnchor(anchor);
+  assert.equal(selection.startLine,1);
+  assert.equal(selection.lineCount,100);
+  assert.equal(selection.sourceId,anchor.sourceId);
+  assert.equal(selection.anchor,anchor);
+  const prefix=Array.from({length:8},(_,i)=>`context ${i+1}`);
+  const page={...f.page,text:[...prefix,anchor.quote,'after'].join('\n'),startLine:1,endLine:13,totalLines:13,next:null};
+  assert.deepEqual(m.anchorPageMatch(page,selection.anchor),{matches:true,complete:true,start:9,end:12});
+});
+test('anchor context crosses page boundaries within the existing 200-line limit', () => {
+  const f=fixture();
+  const anchor={...f.anchor,startLine:195,endLine:310};
+  const selection=m.sourceSelectionForAnchor(anchor);
+  assert.ok(selection.startLine<anchor.startLine);
+  assert.ok(selection.startLine+selection.lineCount-1>anchor.endLine);
+  assert.ok(selection.lineCount<=200);
+  const oversized=m.sourceSelectionForAnchor({...anchor,endLine:800});
+  assert.equal(oversized.lineCount,200);
+  assert.equal(oversized.anchor.endLine,800,'The quote is not shortened to disguise a partial page');
+});
+
 test('uncertain command retry reuses exact operationId/revision/body through the existing transport', async () => {
   const f=fixture(),previousFetch=globalThis.fetch,previousWindow=globalThis.window,calls=[];
   globalThis.window={location:{hash:''},sessionStorage:{getItem:()=>null}};

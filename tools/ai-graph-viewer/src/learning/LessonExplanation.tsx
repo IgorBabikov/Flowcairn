@@ -10,7 +10,7 @@ export function LessonExplanation({ lesson, stepIndex, onStep, onAnchor }: {
     <details><summary>Шаг {stepIndex + 1} из {lesson.steps.length} · оглавление</summary><p>{lesson.scope}</p><ol>{lesson.steps.map((item, index) => <li key={item.id}>
       <button className="game-text-action" type="button" aria-current={index === stepIndex ? 'step' : undefined} onClick={() => onStep(index)}>{item.title}</button>
     </li>)}</ol></details>
-    <h3>{step.title}</h3>
+    <h3 data-lesson-heading tabIndex={-1}>{step.title}</h3>
     <p className="lesson-origin"><strong>{originLabels[step.origin.kind]}</strong> · {step.origin.label}</p>
     <dl><dt>Кто вызывает</dt><dd>{step.caller}</dd><dt>Вход</dt><dd>{step.input}</dd></dl>
     <h4>Преобразования</h4><ol>{step.transformations.map((item, index) => <li key={index}>{item}</li>)}</ol>
