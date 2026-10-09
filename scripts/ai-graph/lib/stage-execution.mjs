@@ -24,10 +24,7 @@ function capture(host, state, task, plan, fingerprint, role, changedFiles = []) 
     files.push({ path: item, role: role === 'before' ? 'before' : changedFiles.includes(item) ? 'after' : 'context', expected: null });
   files.sort((a, b) => Number(!changedFiles.includes(a.path)) - Number(!changedFiles.includes(b.path)) || a.path.localeCompare(b.path));
   const result = captureLearningSources({ store: host.store, projectRoot: state.binding.worktree,
-    sourceHash: fingerprint.hash, files: files.slice(0, files.length > 128 ? 127 : 128), policy: learningPolicy(host.adapters, task) });
-  if (files.length > 128) result.gaps = [...result.gaps, {
-    code: 'size-limit', path: null, reason: 'Объявленный контекст превышает 128 выбранных путей; часть исходников не сохранена.',
-  }];
+    sourceHash: fingerprint.hash, files, policy: learningPolicy(host.adapters, task) });
   return result;
 }
 

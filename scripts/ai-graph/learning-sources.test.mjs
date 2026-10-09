@@ -7,7 +7,7 @@ import path from 'node:path';
 import { GraphStore } from './lib/store.mjs';
 import { hashObject, sha256 } from './lib/io.mjs';
 import { SourceAnchorSchema, SourceChunkSchema } from './lib/learning-schemas.mjs';
-import { captureLearningSources, readLearningSourceCatalog, readLearningSource, learningSourcePage, exactSourceAnchor, LEARNING_SOURCE_LIMITS } from './lib/learning-sources.mjs';
+import { captureLearningSources, readLearningSourceCatalog, readLearningSource, learningSourcePage, exactSourceAnchor } from './lib/learning-sources.mjs';
 
 function fixture(t) {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'flowcairn-learning-source-')));
@@ -63,14 +63,15 @@ test('before bytes remain immutable after delete/rename and no live access is ne
   assert.equal(fx.capture([{ path: 'missing.rs', role: 'context', expected: null }]).gaps[0].code, 'missing-context');
 });
 
-test('capture limits preserve whole files and report omissions, including 64 sources and 2 MiB', (t) => {
-  const fx = fixture(t), limit = LEARNING_SOURCE_LIMITS;
+test('capture preserves complete files beyond old file/count/aggregate ceilings', (t) => {
+  const fx = fixture(t), limit = { fileBytes: 256 * 1024 };
   const large = fx.capture([fx.select('large.txt', 'x'.repeat(limit.fileBytes + 1))]);
-  assert.equal(fx.sources(large).length, 0); assert.equal(large.gaps[0].code, 'size-limit');
+  assert.equal(fx.sources(large).length, 1); assert.deepEqual(large.gaps, []);
+  assert.equal(readLearningSource(fx.store, fx.sources(large)[0]).length, limit.fileBytes + 1);
   const many = fx.capture([...Array.from({ length: 65 }, (_, index) => fx.select(`file-${index}.txt`, 'ok')), { path: 'absent.txt', role: 'before', expected: null }]);
-  assert.equal(fx.sources(many).length, 64); assert.equal(many.gaps.length, 1);
+  assert.equal(fx.sources(many).length, 65); assert.equal(many.gaps.length, 0);
   const total = fx.capture(Array.from({ length: 9 }, (_, index) => fx.select(`big-${index}.txt`, String(index).repeat(limit.fileBytes))));
-  assert.equal(fx.sources(total).length, 8); assert.equal(total.gaps[0].code, 'size-limit');
+  assert.equal(fx.sources(total).length, 9); assert.deepEqual(total.gaps, []);
   assert.equal(readLearningSource(fx.store, fx.sources(total)[0]).length, limit.fileBytes);
 });
 
@@ -78,7 +79,10 @@ test('long lines are saved whole; page/quote limits never silently cut a line', 
   const fx = fixture(t), text = 'x'.repeat(65537);
   const source = fx.sources(fx.capture([fx.select('long.custom', text)]))[0];
   assert.equal(readLearningSource(fx.store, source), text);
-  assert.throws(() => learningSourcePage(source, text), { code: 'LEARNING_PAGE_LIMIT' });
+  const first = learningSourcePage(source, text);
+  assert.equal(first.partial, true); assert.ok(first.next.startColumn > 0);
+  const last = learningSourcePage(source, text, first.next);
+  assert.equal(first.text + last.text, text); assert.equal(last.next, null);
   const paged = 'a'.repeat(40000) + '\n' + 'b'.repeat(40000);
   const second = fx.sources(fx.capture([fx.select('paged.txt', paged)]))[0];
   const firstPage = learningSourcePage(second, paged);
@@ -161,4 +165,34 @@ test('selection does not scan unrelated trees, and durable-store faults are neve
   assert.throws(() => captureLearningSources({ store, projectRoot: fx.root, sourceHash: hashObject('new'), files: [changed] }), /durable-write-fixture/);
   assert.ok(events.some(([stage, kind]) => stage === 'object.after-directory-fsync' && kind === 'learning-source-chunks'));
   assert.equal(readLearningSource(fx.store, fx.sources(ref)[0]), 'class Example {}');
+});
+
+test('длинная Unicode-строка читается до конца порциями без потери CRLF, BOM и хвоста', (t) => {
+  const fx = fixture(t), text = '\ufeff' + 'Я💡'.repeat(23000) + '\r\nnext\r\n';
+  const source = fx.sources(fx.capture([fx.select('large-unicode.txt', text)]))[0];
+  let query = { startLine: 1, lineCount: 100 }, fragments = [], previous = -1;
+  while (query) {
+    const page = learningSourcePage(source, text, query);
+    assert.ok(Buffer.byteLength(page.text) <= 65536);
+    if (page.partial) {
+      assert.equal(page.endLine, 1); assert.ok(page.next.startColumn > previous);
+      previous = page.next.startColumn;
+    }
+    fragments.push(page.text);
+    query = page.next;
+  }
+  assert.equal(fragments.join(''), text.replace(/\r\n/g, '\n'));
+});
+
+test('каталог больше 1000 исходников сохраняется страницами и сохраняет полный порядок и хеши', async (t) => {
+  const fx = fixture(t);
+  const { putLearningSourceCatalog } = await import('./lib/learning-source-storage.mjs');
+  const sources = Array.from({ length: 1001 }, (_, index) => ({ id: `source-${index}`, path: `src/file-${index}.txt`,
+    fileHash: sha256(''), bytes: 0, mode: '100644', role: 'context', chunkHashes: [], lineCount: 0 }));
+  const hash = putLearningSourceCatalog(fx.store, { version: 1, sources });
+  const manifest = fx.store.readObject('learning-sources', hash);
+  assert.equal(manifest.version, 2); assert.equal(manifest.pageHashes.length, 2);
+  assert.deepEqual(readLearningSourceCatalog(fx.store, hash).sources, sources);
+  const wrong = fx.store.putObject('learning-sources', { ...manifest, pageHashes: [...manifest.pageHashes, manifest.pageHashes[0]] });
+  assert.throws(() => readLearningSourceCatalog(fx.store, wrong), { code: 'LEARNING_SOURCE_INTEGRITY' });
 });

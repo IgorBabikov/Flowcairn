@@ -159,18 +159,17 @@ export class WorkflowService {
     if (product && !this.#hasReadConsent()) fail('ONBOARDING_REQUIRED', 'Завершите настройку и разрешите чтение выбранным AI');
     if (snapshotRequested && legacy?.snapshotHash !== project.bootstrap?.snapshotHash) fail('STALE_CONTEXT', 'Исходный снимок изменился; подтвердите актуальные файлы');
     if (untracked.some((file) => !project.bootstrap?.untrackedCandidates.includes(file))) fail('INTAKE_SCOPE', 'Файл не входит в текущий список snapshot candidates');
-    if (!product && !requestedScope && project.scopeCandidates.length > 64) fail('INTAKE_SCOPE_LIMIT', 'Выберите не более 64 областей задачи');
     const preview = product ? this.#intakeContext(body, project) : null;
     if (preview && product && body.selection && !preview.ready) fail('INTAKE_CONTEXT_REQUIRED', preview.issues.join('\n'));
     const initial = preview ? initialTaskContext(preview, project, product && Boolean(body.selection)) : null;
     const inferredScope = initial?.scope ?? unique([...project.scopeCandidates, ...untracked.filter((file) => file !== '.flowcairn.json').map((file) => file.includes('/') ? file.split('/')[0] : file)]);
-    const task = (this.adapters.dataVersion === 3 ? TaskInputV3Schema : TaskInputSchema).parse({ id: `TASK-${suffix.toUpperCase()}`, goal: product ? body.title : body.prompt.slice(0, 4000),
+    const task = (this.adapters.dataVersion === 3 ? TaskInputV3Schema : TaskInputSchema).parse({ id: `TASK-${suffix.toUpperCase()}`, goal: product ? body.title : body.prompt.split(/\r?\n/)[0].slice(0, 160),
       ...(this.adapters.dataVersion === 3 && product ? { learningMode: body.learningMode ?? 'after-stage' } : {}),
       ...(product ? { intakeKind: 'natural' } : {}),
       ...(product ? { taskNumber: body.taskNumber } : {}),
       instructions: product ? body.description : body.prompt, scope: product ? inferredScope : requestedScope ?? inferredScope,
       ...(initial ? { contextDiscovery: true, contextNotes: initial.notes } : {}),
-      contextPaths: project.contextPaths, includeUntracked: untracked, acceptance: [product ? body.description.slice(0, 4000) : body.prompt.slice(0, 4000)], checks: project.checkIds ?? project.checks });
+      contextPaths: project.contextPaths, includeUntracked: untracked, acceptance: [product ? body.description : body.prompt], checks: project.checkIds ?? project.checks });
     if (task.scope.some((file) => !pathAllowed(file, task))) fail('INTAKE_SCOPE', 'Недопустимый scope');
     const pending = this.intakes.get(runId);
     if (pending) {

@@ -18,7 +18,7 @@ function referencedDetail(title, existingIds) {
 export function isOmnibusAcceptance(task) {
   return Boolean((task.intakeKind === 'natural' || (!task.intakeKind && task.taskNumber)) &&
     task.acceptance.length === 1 &&
-    normalize(task.acceptance[0]) === normalize(task.instructions.slice(0, 4000)));
+    (normalize(task.acceptance[0]) === normalize(task.instructions) || normalize(task.acceptance[0]) === normalize(task.instructions.slice(0, 4000))));
 }
 
 /** Deterministic effort selection never changes permissions or removes configured checks. */

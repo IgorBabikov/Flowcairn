@@ -1,15 +1,12 @@
-import { lstatHostSync as lstatSync, fstatHostSync as fstatSync } from './host-filesystem.mjs';
+import { scanSourceFile } from './source-file-scan.mjs';
+import { lstatHostSync as lstatSync } from './host-filesystem.mjs';
 import { createHash } from 'node:crypto';
-import { closeSync, openSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
+import { readdirSync, realpathSync } from 'node:fs';
 import path from 'node:path';
-import { isPathWithin, sameHostPath, noFollowReadFlags, crossStatIdentity } from './host-filesystem.mjs';
+import { isPathWithin, sameHostPath } from './host-filesystem.mjs';
 import { GraphError } from './io.mjs';
 import { classifySource, normalizeSourcePath } from './source-policy.mjs';
 
-const MAX_FILE_BYTES = 32 * 1024 * 1024;
-const MAX_TOTAL_BYTES = 256 * 1024 * 1024;
-const MAX_ENTRIES = 100000;
-const MAX_DEPTH = 64;
 function portableName(name) {
   const normalized = name.normalize('NFKC');
   if ([...normalized].some((char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127) || /[\\:]/u.test(normalized) || /[. ]$/.test(normalized)
@@ -21,18 +18,9 @@ const fail = () => { throw new GraphError('UNSAFE_PROJECT_SOURCE', 'Не уда�
 const identity = (stat) => `${stat.dev}:${stat.ino}:${stat.mode}:${stat.nlink}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
 const isWithin = isPathWithin;
 
-function safeRead(file, expected, root) {
-  if (!expected.isFile() || expected.nlink !== 1n || expected.size > BigInt(MAX_FILE_BYTES)) fail();
+function safeRead(file, expected, root, window = undefined) {
   if (!sameHostPath(realpathSync(file), file) || !isWithin(root, file)) fail();
-  const fd = openSync(file, noFollowReadFlags());
-  try {
-    const before = fstatSync(fd, { bigint: true });
-    if (crossStatIdentity(before) !== crossStatIdentity(expected)) fail();
-    const bytes = readFileSync(fd);
-    if (bytes.length > MAX_FILE_BYTES || identity(fstatSync(fd, { bigint: true })) !== identity(before)
-      || identity(lstatSync(file, { bigint: true })) !== identity(expected) || !sameHostPath(realpathSync(file), file)) fail();
-    return bytes;
-  } finally { closeSync(fd); }
+  return scanSourceFile(file, { expected, window });
 }
 
 function scan(root, options) {
@@ -40,19 +28,13 @@ function scan(root, options) {
   const excludedPaths = [];
   const fingerprints = [];
   const privateFingerprints = [];
-  let total = 0;
-  let count = 0;
   const aliases = new Set();
   function opaque(absolute, depth) {
-    if (depth > MAX_DEPTH) fail();
-    if (++count > MAX_ENTRIES) fail();
     const stat = lstatSync(absolute, { bigint: true });
     if (stat.isSymbolicLink() || (stat.isFile() && stat.nlink !== 1n)) fail();
     if (stat.isFile()) {
       const bytes = safeRead(absolute, stat, root);
-      total += bytes.length;
-      if (total > MAX_TOTAL_BYTES) fail();
-      return digest(bytes);
+      return bytes.hash;
     }
     if (!stat.isDirectory() || !sameHostPath(realpathSync(absolute), absolute)) fail();
     const opaqueAliases = new Set();
@@ -67,13 +49,11 @@ function scan(root, options) {
     return digest(JSON.stringify(hashes));
   }
   function visit(directory, relative = '', depth = 0) {
-    if (depth > MAX_DEPTH) fail();
     const before = lstatSync(directory, { bigint: true });
     if (!before.isDirectory() || !sameHostPath(realpathSync(directory), directory)) fail();
     for (const name of readdirSync(directory).sort()) {
       portableName(name);
-      if (++count > MAX_ENTRIES) fail();
-      const rel = relative ? `${relative}/${name}` : name;
+        const rel = relative ? `${relative}/${name}` : name;
       const normalized = normalizeSourcePath(rel);
       if (aliases.has(normalized)) fail();
       aliases.add(normalized);
@@ -100,14 +80,12 @@ function scan(root, options) {
       if (stat.isDirectory()) { visit(absolute, rel, depth + 1); continue; }
       if (!stat.isFile() || stat.nlink !== 1n) fail();
       const bytes = safeRead(absolute, stat, root);
-      total += bytes.length;
-      if (total > MAX_TOTAL_BYTES) fail();
-      const hash = digest(bytes);
-      const contentReason = classifySource(rel, bytes, options).reason;
+      const hash = bytes.hash;
+      const contentReason = bytes.binary ? 'binary' : bytes.secret ? 'secret-content' : null;
       const mode = stat.mode & 0o111n ? '100755' : '100644';
       (contentReason ? privateFingerprints : fingerprints).push(digest(JSON.stringify([rel, hash, mode, contentReason])));
       if (contentReason) excludedPaths.push(rel);
-      if (!contentReason) entries.push({ path: rel, hash, size: bytes.length, mode: stat.mode & 0o111n ? '100755' : '100644' });
+      if (!contentReason) entries.push({ path: rel, hash, size: bytes.size, mode: stat.mode & 0o111n ? '100755' : '100644' });
     }
     if (identity(lstatSync(directory, { bigint: true })) !== identity(before) || !sameHostPath(realpathSync(directory), directory)) fail();
   }
@@ -170,13 +148,14 @@ export function readProjectSourcePage(index, { path: relative, offset = 0, limit
     const entry = index.files.find((file) => file.path === relative);
     if (!entry) fail();
     const target = path.join(index.root, entry.path);
-    const bytes = safeRead(target, lstatSync(target, { bigint: true }), index.root);
-    if (digest(bytes) !== entry.hash || classifySource(relative, bytes).reason) fail();
-    if (offset < bytes.length && (bytes[offset] & 0xc0) === 0x80) fail();
-    let end = Math.min(bytes.length, offset + limit);
-    while (end < bytes.length && (bytes[end] & 0xc0) === 0x80) end--;
-    if (end <= offset && offset < bytes.length) fail();
-    const eof = end >= bytes.length;
-    return { path: relative, text: bytes.subarray(offset, end).toString('utf8'), next: eof ? null : end, eof, size: bytes.length, hash: entry.hash };
+    const data = safeRead(target, lstatSync(target, { bigint: true }), index.root, { offset, bytes: limit + 4 });
+    if (data.hash !== entry.hash || data.size !== entry.size || data.binary || data.secret || classifySource(relative).reason) fail();
+    const bytes = data.window;
+    if (offset < data.size && (bytes[0] & 0xc0) === 0x80) fail();
+    let length = Math.min(bytes.length, limit);
+    while (offset + length < data.size && (bytes[length] & 0xc0) === 0x80) length--;
+    if (length <= 0 && offset < data.size) fail();
+    const end = offset + length, eof = end >= data.size;
+    return { path: relative, text: bytes.subarray(0, length).toString('utf8'), next: eof ? null : end, eof, size: data.size, hash: entry.hash };
   } catch { fail(); }
 }

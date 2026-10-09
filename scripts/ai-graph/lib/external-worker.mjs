@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { GraphError } from './io.mjs';
 import { providerUsage } from './usage.mjs';
 
-const Input = z.strictObject({ version: z.literal(2), provider: z.enum(['claude', 'cursor']), executable: z.string().min(1).max(1024), versionPin: z.string().min(1).max(160), prompt: z.string().min(1).max(128 * 1024), schema: z.record(z.string(), z.json()), projectRoot: z.string().min(1), deniedPaths: z.array(z.string().min(1).max(4096)).max(100000), review: z.object({path:z.string(),hash:z.string(),bytes:z.number().int().positive()}).nullable().optional() });
+const Input = z.strictObject({ version: z.literal(2), provider: z.enum(['claude', 'cursor']), executable: z.string().min(1).max(1024), versionPin: z.string().min(1).max(160), prompt: z.string().min(1).max(128 * 1024), schema: z.record(z.string(), z.json()), projectRoot: z.string().min(1), deniedPaths: z.array(z.string().min(1).max(4096)).max(100000), instructionReferences: z.array(z.strictObject({ path: z.string(), sourcePath: z.string(), hash: z.string().regex(/^[a-f0-9]{64}$/), bytes: z.number().int().nonnegative() })).optional(), review: z.object({path:z.string(),hash:z.string(),bytes:z.number().int().positive()}).nullable().optional() });
 const fail = (code, message) => { throw new GraphError(code, message); };
 function readInput(file) {
   const stat = lstatSync(file);

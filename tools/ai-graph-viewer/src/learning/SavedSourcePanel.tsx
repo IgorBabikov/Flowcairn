@@ -5,7 +5,7 @@ import { freshnessLabels } from './learning-projection';
 import { anchorPageMatch, sourceRoleLabels } from './source-page';
 import { learningReadMessage, useBoundRead } from './use-bound-read';
 
-export type SourceSelection = { sourceId: string; startLine: number; anchor: SourceAnchor | null; lineCount?: number };
+export type SourceSelection = { sourceId: string; startLine: number; anchor: SourceAnchor | null; lineCount?: number; startColumn?: number };
 export function SavedSourcePanel({ runId, material, selection, onSelect, canRead, deniedReason, freshness = 'unknown', renderQuestion }: {
   runId: string; material: LearningMaterialResponse; selection: SourceSelection | null;
   onSelect: (selection: SourceSelection) => void; canRead: boolean; deniedReason: string | null; freshness?: SourceFreshness; renderQuestion?: (anchor: SourceAnchor | null) => ReactNode;
@@ -13,23 +13,24 @@ export function SavedSourcePanel({ runId, material, selection, onSelect, canRead
   const source = material.sources.find(item => item.id === selection?.sourceId) ?? material.sources[0] ?? null;
   const startLine = selection && source?.id === selection.sourceId ? selection.startLine : 1;
   const lineCount = selection?.sourceId === source?.id ? selection?.lineCount ?? 100 : 100;
+  const startColumn = selection?.sourceId === source?.id ? selection?.startColumn ?? 0 : 0;
   const anchor = selection && source?.id === selection.sourceId ? selection.anchor : null;
   const load = useCallback((signal: AbortSignal) => {
     if (!source) return Promise.reject({ code: 'SOURCE_UNAVAILABLE', message: 'Сохраненный исходник отсутствует.', retryable: false });
-    return api.learningSource(runId, material.id, source, startLine, lineCount, signal);
-  }, [runId, material.id, source, startLine, lineCount]);
-  const result = useBoundRead(source ? `${runId}:${material.id}:${source.id}:${source.fileHash}:${startLine}:${lineCount}` : null, load, canRead);
+    return api.learningSource(runId, material.id, source, startLine, lineCount, signal, startColumn);
+  }, [runId, material.id, source, startLine, lineCount, startColumn]);
+  const result = useBoundRead(source ? `${runId}:${material.id}:${source.id}:${source.fileHash}:${startLine}:${lineCount}:${startColumn}` : null, load, canRead);
   const [fontSize, setFontSize] = useState(15);
   const match = result.data && anchorPageMatch(result.data, anchor);
   const page = result.data;
   const [copyState, setCopyState] = useState<{ key: string; message: string } | null>(null);
-  const pageKey = page ? `${page.sourceId}:${page.fileHash}:${page.startLine}:${page.endLine}` : '';
+  const pageKey = page ? `${page.sourceId}:${page.fileHash}:${page.startLine}:${page.endLine}:${page.startColumn ?? 0}` : '';
   const copyPage = async () => {
     if (!page) return;
     try { await navigator.clipboard.writeText(page.text); setCopyState({ key: pageKey, message: 'Показанные строки скопированы.' }); }
     catch { setCopyState({ key: pageKey, message: 'Не удалось скопировать автоматически. Можно выделить текст кода.' }); }
   };
-  const navigate = (line: number) => { if (source) onSelect({ sourceId: source.id, startLine: line, anchor, lineCount }); };
+  const navigate = (line: number, column = 0) => { if (source) onSelect({ sourceId: source.id, startLine: line, startColumn: column, anchor, lineCount }); };
   return <section className="saved-source-panel" aria-label="Сохраненный исходник">
     <label><span className="source-file-label">Версия файла</span><select value={source?.id ?? ''} disabled={!canRead || !material.sources.length}
       onChange={event => onSelect({ sourceId: event.target.value, startLine: 1, anchor: null })}>
@@ -45,12 +46,13 @@ export function SavedSourcePanel({ runId, material, selection, onSelect, canRead
       {result.error && <div role="alert"><p>{learningReadMessage(result.error)}</p><code>{result.error.code}</code>
         <button className="game-text-action" type="button" disabled={!canRead} onClick={result.reload}>Повторить чтение</button></div>}
       {page && <>
+        {(page.partial || page.startColumn) && <p role="status">Строка {page.startLine} показана частями. {page.next ? 'Продолжение доступно кнопкой «Дальше».' : 'Показана последняя часть.'}</p>}
         {page.totalLines === 0 && <p>Сохранен пустой файл.</p>}
         {anchor && match && !match.complete && <p>Показана часть ссылки разбора: строки {anchor.startLine}–{anchor.endLine}.</p>}
-        {match && !match.matches && <p role="alert">Цитата урока не совпадает с сохраненными строками. Используйте исходник и отчеты для проверки.</p>}
+        {match && match.matches === false && <p role="alert">Цитата урока не совпадает с сохраненными строками. Используйте исходник и отчеты для проверки.</p>}
         <div className="source-pagination" aria-label="Страницы сохраненного исходника">
-          <button className="game-text-action" type="button" aria-label="Предыдущие строки" disabled={!canRead || startLine <= 1} onClick={() => navigate(Math.max(1, startLine - lineCount))}>Назад</button>
-          <button className="game-text-action" type="button" aria-label="Следующие строки" disabled={!canRead || !page.next} onClick={() => { if (page.next) navigate(page.next.startLine); }}>Дальше</button>
+          <button className="game-text-action" type="button" aria-label="Предыдущие строки" disabled={!canRead || startLine <= 1 && startColumn === 0} onClick={() => navigate(startColumn ? startLine : Math.max(1, startLine - lineCount))}>Назад</button>
+          <button className="game-text-action" type="button" aria-label="Следующие строки" disabled={!canRead || !page.next} onClick={() => { if (page.next) navigate(page.next.startLine, page.next.startColumn ?? 0); }}>Дальше</button>
           <button className="game-text-action" type="button" aria-label="Копировать показанные строки" onClick={() => void copyPage()}>Копировать</button>
         </div>
         {copyState?.key === pageKey && <p role="status">{copyState.message}</p>}
@@ -85,6 +87,6 @@ export function SavedCode({ page, fontSize, anchor }: { page: LearningSourceResp
 
 export function questionAnchor(page: LearningSourceResponse, selected: SourceAnchor | null): SourceAnchor | null {
   if (selected) return selected;
-  if (!page.text || new TextEncoder().encode(page.text).length > 8192) return null;
+  if (page.partial || page.startColumn || !page.text || new TextEncoder().encode(page.text).length > 8192) return null;
   return { sourceId: page.sourceId, fileHash: page.fileHash, startLine: page.startLine, endLine: page.endLine, quote: page.text };
 }

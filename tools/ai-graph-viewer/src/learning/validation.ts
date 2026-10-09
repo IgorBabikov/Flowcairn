@@ -16,7 +16,7 @@ export function assertLearning(condition: unknown, message?: string): asserts co
   if (!condition) invalidLearning(message);
 }
 export function relativePath(value: unknown): value is string {
-  return text(value, 512) && !value.includes('\\') && !value.includes('\0') && !/^(\/|[a-z]:)/i.test(value)
+  return text(value, Number.MAX_SAFE_INTEGER) && !value.includes('\\') && !value.includes('\0') && !/^(\/|[a-z]:)/i.test(value)
     && value.split('/').every(part => part && part !== '.' && part !== '..');
 }
 export function capability(value: unknown): value is Capability {
@@ -25,8 +25,8 @@ export function capability(value: unknown): value is Capability {
 }
 export function savedSource(value: unknown): value is SavedSource {
   return record(value) && id(value.id) && relativePath(value.path) && hash(value.fileHash)
-    && integer(value.bytes, 0, 256 * 1024) && choice(value.mode, ['100644', '100755'])
-    && choice(value.role, ['before', 'after', 'context']) && list(value.chunkHashes, hash, 256) && integer(value.lineCount);
+    && integer(value.bytes) && choice(value.mode, ['100644', '100755'])
+    && choice(value.role, ['before', 'after', 'context']) && ((value.chunkIndexHash === undefined && Array.isArray(value.chunkHashes) && value.chunkHashes.every(hash)) || (value.chunkHashes === undefined && hash(value.chunkIndexHash))) && integer(value.lineCount);
 }
 export function sourceAnchor(value: unknown): value is SourceAnchor {
   return record(value) && id(value.sourceId) && hash(value.fileHash) && integer(value.startLine, 1) && integer(value.endLine, value.startLine)

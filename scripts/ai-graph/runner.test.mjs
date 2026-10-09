@@ -740,7 +740,7 @@ test('failed prompt preparation releases the private evidence file and schema/re
         task: { ...contract.task, instructions: 'x'.repeat(128 * 1024) },
         worktree: realpathSync(fixture()),
         skills: [],
-        priorEvidence: null,
+        priorEvidence: { mandatoryContext: 'x'.repeat(128 * 1024) },
         reviewBundle: { content, bytes: Buffer.byteLength(content), hash: sha256(content) },
         outputPath,
         toolchain: { node: NODE_BINARY, codexEntry: '/trusted/codex.js', digest: 'a'.repeat(64) },

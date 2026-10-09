@@ -13,8 +13,10 @@ test('planning contracts preserve every criterion while sharing identical verifi
   const compressed = contractForPrompt(contract, true);
   assert.ok(JSON.stringify(compressed).length < JSON.stringify(contract).length / 3);
   const expanded = structuredClone(compressed);
-  for (const requirement of expanded.requirements)
+  for (const requirement of expanded.requirements) {
     if (requirement.verification.paths.sameAs === 'scope') requirement.verification.paths = [...expanded.scope];
+    if (requirement.verification.criterion.sameAs === 'title') requirement.verification.criterion = requirement.title;
+  }
   assert.deepEqual(expanded, contract);
   assert.deepEqual(contract, before);
   assert.strictEqual(contractForPrompt(contract, false), contract);

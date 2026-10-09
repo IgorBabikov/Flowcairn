@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { GraphError, hashObject } from './io.mjs';
 import { ContextSelectionSchema, RelativePath } from './schemas.mjs';
-import { isAuxiliaryContextPath, isInstructionPath, isSensitivePath, isWithin, overlaps } from './registry.mjs';
+import { isAuxiliaryContextPath, isSensitivePath, isWithin, overlaps } from './registry.mjs';
 
 const unique = (values) => [...new Set(values)].sort();
 const normalized = (value) => value.normalize('NFC').toLowerCase();
@@ -88,11 +88,7 @@ export function buildTaskContext({ fields, project, files = null, outputPaths = 
     candidates, contextPaths: unique(project.contextPaths), outputPaths: unique(outputPaths), forbiddenPaths: unique(forbiddenPaths) });
   const feedback = [];
   const inferredScope = unique([...scope]).filter((file, _, all) => !all.some((parent) => parent !== file && isWithin(file, parent)));
-  const automaticOverflow = inferredScope.length > 64 || references.length > 32;
-  const discoveryStart = availableFiles.includes('package.json') ? 'package.json' :
-    availableFiles.find((file) => !isInstructionPath(file));
   let selectedScope = [...inferredScope];
-  let unchangedDiscoverySelection = false;
   if (selection) {
     const parsed = ContextSelectionSchema.safeParse(selection);
     if (!parsed.success) fail('Некорректный выбор файлов задачи');
@@ -100,8 +96,6 @@ export function buildTaskContext({ fields, project, files = null, outputPaths = 
     if (selection.previewHash !== previewHash) throw new GraphError('STALE_CONTEXT', 'Описание или файлы изменились. Проверьте область задачи заново.');
     if (new Set(selection.scope).size !== selection.scope.length) fail('Пути области задачи повторяются');
     selectedScope = selection.scope.map((file) => file.replace(/\/$/, ''));
-    unchangedDiscoverySelection = automaticOverflow && selection.resolutions.length === 0 &&
-      selectedScope.length === 1 && selectedScope[0] === discoveryStart;
     for (const file of selectedScope) {
       if (!safe(file)) fail('Путь недоступен для задачи: выберите обычные файлы проекта, вне закрытых областей и результатов сборки.');
       if (fileSet.has(file) && !availableFiles.includes(file)) fail('Выбранный файл недоступен');
@@ -127,7 +121,7 @@ export function buildTaskContext({ fields, project, files = null, outputPaths = 
           : `Пользователь уточнил: ${choice.reference} обозначает новый файл ${choice.path}. Его еще нет; создание не доказывает перенос или сохранность отсутствующих исходных данных.`);
       }
     }
-    if (!unchangedDiscoverySelection) {
+    {
       for (const ref of references) {
         if (resolved.has(ref.reference)) continue;
         const selectedMatches = ref.matches.filter((file) => selectedScope.some((root) => isWithin(file, root)));
@@ -138,22 +132,10 @@ export function buildTaskContext({ fields, project, files = null, outputPaths = 
   }
   // Keep an explicitly named parent; remove only redundant descendants.
   selectedScope = unique(selectedScope).filter((file, _, all) => !all.some((parent) => parent !== file && isWithin(file, parent)));
-  // Natural-language intake is not an instruction to grant every matched path.
-  // Start discovery from one safe file when the match list exceeds a bounded
-  // planning bundle; the complete description remains the source of intent.
-  const automaticDiscovery = automaticOverflow && (!selection || unchangedDiscoverySelection);
-  if (automaticDiscovery) {
-    selectedScope = discoveryStart ? [discoveryStart] : [];
-    feedback.push('Описание затрагивает много файлов. Начни с доступного контекста и запроси нужные пути через contextRequests; исходное описание задачи сохраняется полностью.');
-    const unresolved = references.slice(32).filter((ref) => ref.status !== 'resolved');
-    if (unresolved.length) feedback.push(`За пределом краткого списка осталось ${unresolved.length} неразрешенных ссылок. Первая: ${unresolved[0].reference.slice(0, 160)}. Проверь полный текст задачи перед планированием.`);
-  }
   const issues = [];
   if (!selectedScope.length) issues.push('Выберите файлы или папки, к которым относится задача. Можно указать путь нового файла.');
-  if (selectedScope.length > 64) issues.push('Выберите не более 64 файлов или папок для одной задачи.');
   let remainingIssues = 0;
   for (const ref of references) {
-    if (automaticDiscovery && ref.status !== 'unavailable') continue;
     const issue = ref.status === 'missing' ? `Не найден исходный файл «${ref.reference}». Укажите существующий путь или уточните, что файл нужно создать.` :
       ref.status === 'ambiguous' ? `Найдено несколько файлов «${ref.reference}». Выберите нужный.` :
       ref.status === 'unavailable' ? `«${ref.reference}» относится к закрытому или исключенному контексту. Уточните описание или настройки проекта.` : null;
@@ -164,7 +146,7 @@ export function buildTaskContext({ fields, project, files = null, outputPaths = 
   }
   if (remainingIssues) issues.push(`Есть еще ${remainingIssues} неразрешенных ссылок; они сохранены в полном описании задачи.`);
   return { contextHash: project.contextHash, previewHash, scope: selectedScope, candidates,
-    references: references.slice(0, 32), issues, ready: issues.length === 0, feedback };
+    references, issues, ready: issues.length === 0, feedback };
 }
 
 /** Natural intake starts discovery, not an implementation claim or a guessed move. */

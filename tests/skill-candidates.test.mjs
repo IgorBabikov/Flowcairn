@@ -45,15 +45,15 @@ test('selection rejects stale bytes, fingerprints, unknown paths and incomplete 
   assert.throws(() => createProjectSkillManifest(f.root, options), { code: 'SKILL_DISCOVERY_DRIFT' });
 });
 
-test('colliding, invalid, reserved or oversized candidates cannot be selected silently', (t) => {
+test('colliding, invalid and reserved candidates cannot be selected; large bodies remain eligible', (t) => {
   const f = fixture(t);
   f.add('.agents/skills/one/SKILL.md', 'same'); f.add('.agents/skills/two/SKILL.md', 'same');
   f.add('skills/reserved/SKILL.md', 'context'); f.add('skills/invalid/SKILL.md', 'Invalid Name');
   f.add('skills/large/SKILL.md', 'large', 'a'.repeat(13000));
   const preview = discoverProjectSkillCandidates(f.root, { instructionManifest: f.inventory() });
-  assert.ok(preview.candidates.every((item) => !item.eligible));
+  assert.ok(preview.candidates.filter((item) => item.name !== 'large').every((item) => !item.eligible));
   assert.ok(preview.candidates.some((item) => item.reason === 'SKILL_ID_COLLISION'));
-  assert.ok(preview.candidates.some((item) => item.reason === 'SKILL_TOO_LARGE'));
+  assert.ok(preview.candidates.some((item) => item.name === 'large' && item.eligible));
 });
 
 

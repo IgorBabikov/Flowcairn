@@ -1,3 +1,4 @@
+import { verifyInstructionReference } from './instruction-references.mjs';
 import { lstatHostSync as lstatSync, fstatHostSync as fstatSync } from './host-filesystem.mjs';
 import path from 'node:path';
 import { closeSync, constants, openSync, readFileSync, realpathSync } from 'node:fs';
@@ -31,6 +32,10 @@ export function providerCliCommand(input, { env = process.env, platform = proces
   const cwd = realpathSync(input.projectRoot);
   assertProviderExecutablePlatform(input.executable, platform);
   const reviewRule = input.review ? validateReview(input.review) : null;
+  const instructionRules = (input.instructionReferences ?? []).map((reference) => {
+    verifyInstructionReference(reference);
+    return exactClaudeReadRule(reference.path);
+  });
   const denied = input.deniedPaths.map((entry) => {
     if (!entry || /[\0\r\n(),]/u.test(entry) || path.isAbsolute(entry) || entry.split('/').includes('..') || entry.includes('\\')) fail('PROVIDER_DENIAL_INVALID');
     return entry;
@@ -47,7 +52,7 @@ export function providerCliCommand(input, { env = process.env, platform = proces
     environment.CLAUDE_CODE_DISABLE_AUTO_MEMORY = '1';
     args = ['--strict-mcp-config', '--no-session-persistence',
       '--permission-mode', 'dontAsk', '--tools', 'Read,Grep,Glob',
-      ...(reviewRule ? ['--allowedTools', reviewRule] : []),
+      ...((reviewRule || instructionRules.length) ? ['--allowedTools', ...instructionRules, ...(reviewRule ? [reviewRule] : [])] : []),
       '--disallowedTools', 'mcp__*', ...denied.map((entry) => `Read(./${entry})`),
       '-p', '--output-format', 'json', '--json-schema', JSON.stringify(input.schema)];
   } else if (input.provider === 'cursor') {

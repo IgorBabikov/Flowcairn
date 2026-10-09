@@ -4,7 +4,7 @@ import { mkdtempSync, realpathSync, mkdirSync, writeFileSync, readFileSync, rmSy
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { INSTRUCTION_LIMITS, inspectInstructions, readInstructionBundle, readInstructionFile, assessProjectInstructions } from '../scripts/ai-graph/lib/instructions.mjs';
+import { inspectInstructions, readInstructionBundle, readInstructionFile, assessProjectInstructions } from '../scripts/ai-graph/lib/instructions.mjs';
 import { activateIntegration, inspectIntegration, INTEGRATION_JOURNAL, INTEGRATION_LOCK, replaceIntegrationFile, WORKFLOW_PAYLOAD } from '../scripts/ai-graph/lib/integration.mjs';
 import { sha256 } from '../scripts/ai-graph/lib/io.mjs';
 import { uninstallIntegration, assertUninstallSafe } from '../scripts/ai-graph/lib/uninstall.mjs';
@@ -177,7 +177,7 @@ test('linked integration storage refuses and keeps owner instructions', (t) => {
   assert.equal(existsSync(path.join(outside.root, 'flowcairn-integration.json')), false);
 });
 test('bounded discovery fails closed on oversize, entries and depth without exposing contents', (t) => {
-  const f = fixture(t); f.write('AGENTS.md', 'x'.repeat(INSTRUCTION_LIMITS.maxFileBytes + 1));
+  const f = fixture(t); f.write('AGENTS.md', Buffer.from([0xff]));
   assert.equal(f.inspect().complete, false); assert.throws(f.activate, { code: 'INTEGRATION_INCOMPLETE_DISCOVERY' });
   f.write('AGENTS.md', 'ok'); f.write('a/b/c/AGENTS.md', 'deep');
   assert.equal(inspectInstructions({ projectRoot: f.root, limits: { maxDepth: 1 } }).complete, false);

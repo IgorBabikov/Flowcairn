@@ -84,8 +84,8 @@ export async function selectProjectSkills(projectRoot, options = {}, terminal = 
         selections: recommendations,
       });
     }
-    if (selected.length > 4 || new Set(selected.map((item) => item.path)).size !== selected.length)
-      throw new GraphError('SKILL_SELECTION', 'Выберите не более 4 разных Skills. Файлы не изменены.');
+    if (new Set(selected.map((item) => item.path)).size !== selected.length)
+      throw new GraphError('SKILL_SELECTION', 'Выберите разные Skills. Файлы не изменены.');
     const selections = [];
     for (const candidate of selected) {
       let assignedActions, scope;

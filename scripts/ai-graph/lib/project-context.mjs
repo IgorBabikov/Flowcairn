@@ -1,14 +1,11 @@
-import { lstatHostSync as lstatSync, fstatHostSync as fstatSync } from './host-filesystem.mjs';
-import { constants, closeSync, openSync, readSync, realpathSync } from 'node:fs';
+import { collectInstructionFile } from './instruction-reader.mjs';
+import { lstatHostSync as lstatSync } from './host-filesystem.mjs';
+import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import { GraphError, hashObject, sha256 } from './io.mjs';
 import { discoverWorkspaceManifests } from '../../../bin/workspaces.mjs';
 
-const MAX_FILE_BYTES = 64 * 1024;
-const MAX_FILES = 128;
-const MAX_DISCOVERY_BYTES = 512 * 1024;
 const MANIFEST_NAMES = ['package.json', 'pubspec.yaml', 'requirements.txt', 'go.mod', 'pom.xml', 'composer.json', 'index.html'];
-const MAX_DISCOVERY_PROBES = MAX_FILES * MANIFEST_NAMES.length;
 const fail = (code, message) => { throw new GraphError(code, message); };
 const within = (file, directory) => directory === '.' || file === directory || file.startsWith(`${directory}/`);
 const overlaps = (a, b) => within(a, b) || within(b, a);
@@ -17,7 +14,7 @@ const sorted = (values) => [...new Set(values)].sort();
 /** No arbitrary paths, globals, credentials, generated trees or executable config reads. */
 export function safeContextPath(value, allowRoot = false) {
   if (allowRoot && value === '.') return value;
-  if (typeof value !== 'string' || value.length > 512 || !value || /[\\<>"&]/.test(value) || [...value].some((char) => char.charCodeAt(0) < 32) || path.posix.isAbsolute(value) || /^[a-z]:/i.test(value))
+  if (typeof value !== 'string' || !value || /[\\<>"&]/.test(value) || [...value].some((char) => char.charCodeAt(0) < 32) || path.posix.isAbsolute(value) || /^[a-z]:/i.test(value))
     fail('CONTEXT_PATH_UNSAFE', 'Ожидался безопасный относительный путь проекта');
   const parts = value.split('/');
   if (parts.some((part) => !part || part === '.' || part === '..' || part !== part.trim() ||
@@ -52,43 +49,28 @@ function inspectPath(root, relative, optional = false) {
   }
 }
 
-/** Bounded descriptor read; metadata is revalidated before and after the read. */
-export function readContextFile(root, relative, { maxBytes = MAX_FILE_BYTES, optional = false } = {}) {
-  if (!Number.isInteger(maxBytes) || maxBytes < 1 || maxBytes > MAX_FILE_BYTES) fail('CONTEXT_LIMIT', 'Некорректный предел чтения');
-  const canonical = canonicalRoot(root);
-  const inspected = inspectPath(canonical, relative, optional);
+/** Explicit text loading for one classification manifest, never the whole project. */
+export function readContextFile(root, relative, { maxBytes = undefined, optional = false } = {}) {
+  if (maxBytes !== undefined && (!Number.isSafeInteger(maxBytes) || maxBytes < 1)) fail('CONTEXT_LIMIT', 'Некорректный предел чтения');
+  const canonical = canonicalRoot(root), inspected = inspectPath(canonical, relative, optional);
   if (!inspected) return null;
   const { file, stat } = inspected;
   if (!stat.isFile() || stat.nlink !== 1) fail('CONTEXT_FILE_UNSAFE', 'Контекст должен быть обычным файлом без hardlinks');
-  if (stat.size > maxBytes) fail('CONTEXT_LIMIT', 'Файл контекста превышает лимит');
-  let fd;
   try {
-    fd = openSync(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
-    const before = fstatSync(fd);
-    if (!before.isFile() || before.nlink !== 1 || before.ino !== stat.ino || before.dev !== stat.dev || before.size > maxBytes)
-      fail('CONTEXT_FILE_CHANGED', 'Файл контекста изменился до чтения');
-    const buffer = Buffer.alloc(maxBytes + 1);
-    let length = 0;
-    while (length < buffer.length) {
-      const count = readSync(fd, buffer, length, buffer.length - length, null);
-      if (!count) break;
-      length += count;
-    }
-    if (length > maxBytes) fail('CONTEXT_LIMIT', 'Файл контекста превышает лимит');
-    const after = fstatSync(fd), live = inspectPath(canonical, relative).stat;
-    if ([after, live].some((s) => s.ino !== before.ino || s.dev !== before.dev || s.size !== before.size || s.mtimeMs !== before.mtimeMs || s.ctimeMs !== before.ctimeMs || s.nlink !== 1) || length !== before.size)
-      fail('CONTEXT_FILE_CHANGED', 'Файл контекста изменился во время чтения');
-    let text;
-    try { text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(buffer.subarray(0, length)); }
-    catch { fail('CONTEXT_ENCODING', 'Контекст должен быть UTF-8'); }
+    const data = collectInstructionFile(file, { maxBytes, currentPath: () => inspectPath(canonical, relative).file });
+    const text = data.bytes.toString('utf8');
     return { path: relative, hash: sha256(text), text };
-  } finally { if (fd !== undefined) closeSync(fd); }
+  } catch (error) {
+    const codes = { INSTRUCTION_LIMIT: 'CONTEXT_LIMIT', INVALID_UTF8: 'CONTEXT_ENCODING', INSTRUCTION_CHANGED: 'CONTEXT_FILE_CHANGED' };
+    if (codes[error.code]) fail(codes[error.code], 'Не удалось прочитать стабильный UTF-8 контекст');
+    throw error;
+  }
 }
 
 function checkedScope(root, scope) {
   // Task intake and TaskSpecSchema allow up to 64 paths; Skill discovery must
   // accept the same bounded scope before the task is registered.
-  if (!Array.isArray(scope) || !scope.length || scope.length > 64) fail('CONTEXT_SCOPE_INVALID', 'Нужен ограниченный scope узла (не более 64 путей)');
+  if (!Array.isArray(scope) || !scope.length) fail('CONTEXT_SCOPE_INVALID', 'Нужен непустой явный scope узла');
   return sorted(scope.map((entry) => {
     const normalized = typeof entry === 'string' ? entry.replace(/\/$/, '') : entry;
     const safe = safeContextPath(normalized, true);
@@ -186,16 +168,14 @@ function otherManifestDomains(file, text) {
  */
 export function discoverProjectContext(root, { scope = ['.'], manifestPaths = [] } = {}) {
   const canonical = canonicalRoot(root), scopes = checkedScope(canonical, scope);
-  if (!Array.isArray(manifestPaths) || manifestPaths.length > 32) fail('CONTEXT_LIMIT', 'Слишком много manifests');
+  if (!Array.isArray(manifestPaths)) fail('CONTEXT_LIMIT', 'Слишком много manifests');
   // Профиль содержит также lockfiles и другие manifests. Маршрутизация читает только известные форматы.
   const declared = sorted(manifestPaths.map((file) => safeContextPath(file)));
   const candidates = new Set();
   const packages = [], evidence = [];
-  let totalBytes = 0, loadedFiles = 0;
   const add = (file) => {
     if (![...MANIFEST_NAMES, 'pnpm-workspace.yaml'].includes(path.posix.basename(file))) return;
     candidates.add(file);
-    if (candidates.size > MAX_DISCOVERY_PROBES) fail('CONTEXT_LIMIT', 'Discovery превышает предел проверяемых путей');
   };
   for (const file of declared) {
     if (scopes.some((s) => overlaps(s, path.posix.dirname(file)))) add(file);
@@ -224,9 +204,6 @@ export function discoverProjectContext(root, { scope = ['.'], manifestPaths = []
     const loaded = readContextFile(canonical, file, { optional: !declared.includes(file) });
     evidence.push({ path: file, hash: loaded?.hash ?? null });
     if (!loaded) return null;
-    if (++loadedFiles > MAX_FILES) fail('CONTEXT_LIMIT', 'Discovery превышает предел читаемых файлов');
-    totalBytes += Buffer.byteLength(loaded.text);
-    if (totalBytes > MAX_DISCOVERY_BYTES) fail('CONTEXT_LIMIT', 'Discovery превышает предел контекста');
     if (file === 'pnpm-workspace.yaml') return null;
     const directory = path.posix.dirname(file);
     const data = file.endsWith('package.json') ? jsonManifest(loaded.text) : null;

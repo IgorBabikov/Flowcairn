@@ -211,7 +211,7 @@ export async function migrateLegacyCheckMode(root, { dryRun = false } = {}) {
     return { migrated: false, reason: 'INSTALLATION_MISSING' };
 
   const legacyProfile = ProjectProfileSchema.parse({ ...raw, checkMode: 'none' });
-  const manifest = readIntegrationTarget(root, 'package.json', 1024 * 1024);
+  const manifest = readIntegrationTarget(root, 'package.json');
   if (!manifest) fail('PACKAGE_JSON', 'Нужен package.json проекта.');
   const available = discoverProjectChecks(JSON.parse(manifest.bytes.toString('utf8')));
   const checks = legacyProfile.checks.length ? legacyProfile.checks : available.checks;
@@ -287,7 +287,7 @@ function configuredProfile(root, previous, value) {
     checkSettings = { version: 2, checkMode, checks, checkProfile: { ...checkProfile, requiredCheckIds: checks } };
   } else if (value.checkMode !== undefined || value.checks !== undefined) {
     const checkMode = value.checkMode ?? previous.checkMode;
-    const manifest = readIntegrationTarget(root, 'package.json', 1024 * 1024);
+    const manifest = readIntegrationTarget(root, 'package.json');
     if (!manifest) fail('PACKAGE_JSON', 'Нужен package.json проекта.');
     const available = discoverProjectChecks(JSON.parse(manifest.bytes.toString('utf8')));
     const checks = value.checks ?? (checkMode === 'none'
@@ -357,7 +357,6 @@ export async function saveOnboarding(root, input, { dryRun = false } = {}) {
     if (!sameProfileStructure(previous, profile))
       fail('PROFILE_MIGRATION_SCOPE', 'Настройка может менять только AI, проверки, каталоги результатов и onboarding; остальные структурные поля проекта сохранены.');
     const bytes = Buffer.from(JSON.stringify(profile,null,2)+'\n');
-    if (bytes.length > 32768) fail('PROJECT_PROFILE_TOO_LARGE', 'Итоговый профиль превышает 32 KiB. Сократите определения проверок.');
     let profileAfter, ownerAfter;
     try {
       // При частичной записи старое согласие перестает подходить новому профилю.

@@ -34,7 +34,7 @@ flowchart TD
 | --- | --- |
 | `stage-plan.mjs`, `stage-execution.mjs` | Компилируют проверяемые этапы; сохраняют before до эффекта, связывают receipt, after и учебную паузу |
 | `check-profile.mjs`, `check-toolchain.mjs`, `check-command.mjs`, `check-execution.mjs`, `check-shell.mjs` | Регистрируют команды любого стека, отличают путь вызова от identity инструмента, повторно проверяют фактические входы перед запуском |
-| `learning-sources.mjs`, `learning-material.mjs`, `lesson-validation.mjs` | Хранят выбранные полные bytes, проверяют привязку материала и точные цитаты; не повышают PROVEN |
+| `learning-sources.mjs`, `learning-source-storage.mjs`, `learning-source-page.mjs`, `learning-material.mjs`, `lesson-validation.mjs` | Хранят выбранные полные bytes, проверяют привязку материала и точные цитаты; не повышают PROVEN |
 | `learning-control.mjs`, `learning-view.mjs` | Управляют явным Continue/режимом/учебной отметкой и дают read-only проекцию текущих и исторических материалов |
 | `learning-jobs.mjs`, `learning-job-state.mjs`, `learning-job-adapter.mjs` | Используют тот же store/CAS/supervisor для ограниченных учебных вызовов; поздний ответ меняет только учебную ветку |
 | `learning-prompt.mjs`, `learning-provider.mjs`, `learning-runner.mjs` | Готовят только сохраненный материал, проверяют ограничения выбранного CLI, результат и безопасную очистку |
@@ -107,7 +107,7 @@ Store использует CAS, locks, durable revisions и fsync. Текущи�
 
 `runtimeRoot` — пакет Flowcairn; `projectRoot` — проект пользователя. Runtime не копирует свои исходники в пользовательский проект. В режиме `direct` изменения применяются в текущем `projectRoot`, в явно выбранном режиме `worktree` — в отдельной Git-копии. Оба режима ограничены утвержденными путями и правами.
 
-Для реализации compiler использует paths текущего шага, explicit readPaths, необходимые зависимости и проектные инструкции. Полный review bundle имеет отдельный предел 512 KiB и не обрезается молча. Провайдеры получают структурированные данные, а executable actions выбирает registry.
+Для реализации compiler использует paths текущего шага, explicit readPaths, необходимые зависимости и проектные инструкции. Полный review bundle одного действия имеет отдельный предел 512 KiB и не обрезается молча. Провайдеры получают структурированные данные, а executable actions выбирает registry.
 
 Для нового локального проекта default — `trusted-local`: runtime регистрирует найденные conventional scripts и связывает их имена и профиль с локальной установкой. Эта привязка не означает отдельный hash содержимого каждого script. `none` и `hardened` остаются явными настройками. Команды проверок выбирает registry, а не model/task JSON. Штатные инструменты AI-клиента подчиняются его собственным правам. Внешние side effects, commit, push и deploy не следуют из PROVEN.
 
@@ -140,3 +140,12 @@ Object и только затем запускается. Завершение �
 Идентичность процесса (PID, родитель, время создания, путь программы) проверяется
 через Windows API. PowerShell/WMI и чтение command line или окружения не нужны.
 Это механизм жизненного цикла, а не дополнительная файловая изоляция.
+
+
+## Учет больших проектов
+
+Локальный inventory и fingerprint отделены от inline AI-контекста. `instruction-reader.mjs` и `source-file-scan.mjs` читают полные bytes рабочим буфером и проверяют идентичность/EOF. `instructions.mjs` перечисляет файлы без фиксированной общей квоты; ошибки и отмена остаются неполнотой. Метаданные fingerprint и учебные catalogs/chunk-indices сохраняются отдельными порциями. Native source pages проверяют полный hash, удерживая только окно чтения.
+
+`instruction-references.mjs` подготавливает закрытые полные копии применимых больших правил. Runner выдает право чтения только конкретных файлов, проверяет hashes до/после процесса и убирает копии лишь после подтвержденной остановки. Большая постановка аналогично передается как неизмененная task-data, отдельно от действующих инструкций. Необходимость читать оригинал не заменяется summary или claim модели.
+
+Число работ/требований не ограничено прежними константами; source bounds, verifiers, покрытие и finite autonomy остаются у Executor. Это не отменяет реальные ресурсы, размер отдельного протокольного пакета и прочие перечисленные [рабочие границы](LIMITS-AUDIT.md).

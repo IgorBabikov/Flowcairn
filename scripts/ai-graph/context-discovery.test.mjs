@@ -84,19 +84,18 @@ test('malformed, duplicated, oversized and unrecognized requests are rejected', 
 
 test('old scope and context cannot silently shrink to accommodate limits', () => {
   const originalScope = Array.from({ length: 64 }, (_, index) => `scope-${index}`);
-  assert.throws(() => resolve([request('new.ts', 'write')], { task: { ...task, scope: originalScope } }),
-    { code: 'CONTEXT_REQUEST_LIMIT' });
+  const larger = resolve([request('new.ts', 'write')], { task: { ...task, scope: originalScope } });
+  assert.deepEqual(larger.scope, [...originalScope, 'new.ts'].sort());
   const originalContext = Array.from({ length: 32 }, (_, index) => `context-${index}`);
-  assert.throws(() => resolve([request('src/b.ts')], { task: { ...task, contextPaths: originalContext } }),
-    { code: 'CONTEXT_REQUEST_LIMIT' });
+  const broader = resolve([request('src/b.ts')], { task: { ...task, contextPaths: originalContext } });
+  assert.deepEqual(broader.contextPaths, [...originalContext, 'src/b.ts'].sort());
 });
 
-test('external providers apply file-count and byte caps to the entire resulting readable context', () => {
+test('external providers use paged native file access without aggregate context count/byte rejection', () => {
   for (const provider of ['claude', 'cursor']) {
     const manyFiles = Array.from({ length: 257 }, (_, index) => file(`bulk/${index}.ts`));
-    assert.throws(() => resolve([request('bulk')], { files: [...files, ...manyFiles], provider }), { code: 'CONTEXT_REQUEST_LIMIT' });
-    assert.throws(() => resolve([request('large.ts')], { files: [...files, file('large.ts', 512 * 1024)], provider }),
-      { code: 'CONTEXT_REQUEST_LIMIT' });
+    assert.ok(resolve([request('bulk')], { files: [...files, ...manyFiles], provider }).contextPaths.includes('bulk'));
+    assert.ok(resolve([request('large.ts')], { files: [...files, file('large.ts', 512 * 1024)], provider }).contextPaths.includes('large.ts'));
   }
   assert.ok(resolve([request('large.ts')], { files: [...files, file('large.ts', 512 * 1024)], provider: 'codex' }).contextPaths.includes('large.ts'));
 });

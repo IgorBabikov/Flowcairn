@@ -1,25 +1,15 @@
-import { gitExecutable, gitNullDevice, hostSystemEnvironment } from '../scripts/ai-graph/lib/host-executables.mjs';
-import { spawnSync } from 'node:child_process';
+import { readGitPathInventory } from '../scripts/ai-graph/lib/git-path-inventory.mjs';
+import { collectInstructionFile } from '../scripts/ai-graph/lib/instruction-reader.mjs';
 import {
-  closeSync,
-  constants,
-  fstatSync,
   lstatSync,
-  openSync,
-  readFileSync,
   realpathSync,
 } from 'node:fs';
 import path from 'node:path';
-import { TextDecoder } from 'node:util';
 import { parseDocument } from 'yaml';
 import picomatch from 'picomatch';
 import { GraphError } from '../scripts/ai-graph/lib/io.mjs';
 import { assertJsonBounds } from '../scripts/ai-graph/lib/schemas.mjs';
 
-const MAX_CONFIG_BYTES = 128 * 1024;
-const MAX_GIT_BYTES = 4 * 1024 * 1024;
-const MAX_GIT_PATHS = 20000;
-const MAX_MANIFESTS = 256;
 const EXCLUDED_SEGMENTS = new Set(['node_modules', '.git', '.ai-orchestrator']);
 const PATHSPECS = [...EXCLUDED_SEGMENTS].map((name) => `:(exclude,glob)**/${name}/**`);
 const fail = (code, message) => {
@@ -44,7 +34,7 @@ function relativePath(value) {
   return value;
 }
 
-function physicalFile(root, relative, maxBytes = 16 * 1024 * 1024) {
+function physicalFile(root, relative) {
   relativePath(relative);
   const pieces = relative.split('/');
   let candidate = root;
@@ -59,7 +49,7 @@ function physicalFile(root, relative, maxBytes = 16 * 1024 * 1024) {
     const last = index === pieces.length - 1;
     if (
       stat.isSymbolicLink() ||
-      (last ? !stat.isFile() || stat.nlink !== 1 || stat.size > maxBytes : !stat.isDirectory())
+      (last ? !stat.isFile() || stat.nlink !== 1 : !stat.isDirectory())
     )
       fail(
         'WORKSPACES_FILE',
@@ -82,20 +72,8 @@ function workspacePatterns(root, pkg, manager) {
       fail('WORKSPACES_FILE', 'Не удалось проверить конфигурацию workspace.');
   }
   if (manager === 'pnpm' && yamlPresent) {
-    const file = physicalFile(root, 'pnpm-workspace.yaml', MAX_CONFIG_BYTES);
-    const fd = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW);
-    let text;
-    try {
-      const stat = fstatSync(fd);
-      if (!stat.isFile() || stat.nlink !== 1 || stat.size > MAX_CONFIG_BYTES)
-        fail(
-          'WORKSPACES_FILE',
-          'Конфигурация workspace должна быть обычным файлом до 128 КиБ, без ссылок.',
-        );
-      text = readFileSync(fd, 'utf8');
-    } finally {
-      closeSync(fd);
-    }
+    const file = physicalFile(root, 'pnpm-workspace.yaml');
+    const text = collectInstructionFile(file).bytes.toString('utf8');
     try {
       const doc = parseDocument(text, { strict: true, uniqueKeys: true });
       if (doc.errors.length || doc.warnings.length)
@@ -131,8 +109,8 @@ function workspacePatterns(root, pkg, manager) {
 }
 
 function compilePatterns(patterns) {
-  if (!Array.isArray(patterns) || patterns.length > 64)
-    fail('WORKSPACES_PATTERNS', 'Шаблоны workspace должны быть массивом до 64 элементов.');
+  if (!Array.isArray(patterns))
+    fail('WORKSPACES_PATTERNS', 'Шаблоны workspace должны быть массивом.');
   const positive = [],
     negative = [];
   for (const raw of patterns) {
@@ -173,37 +151,7 @@ function gitPaths(root, ignored) {
         ...PATHSPECS,
       ]
     : ['ls-files', '--cached', '--others', '--exclude-standard', '-z', '--', '.', ...PATHSPECS];
-  const result = spawnSync(
-    gitExecutable(),
-    ['-c', 'core.fsmonitor=false', '-c', 'core.untrackedCache=false', ...args],
-    {
-      cwd: root,
-      encoding: 'buffer',
-      maxBuffer: MAX_GIT_BYTES,
-      timeout: 10000,
-      shell: false,
-      env: { ...hostSystemEnvironment(),
-        PATH: '/usr/bin:/bin',
-        LC_ALL: 'C',
-        GIT_OPTIONAL_LOCKS: '0',
-        GIT_CONFIG_NOSYSTEM: '1',
-        GIT_CONFIG_GLOBAL: gitNullDevice,
-      },
-    },
-  );
-  if (result.error || result.status !== 0 || result.signal)
-    fail('WORKSPACES_GIT', 'Не удалось получить список файлов workspace в пределах лимита.');
-  let text;
-  try {
-    text = new TextDecoder('utf-8', { fatal: true }).decode(result.stdout);
-  } catch {
-    fail('WORKSPACES_PATH', 'Пути workspace должны иметь корректную кодировку UTF-8.');
-  }
-  if (text && !text.endsWith('\0'))
-    fail('WORKSPACES_GIT', 'Git вернул неполный список путей workspace.');
-  const entries = [...new Set(text.split('\0').filter(Boolean))];
-  if (entries.length > MAX_GIT_PATHS)
-    fail('WORKSPACES_GIT', 'Число файлов workspace превышает лимит.');
+  const entries = readGitPathInventory(root, args);
   return entries.filter((file) => !file.split('/').some((part) => EXCLUDED_SEGMENTS.has(part)));
 }
 
@@ -241,7 +189,5 @@ export function discoverWorkspaceManifests(root, pkg, manager) {
       'WORKSPACES_IGNORED',
       'Git игнорирует найденные manifests workspace. Уберите их из ignore или явно исключите из workspace.',
     );
-  if (manifests.length > MAX_MANIFESTS)
-    fail('WORKSPACES_PATTERNS', 'Слишком много manifests workspace.');
   return manifests.sort();
 }

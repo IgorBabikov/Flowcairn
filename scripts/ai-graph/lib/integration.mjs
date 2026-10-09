@@ -25,7 +25,7 @@ function exists(root, relative) {
   try { lstatSync(instructionPath(root, relative)); return true; }
   catch (error) { if (error.code === 'ENOENT') return false; throw error; }
 }
-export function readIntegrationTarget(root, relative, max = 65536) {
+export function readIntegrationTarget(root, relative, max = undefined) {
   try { return readInstructionFile(root, relative, max); }
   catch (error) { if (error.code === 'ENOENT') return null; throw error; }
 }
@@ -65,7 +65,7 @@ function removeOwnedTemporary(file, own) {
   } catch (error) { if (error.code !== 'ENOENT') throw error; }
 }
 /** Cooperative lock + pre-rename identity/hash checks; no claim of OS-level CAS against hostile writers. */
-export function replaceIntegrationFile(root, relative, bytes, expected, max = 65536) {
+export function replaceIntegrationFile(root, relative, bytes, expected, max = undefined) {
   unchanged(root, relative, expected, max);
   if (bytes === null) { if (expected) unlinkSync(instructionPath(root, relative)); return null; }
   const temporary = `${relative}.flowcairn-${randomUUID()}.tmp`;
@@ -196,7 +196,6 @@ export function activateIntegration({ projectRoot, consent = false, expectedFing
     const separator = !source.length ? '' : source.at(-1) === 10 ? '\n' : '\n\n';
     const addition = Buffer.from(separator + CORE);
     const result = Buffer.concat([source, addition]);
-    if (result.length > 65536) instructionError('INSTRUCTION_LIMIT', 'Managed adapter would exceed the instruction byte limit.');
     const journal = { version: 1, owner: 'flowcairn', phase: 'prepared', target, createdFile: !original, separator, blockHash: sha256(addition), beforeHash: original?.sha256 ?? null, afterHash: sha256(result) };
     if (inspectInstructions({ projectRoot: root }).fingerprint !== before.fingerprint) instructionError('INTEGRATION_CONCURRENT_EDIT', 'Instructions changed while staging activation.');
     const prepared = writeIntegrationJournal(root, journal, null);

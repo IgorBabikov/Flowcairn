@@ -7,13 +7,10 @@ export const stageScopeId = (index) => `${stagePrefix(index)}-workspace-check`;
 export const stageCheckId = (index, checkId) => `${stagePrefix(index)}-check-${checkId}`;
 
 /** Compute the execution budget before asking a provider for semantic steps. */
-export function planningStepLimit(task, { workflow = undefined, provider = undefined, nodes = [] } = {}) {
-  if (task.schemaVersion !== 3) return 12;
-  const checkCount = task.checks.length;
-  if (!checkCount) return 1; // An inert, readable plan; never a verified stage.
-  const consent = ['claude', 'cursor'].includes(provider) || nodes.some((node) => node.action.id === 'human-provider-consent');
-  const gateCount = 1 + Number(consent) + Number(workflow !== 'autonomous');
-  return Math.min(12, Math.floor((64 - gateCount - 2) / (2 + checkCount)));
+export function planningStepLimit(task) {
+  // Several stages still require an executable verifier. There is no project-
+  // size/node-count ceiling; finite process/approval budgets remain independent.
+  return task.schemaVersion === 3 && !task.checks.length ? 1 : null;
 }
 
 /** Rebuild immutable stage metadata from compiler-owned node IDs after contract rebinding. */
@@ -23,11 +20,11 @@ export function buildExecutionStages(nodes, taskContract = null) {
   const scopes = nodes.filter((node) => node.action.id === 'workspace-check');
   const reviews = nodes.filter((node) => node.action.id === 'ai-review');
   const handoffs = nodes.filter((node) => node.action.id === 'artifact-handoff');
-  if (new Set(nodes.map((node) => node.id)).size !== nodes.length || !implementations.length || implementations.length > 12 ||
+  if (new Set(nodes.map((node) => node.id)).size !== nodes.length || !implementations.length ||
       scopes.length !== implementations.length || reviews.length !== 1 || handoffs.length !== 1 ||
       nodes.some((node) => node.resources.writes.length && node.action.id !== 'ai-implement'))
     fail('STAGE_CONTRACT', 'Нет однозначного полного набора работ и границ этапов.');
-  const finalChecks = checks.filter((node) => !/^s\d{2}-/.test(node.id));
+  const finalChecks = checks.filter((node) => !/^s\d{2,}-/.test(node.id));
   if (implementations.length > 1 && !finalChecks.length)
     fail('STAGE_VERIFIER_REQUIRED', 'Для нескольких этапов нужна зарегистрированная исполнимая проверка.');
   const stages = implementations.map((work, index) => {

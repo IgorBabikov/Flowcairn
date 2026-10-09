@@ -1,11 +1,12 @@
-import { lstatHostSync as lstatSync, fstatHostSync as fstatSync } from '../scripts/ai-graph/lib/host-filesystem.mjs';
+import { lstatHostSync as lstatSync } from '../scripts/ai-graph/lib/host-filesystem.mjs';
 import { gitExecutable } from '../scripts/ai-graph/lib/host-executables.mjs';
 import { execFileSync } from 'node:child_process';
-import { closeSync, constants, openSync, readFileSync, realpathSync } from 'node:fs';
+import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import { GraphError } from '../scripts/ai-graph/lib/io.mjs';
 import { assertRuntimePlatform, assertProjectPlatform } from '../scripts/ai-graph/lib/platform.mjs';
 import { CheckProfileSchema } from '../scripts/ai-graph/lib/check-profile.mjs';
+import { collectInstructionFile } from '../scripts/ai-graph/lib/instruction-reader.mjs';
 import { readInstructionFile } from '../scripts/ai-graph/lib/instructions.mjs';
 
 export const PROFILE = '.flowcairn.json';
@@ -64,19 +65,10 @@ export function readCheckProfile(root, relative) {
   try { return CheckProfileSchema.parse(JSON.parse(bytes.toString('utf8'))); }
   catch { fail('CHECK_PROFILE_INVALID', 'Профиль проверок должен соответствовать строгой схеме CheckProfile v1.'); }
 }
-export function readRegular(file, max = 1024 * 1024) {
-  const fd = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW);
-  try {
-    const stat = fstatSync(fd);
-    if (!stat.isFile() || stat.nlink !== 1 || stat.size > max)
-      fail('UNSAFE_FILE', 'Ожидался обычный ограниченный файл без ссылок.');
-    const bytes = readFileSync(fd);
-    if (bytes.length > max) fail('UNSAFE_FILE', 'Файл превысил допустимый размер.');
-    return bytes;
-  } finally {
-    closeSync(fd);
-  }
+export function readRegular(file, max = undefined) {
+  return collectInstructionFile(file, { maxBytes: max }).bytes;
 }
+
 export function existsNoFollow(file) {
   try {
     lstatSync(file);

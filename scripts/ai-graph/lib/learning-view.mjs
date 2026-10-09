@@ -123,12 +123,12 @@ export function learningMaterial(host, runId, materialHash) {
   });
 }
 
-/** @param {{startLine?: number, lineCount?: number}} options */
+/** @param {{startLine?: number, lineCount?: number, startColumn?: number}} options */
 export function learningSource(host, runId, materialHash, sourceId, options = {}) {
   const context = materialContext(host, runId, materialHash);
   // Validate the committed stage slot before returning any saved source bytes.
   materialMetadata(host, context.owner, materialHash);
-  return readLearningSourcePage({ ...context.options, sourceId, startLine: options.startLine, lineCount: options.lineCount });
+  return readLearningSourcePage({ ...context.options, sourceId, startLine: options.startLine, lineCount: options.lineCount, startColumn: options.startColumn });
 }
 
 export function learningUnavailable(host, runId, kind, id) {

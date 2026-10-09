@@ -6,7 +6,7 @@ import { GraphError, canonicalJson, hashObject, sha256 } from './io.mjs';
 import { Hash } from './schema-primitives.mjs';
 import { LessonMaterialSchema, LessonAnswerSchema } from './learning-schemas.mjs';
 import { readLearningMaterial, validateLearningSourceAnchor } from './learning-material.mjs';
-import { readLearningSource, exactSourceAnchor } from './learning-sources.mjs';
+import { readLearningSource, savedSourceAnchor } from './learning-sources.mjs';
 import { validateLessonMaterial } from './lesson-validation.mjs';
 import { assertSafeText } from './source-policy.mjs';
 
@@ -72,6 +72,10 @@ export function buildLearningPrompt(options) {
   const { store, materialHash, binding, policy = {}, question } = options;
   const selected = readLearningMaterial({ store, materialHash, binding, policy });
   if (!selected.sources.length) fail('LEARNING_MATERIAL_UNAVAILABLE', 'В материале нет сохраненных исходников для объяснения.');
+  // Fail before assembling bodies that cannot fit this tool-free AI action.
+  // Complete sources remain stored and readable through the paged reader.
+  if (selected.sources.reduce((total, source) => total + source.bytes, 0) > LEARNING_PROMPT_LIMITS.promptBytes)
+    fail('LEARNING_INPUT_LIMIT', 'Полный материал сохранен, но превышает контекст одного учебного AI-вызова. Читайте код частями или разделите учебный разбор на этапы.');
   const sources = selected.sources.map((source) => ({ ...source, text: readLearningSource(store, source, policy) }));
   let questionData = null;
   if (question) {
@@ -126,11 +130,11 @@ export function validateLearningOutput(options) {
   if (Buffer.byteLength(JSON.stringify(answer.data), 'utf8') > LEARNING_PROMPT_LIMITS.outputBytes)
     fail('LEARNING_OUTPUT_LIMIT', 'Ответ с привязками превышает 64 KiB.');
   const material = readLearningMaterial(input);
-  const sources = new Map(material.sources.map((source) => [source.id, { source, text: readLearningSource(input.store, source, input.policy) }]));
+  const sources = new Map(material.sources.map((source) => [source.id, source]));
   for (const anchor of answer.data.anchors) {
     const saved = sources.get(anchor.sourceId);
     if (!saved) fail('LEARNING_ANCHOR_INVALID', 'Цитата относится к другому материалу.');
-    exactSourceAnchor(saved.source, saved.text, anchor);
+    savedSourceAnchor(input.store, saved, anchor, input.policy);
   }
   return answer.data;
 }

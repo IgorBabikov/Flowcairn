@@ -68,9 +68,9 @@ export function compileTaskProposal(task, proposalInput, context) {
     fail('PLANNING_CONTRACT', 'Planner должен предложить шаги без изменений файлов');
   if (task.schemaVersion === 3 && !task.checks.length && proposal.steps.length > 1)
     fail('STAGE_VERIFIER_REQUIRED', 'Для нескольких этапов нужна зарегистрированная исполнимая проверка.');
-  const maxSteps = planningStepLimit(task, context);
-  if (proposal.steps.length > maxSteps)
-    fail('PLANNING_NODE_BUDGET', `План допускает не более ${maxSteps} этапов с обязательными проверками в пределах 64 узлов.`);
+  const maxSteps = planningStepLimit(task);
+  if (maxSteps !== null && proposal.steps.length > maxSteps)
+    fail('PLANNING_NODE_BUDGET', `Несколько этапов требуют исполнимой зарегистрированной проверки.`);
   const byId = new Map(proposal.steps.map((step) => [step.id, step]));
   if (byId.size !== proposal.steps.length) fail('PLANNING_DUPLICATE', 'Planning step IDs повторяются');
   const active = new Set(), done = new Set(), ordered = [];

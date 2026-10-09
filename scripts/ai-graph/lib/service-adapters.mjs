@@ -1,10 +1,11 @@
+import { scanSourceFile } from './source-file-scan.mjs';
 import { gitExecutable, gitNullDevice, hostSystemEnvironment } from './host-executables.mjs';
 import { isPrivateMode } from './host-filesystem.mjs';
-import { lstatSync, mkdirSync, readFileSync, readdirSync, existsSync } from 'node:fs';
+import { lstatSync, mkdirSync, readdirSync, realpathSync, existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { RUNTIME_ROOT, loadProjectProfile, projectContextPaths } from './project.mjs';
-import { GraphError, hashObject, sha256 } from './io.mjs';
+import { GraphError, hashObject } from './io.mjs';
 import { loadSkill } from './skills.mjs';
 import * as SkillsPolicy from './skills.mjs';
 import { SKILL_ROUTES } from './config.mjs';
@@ -43,17 +44,18 @@ export function sanitizeText(value) {
     .slice(0, 12000);
 }
 
-function readTrusted(root, relative) {
+function trustedDigest(root, relative) {
   const file = path.join(root, relative);
   for (let cursor = file; cursor !== root; cursor = path.dirname(cursor)) {
     const stat = lstatSync(cursor);
     if (stat.isSymbolicLink() || (cursor === file && (!stat.isFile() || stat.nlink !== 1)))
       fail('UNSAFE_RUNTIME', 'Runtime или инструкции содержат ссылку');
   }
-  return readFileSync(file);
+  return scanSourceFile(file, { classify: false }).hash;
 }
 
 export function runtimeIdentity(root) {
+  root = realpathSync(root);
   const profile = loadProjectProfile(root);
   const files = [
     'package.json',
@@ -76,7 +78,6 @@ export function runtimeIdentity(root) {
   for (const lock of ['package-lock.json', 'pnpm-lock.yaml', 'yarn.lock'])
     if (existsSync(path.join(RUNTIME_ROOT, lock))) files.push(lock);
   const instructions = [];
-  let instructionBytes = 0;
   const visitContext = (relative) => {
     const stat = lstatSync(path.join(root, relative));
     if (stat.isSymbolicLink()) fail('UNSAFE_RUNTIME', 'Project context must not contain links');
@@ -84,9 +85,7 @@ export function runtimeIdentity(root) {
       for (const entry of readdirSync(path.join(root, relative)))
         visitContext(`${relative.replace(/\/$/, '')}/${entry}`);
     } else {
-      if (instructions.length >= 20000 || (instructionBytes += stat.size) > 64 * 1024 * 1024)
-        fail('CONTEXT_TOO_LARGE', 'Project instruction identity exceeds the bounded context size');
-      instructions.push({ path: relative, hash: sha256(readTrusted(root, relative)) });
+      instructions.push({ path: relative, hash: trustedDigest(root, relative) });
     }
   };
   // Direct work changes project files in place. Their bytes are fenced by the
@@ -96,7 +95,7 @@ export function runtimeIdentity(root) {
   return hashObject({
     runtime: files
       .sort()
-      .map((file) => ({ path: file, hash: sha256(readTrusted(RUNTIME_ROOT, file)) })),
+      .map((file) => ({ path: file, hash: trustedDigest(RUNTIME_ROOT, file) })),
     profile,
     instructions,
   });

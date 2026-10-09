@@ -143,7 +143,8 @@ test('trusted repair preserves expanded read context without expanding the AI pr
   const repaired = compileTaskProposal(task, proposal([steps[0]]), { ...context, repairReadPaths: { format: expandedReads } }).plan;
   const reads = repaired.nodes.find((node) => node.id === 'step-format').resources.reads;
   for (const file of expandedReads) assert.ok(reads.includes(file));
-  assert.throws(() => compileTaskProposal(task, proposal([{ ...steps[0], readPaths: expandedReads }]), context), { code: 'PLANNING_SCHEMA' });
+  const explicitlyRead = compileTaskProposal(task, proposal([{ ...steps[0], readPaths: expandedReads }]), context).plan;
+  for (const file of expandedReads) assert.ok(explicitlyRead.nodes.find((node) => node.id === 'step-format').resources.reads.includes(file));
   assert.throws(() => compileTaskProposal(task, proposal([steps[0]]), { ...context, repairReadPaths: { format: ['outside/private'] } }), { code: 'PLANNING_READ_SCOPE' });
   assert.throws(() => compileTaskProposal(task, { ...proposal([steps[0]]), repairReadPaths: { format: expandedReads } }, context), { code: 'PLANNING_SCHEMA' });
 });

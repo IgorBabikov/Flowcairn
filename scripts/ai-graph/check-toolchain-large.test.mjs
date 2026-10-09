@@ -59,21 +59,19 @@ test('a real 290664032-byte executable hashes fully with a bounded reusable buff
   t.diagnostic(JSON.stringify({ bytes: result.bytes, hash: result.hash, readCalls: calls, bufferBytes: [...buffers][0].byteLength }));
 });
 
-test('executables over 512 MiB reject before reading even if a caller requests a larger bound', t => {
+test('executables beyond the old aggregate ceiling are streamed; explicit caller budgets remain enforceable', t => {
   const fx = fixture(t, 512 * MiB + 1);
-  const reject = () => observeReads(t, () => assert.fail('Oversized executable must not be read.'), () => {
-    for (const action of [() => resolveCheckExecutable(fx.root, fx.file),
-      () => checkFileIdentity(fx.file, { executable: true, maxBytes: 1024 * MiB })])
-      assert.throws(action, error => error.code === 'CHECK_INPUT_UNSAFE' &&
-        error.message.includes('536870913 байт > 536870912 байт') && !error.message.includes(fx.file));
+  const result = resolveCheckExecutable(fx.root, fx.file);
+  assert.equal(result.bytes, fx.size); assert.equal(result.hash, expectedHash(fx));
+  observeReads(t, () => assert.fail('Explicitly over-budget input must not be read.'), () => {
+    assert.throws(() => checkFileIdentity(fx.file, { executable: true, maxBytes: 512 * MiB }), { code: 'CHECK_INPUT_UNSAFE' });
   });
-  reject();
 });
 
-test('source input size and secret guards keep their existing bounds', t => {
+test('source inputs stream beyond the old16MiB cap and keep secret guards', t => {
   const fx = fixture(t, 16 * MiB + 1);
-  assert.throws(() => checkFileIdentity(fx.file), error => error.code === 'CHECK_INPUT_UNSAFE' &&
-    error.message.includes('16777217 байт > 16777216 байт'));
+  assert.equal(checkFileIdentity(fx.file).bytes, fx.size);
+  assert.throws(() => checkFileIdentity(fx.file, { maxBytes: 16 * MiB }), { code: 'CHECK_INPUT_UNSAFE' });
   fs.writeFileSync(fx.file, 'Bearer ' + 'a'.repeat(32));
   assert.throws(() => checkFileIdentity(fx.file), { code: 'CHECK_INPUT_UNSAFE' });
 });

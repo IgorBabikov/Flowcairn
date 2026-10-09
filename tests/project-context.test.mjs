@@ -114,7 +114,7 @@ test('Skill context accepts the full task scope limit without truncating paths',
   const context = discoverProjectContext(f.root, { scope });
   assert.deepEqual(context.scope, scope.sort());
   assert.deepEqual(verifyProjectContext(f.root, context), context);
-  assert.throws(() => discoverProjectContext(f.root, { scope: [...scope, 'extra/new.js'] }), { code: 'CONTEXT_SCOPE_INVALID' });
+  assert.deepEqual(discoverProjectContext(f.root, { scope: [...scope, 'extra/new.js'] }).scope, [...scope, 'extra/new.js'].sort());
 });
 
 test('mixed workspace selects nearest package and does not inherit root or sibling norms', (t) => {
@@ -171,8 +171,8 @@ test('scope and file reader reject traversal, secrets, missing parents and all l
 });
 
 test('size, manifest syntax and unsafe workspace patterns fail explicitly', (t) => {
-  const f = fixture(t); f.write('package.json', 'x'.repeat(65537));
-  assert.throws(() => discoverProjectContext(f.root), { code: 'CONTEXT_LIMIT' });
+  const f = fixture(t); f.write('package.json', JSON.stringify({ description: 'x'.repeat(65537), dependencies: { react: '*' } }));
+  assert.deepEqual(discoverProjectContext(f.root).domains, ['frontend']);
   f.write('package.json', '{bad');
   assert.throws(() => discoverProjectContext(f.root), { code: 'CONTEXT_MANIFEST_INVALID' });
   f.pkg('package.json', {}, { workspaces: ['../outside'] });

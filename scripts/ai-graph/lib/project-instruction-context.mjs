@@ -1,7 +1,8 @@
 import { assertSafeText } from './source-policy.mjs';
 import { TextDecoder } from 'node:util';
 import { GraphError, hashObject } from './io.mjs';
-import { effectiveInstructionFiles, inspectInstructions, readInstructionFile } from './instructions.mjs';
+import { effectiveInstructionFiles, inspectInstructions, inspectInstructionFile, readInstructionFile } from './instructions.mjs';
+import { instructionReferenceText } from './instruction-references.mjs';
 import { contextPathAllowed } from './registry.mjs';
 
 const MAX_INSTRUCTION_BUNDLE_BYTES = 64 * 1024;
@@ -18,8 +19,8 @@ export function projectInstructionMetadata(root, node, task, profile, inspection
   for (const file of new Set([...(profile.contextPaths ?? []), ...(task.contextPaths ?? [])])) {
     if (known.has(file) || !/\.md$/i.test(file) || !node.resources.reads.includes(file)) continue;
     if (!contextPathAllowed(file, task)) fail('INSTRUCTION_CONTEXT_SCOPE', 'Контекст инструкций выходит за область задачи');
-    const data = readInstructionFile(root, file);
-    selected.push({ path: file, kind: 'explicit-context', scope: '.', sha256: data.sha256, bytes: data.bytes.length });
+    const data = inspectInstructionFile(root, file);
+    selected.push({ path: file, kind: 'explicit-context', scope: '.', sha256: data.sha256, bytes: data.size });
   }
   return selected.sort((a, b) => a.path.localeCompare(b.path));
 }
@@ -33,11 +34,16 @@ export function buildProjectInstructionContext({ projectRoot, node, task, profil
   let bytes = 0;
   const files = selected.map((file) => {
     if (!contextPathAllowed(file.path, task)) fail('INSTRUCTION_CONTEXT_SCOPE', 'Путь инструкции не входит в разрешенный контекст');
-    const data = readInstructionFile(projectRoot, file.path);
-    if (data.sha256 !== file.sha256 || data.bytes.length !== file.bytes)
+    const inspected = inspectInstructionFile(projectRoot, file.path);
+    if (inspected.sha256 !== file.sha256 || inspected.size !== file.bytes)
       fail('INSTRUCTION_CHANGED', 'Байты инструкции изменились перед передачей');
-    if ((bytes += data.bytes.length) > MAX_INSTRUCTION_BUNDLE_BYTES)
-      fail('INSTRUCTION_CONTEXT_LIMIT', 'Инструкции текущего действия превышают 64 KiB; требуется сузить контекст');
+    if (inspected.size > 8 * 1024 || bytes + inspected.size > MAX_INSTRUCTION_BUNDLE_BYTES) {
+      const source = { path: file.path, sha256: file.sha256, bytes: file.bytes };
+      return { ...file, content: instructionReferenceText(source), source };
+    }
+    const data = readInstructionFile(projectRoot, file.path, 8 * 1024);
+    if (data.sha256 !== file.sha256) fail('INSTRUCTION_CHANGED', 'Байты инструкции изменились при загрузке');
+    bytes += data.bytes.length;
     let content;
     try { content = new TextDecoder('utf-8', { fatal: true }).decode(data.bytes); }
     catch { fail('INSTRUCTION_ENCODING', 'Инструкция не является UTF-8 текстом'); }

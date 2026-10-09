@@ -1,16 +1,12 @@
-import { lstatHostSync as lstatSync, fstatHostSync as fstatSync } from './host-filesystem.mjs';
-import { classifySource, hasSecretContent } from './source-policy.mjs';
-import { closeSync, openSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
+import { lstatHostSync as lstatSync } from './host-filesystem.mjs';
+import { classifySource } from './source-policy.mjs';
+import { opendirSync, realpathSync } from 'node:fs';
 import path from 'node:path';
-import { noFollowReadFlags, crossStatIdentity } from './host-filesystem.mjs';
+import { scanSourceFile } from './source-file-scan.mjs';
 import { TextDecoder } from 'node:util';
 import { GraphError, canonicalJson, sha256 } from './io.mjs';
 import { isSensitivePath } from './registry.mjs';
 
-const MAX_FILES = 20_000;
-const MAX_FILE_BYTES = 64 * 1024 * 1024;
-const MAX_TOTAL_BYTES = 512 * 1024 * 1024;
-const MAX_DEPTH = 128;
 const PRIVATE_ROOTS = new Set(['.git', '.ai', '.ai-orchestrator', '.DS_Store', 'node_modules', '.agents', '.codex', '.claude']);
 const decoder = new TextDecoder('utf-8', { fatal: true });
 const fail = (code, reason) => { throw new GraphError(code, reason); };
@@ -26,62 +22,46 @@ function pathName(buffer) {
 }
 
 function readRegular(file, relative) {
-  const before = lstatSync(file, { bigint: true });
-  if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1n || before.size > BigInt(MAX_FILE_BYTES))
-    fail('DIRECT_FILE', `Небезопасный или слишком большой файл: ${relative}`);
-  let fd;
   try {
-    fd = openSync(file, noFollowReadFlags());
-    const opened = fstatSync(fd, { bigint: true });
-    if (!opened.isFile() || opened.nlink !== 1n || crossStatIdentity(opened) !== crossStatIdentity(before))
-      fail('DIRECT_CHANGED', `Файл изменился до чтения: ${relative}`);
-    const body = readFileSync(fd);
-    const after = fstatSync(fd, { bigint: true });
-    const live = lstatSync(file, { bigint: true });
-    if (BigInt(body.length) !== before.size || [[after, opened], [live, before]].some(([stat, expected]) =>
-      stat.ino !== expected.ino || stat.dev !== expected.dev || stat.mode !== expected.mode || stat.nlink !== expected.nlink ||
-      stat.size !== expected.size || stat.mtimeNs !== expected.mtimeNs || stat.ctimeNs !== expected.ctimeNs))
-      fail('DIRECT_CHANGED', `Файл изменился во время чтения: ${relative}`);
-    return { path: relative, hash: sha256(body), size: body.length, privateContent: hasSecretContent(body.toString('utf8')),
-      mode: (before.mode & 0o111n) ? '100755' : '100644' };
-  } finally { if (fd !== undefined) closeSync(fd); }
+    const { hash, size, mode, secret } = scanSourceFile(file);
+    return { path: relative, hash, size, mode, privateContent: secret };
+  } catch (error) { fail(error.code === 'SOURCE_FILE_CHANGED' ? 'DIRECT_CHANGED' : error.code, `Не удалось проверить файл: ${relative}`); }
 }
 
 function scan(root, outputPaths) {
   const files = [], privateFiles = [];
-  let totalBytes = 0;
-  const walk = (directory, relative, depth) => {
-    if (depth > MAX_DEPTH) fail('DIRECT_LIMIT', 'Слишком глубокое дерево проекта');
+  const pending = [{ directory: root, relative: '' }];
+  while (pending.length) {
+    const { directory, relative } = pending.pop();
     const before = lstatSync(directory);
     if (!before.isDirectory() || before.isSymbolicLink()) fail('DIRECT_DIRECTORY', 'Каталог проекта изменился');
-    const entries = readdirSync(directory, { withFileTypes: true, encoding: 'buffer' })
-      .map((entry) => ({ name: pathName(entry.name) })).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
-    for (const { name } of entries) {
-      const target = path.join(directory, name), file = relative ? `${relative}/${name}` : name;
-      if (PRIVATE_ROOTS.has(name)) {
-        const excluded = lstatSync(target);
-        if (excluded.isSymbolicLink()) fail('DIRECT_LINK', `Недопустимая ссылка: ${file}`);
-        continue;
+    const dir = opendirSync(directory, /** @type {any} */ ({ encoding: 'buffer' }));
+    try {
+      let entry;
+      while ((entry = dir.readSync())) {
+        const name = pathName(entry.name);
+        const target = path.join(directory, name), file = relative ? `${relative}/${name}` : name;
+        if (PRIVATE_ROOTS.has(name)) {
+          const excluded = lstatSync(target);
+          if (excluded.isSymbolicLink()) fail('DIRECT_LINK', `Недопустимая ссылка: ${file}`);
+          continue;
+        }
+        if (['dependency', 'output'].includes(classifySource(file).reason) || outputPaths.some((prefix) => within(file, prefix))) {
+          if (lstatSync(target).isSymbolicLink()) fail('DIRECT_LINK', `Недопустимая ссылка в результатах: ${file}`);
+          continue;
+        }
+        const stat = lstatSync(target);
+        if (stat.isSymbolicLink()) fail('DIRECT_LINK', `Недопустимая ссылка: ${file}`);
+        if (stat.isDirectory()) { pending.push({ directory: target, relative: file }); continue; }
+        const { privateContent, ...descriptor } = readRegular(target, file);
+        if (isSensitivePath(file) || privateContent) privateFiles.push({ path: file, hash: descriptor.hash });
+        else files.push(descriptor);
       }
-      if (['dependency', 'output'].includes(classifySource(file).reason) || outputPaths.some((prefix) => within(file, prefix))) {
-        if (lstatSync(target).isSymbolicLink()) fail('DIRECT_LINK', `Недопустимая ссылка в результатах: ${file}`);
-        continue;
-      }
-      const stat = lstatSync(target);
-      if (stat.isSymbolicLink()) fail('DIRECT_LINK', `Недопустимая ссылка: ${file}`);
-      if (stat.isDirectory()) { walk(target, file, depth + 1); continue; }
-      if (files.length + privateFiles.length >= MAX_FILES) fail('DIRECT_LIMIT', 'Слишком много файлов проекта');
-      const { privateContent, ...descriptor } = readRegular(target, file);
-      totalBytes += descriptor.size;
-      if (totalBytes > MAX_TOTAL_BYTES) fail('DIRECT_LIMIT', 'Проект превышает предел проверки');
-      if (isSensitivePath(file) || privateContent) privateFiles.push({ path: file, hash: descriptor.hash });
-      else files.push(descriptor);
-    }
+    } finally { dir.closeSync(); }
     const after = lstatSync(directory);
     if (after.ino !== before.ino || after.dev !== before.dev || after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs)
       fail('DIRECT_CHANGED', `Каталог проекта изменился во время проверки: ${relative || '.'}`);
-  };
-  walk(root, '', 0);
+  }
   const byPath = (left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0;
   return { files: files.sort(byPath), privateFiles: privateFiles.sort(byPath) };
 }

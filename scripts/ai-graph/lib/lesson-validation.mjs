@@ -2,7 +2,7 @@ import { GraphError } from './io.mjs';
 import { Hash } from './schema-primitives.mjs';
 import { LessonMaterialSchema } from './learning-schemas.mjs';
 import { readLearningMaterial } from './learning-material.mjs';
-import { readLearningSource, exactSourceAnchor } from './learning-sources.mjs';
+import { savedSourceAnchor } from './learning-sources.mjs';
 import { assertSafeText } from './source-policy.mjs';
 
 /** @returns {never} */
@@ -28,11 +28,11 @@ export function validateLessonMaterial({ store, materialHash, binding, methodHas
     fail('LEARNING_LESSON_INVALID', 'Шаги и вопросы должны иметь уникальные IDs.');
   assertSafeText(JSON.stringify(value));
   const { material, sources } = readLearningMaterial({ store, materialHash, binding, policy });
-  const saved = new Map(sources.map((source) => [source.id, { source, text: readLearningSource(store, source, policy) }]));
+  const saved = new Map(sources.map((source) => [source.id, source]));
   const validateAnchor = (anchor) => {
     const entry = saved.get(anchor.sourceId);
     if (!entry) fail('LEARNING_ANCHOR_INVALID', 'Цитата относится к другому материалу.');
-    return exactSourceAnchor(entry.source, entry.text, anchor);
+    return savedSourceAnchor(store, entry, anchor, policy);
   };
   const receipts = new Set([...material.implementationReceiptIds, ...material.checkReceiptIds, ...material.reviewReceiptIds]);
   for (const step of value.steps) {

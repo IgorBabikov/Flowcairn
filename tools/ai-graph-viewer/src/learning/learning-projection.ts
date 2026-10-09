@@ -2,9 +2,9 @@ import type { Capability, LearningSnapshot, Snapshot, SnapshotV3, SourceFreshnes
 import { record, text, hash, id, list, nullable, choice, uniqueIds } from './validation';
 
 function learningData(value: unknown): value is LearningSnapshot {
-  if (!record(value) || value.version !== 1 || !choice(value.mode, ['after-stage', 'after-task']) || !Array.isArray(value.stages) || value.stages.length > 12) return false;
+  if (!record(value) || value.version !== 1 || !choice(value.mode, ['after-stage', 'after-task']) || !Array.isArray(value.stages)) return false;
   const validStages = value.stages.every(stage => record(stage) && id(stage.id) && text(stage.title, 160) && text(stage.outcome)
-    && list(stage.requirementIds, id, 40) && choice(stage.status, ['pending', 'running', 'verified', 'failed', 'uncertain'])
+    && (Array.isArray(stage.requirementIds) && stage.requirementIds.every(id)) && choice(stage.status, ['pending', 'running', 'verified', 'failed', 'uncertain'])
     && nullable(stage.checkedResultHash, hash) && choice(stage.freshness, ['current', 'stale', 'unknown']) && nullable(stage.materialHash, hash)
     && choice(stage.materialStatus, ['pending', 'complete', 'partial', 'unavailable']) && nullable(stage.lessonHash, hash)
     && choice(stage.lessonStatus, ['absent', 'generating', 'ready', 'failed', 'uncertain']) && choice(stage.progress, ['unread', 'read', 'deferred']) && nullable(stage.reason, text));
