@@ -41,6 +41,11 @@ const ERROR_GUIDANCE = Object.freeze({
     where: 'Файл инструкции, указанный в сообщении проверки',
     action: 'Повторите inspect/setup и подтвердите актуальный набор правил.',
   },
+  INSTRUCTION_INCOMPLETE: {
+    message: 'Flowcairn не смог полностью проверить инструкции проекта. Это не означает, что они изменились.',
+    where: 'Путь и причина указаны в technical; подробности доступны через flowcairn instructions inspect.',
+    action: 'Проверьте указанный файл, доступ к нему и лимиты инструкций. Повторный setup без устранения причины не поможет.',
+  },
   PROJECT_PROFILE_INVALID: {
     message: 'Профиль Flowcairn в проекте поврежден или не соответствует текущему формату.',
     where: '.flowcairn.json',

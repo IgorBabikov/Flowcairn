@@ -5,7 +5,8 @@ import { TextDecoder } from 'node:util';
 import { GraphError, hashObject, sha256 } from './io.mjs';
 import { CORE_SKILL_ROUTES, DOMAIN_SKILLS } from './config.mjs';
 
-export const INSTRUCTION_LIMITS = Object.freeze({ maxDepth: 32, maxEntries: 12000, maxFiles: 256, maxFileBytes: 65536, maxTotalBytes: 1048576 });
+// Локальный учет файлов не расширяет отдельный лимит AI-контекста действия.
+export const INSTRUCTION_LIMITS = Object.freeze({ maxDepth: 32, maxEntries: 12000, maxFiles: 256, maxFileBytes: 256 * 1024, maxTotalBytes: 1048576 });
 export const WORKFLOW_PRECEDENCE = Object.freeze({
   version: 1,
   scope: 'flowcairn orchestration only',
@@ -35,11 +36,12 @@ export function instructionPath(root, relative) {
   }
   return path.join(root, ...parts);
 }
-export function readInstructionFile(root, relative, maxBytes = 65536) {
+export function readInstructionFile(root, relative, maxBytes = INSTRUCTION_LIMITS.maxFileBytes) {
   if (relative.split('/').some((part) => sensitive(part) || ['.git', '.npmrc', '.netrc', '.pypirc', 'id_rsa', 'id_ed25519'].includes(part))) instructionError('INSTRUCTION_SENSITIVE_PATH', 'Sensitive files are not instruction input.');
   const target = instructionPath(root, relative);
   const before = lstatSync(target);
-  if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1 || before.size > maxBytes) instructionError('INSTRUCTION_UNSAFE_FILE', 'Instruction file must be bounded, regular, and have one link.');
+  if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1) instructionError('INSTRUCTION_UNSAFE_FILE', 'Instruction file must be regular and have one link.');
+  if (before.size > maxBytes) instructionError('INSTRUCTION_LIMIT', `${relative}: ${before.size} bytes exceeds the ${maxBytes} byte read limit.`);
   const fd = openSync(target, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
   try {
     const stat = fstatSync(fd);
@@ -149,10 +151,18 @@ export function effectiveInstructionFiles(manifest, { provider = null, scope = n
 /** Explicit content read for the trusted runtime after its context/egress consent check.
  * Scoped metadata is retained; this does not pretend to evaluate client glob semantics.
  */
+function requireCompleteInstructionManifest(manifest) {
+  if (manifest?.complete === true && Array.isArray(manifest.files)) return;
+  const issues = (manifest?.audit?.issues ?? []).filter((item) => item.severity === 'error');
+  const detail = issues.slice(0, 8).map((item) => `${item.code}: ${JSON.stringify(item.path)}`).join('; ');
+  instructionError('INSTRUCTION_INCOMPLETE', `Не удалось полностью проверить инструкции.${detail ? ` ${detail}` : ' Полный список инструкций отсутствует.'}`);
+}
+
 export function readInstructionBundle({ projectRoot, expectedFingerprint, paths }) {
   const root = canonicalInstructionRoot(projectRoot);
   const before = inspectInstructions({ projectRoot: root });
-  if (!before.complete || before.fingerprint !== expectedFingerprint) instructionError('INSTRUCTION_CHANGED', 'Instruction discovery is incomplete or its approved fingerprint changed.');
+  requireCompleteInstructionManifest(before);
+  if (before.fingerprint !== expectedFingerprint) instructionError('INSTRUCTION_CHANGED', 'Approved instruction fingerprint changed.');
   if (!Array.isArray(paths) || paths.length > INSTRUCTION_LIMITS.maxFiles || new Set(paths).size !== paths.length) instructionError('INSTRUCTION_PATHS', 'Explicit unique instruction paths are required.');
   const known = new Map(before.files.map((file) => [file.path, file]));
   const files = paths.map((relative) => {
@@ -168,8 +178,7 @@ export function readInstructionBundle({ projectRoot, expectedFingerprint, paths 
 
 /** Локальная проверка наблюдаемых свойств. Не сертифицирует качество и не активирует инструкции. */
 export function assessProjectInstructions(projectRoot, { instructionManifest } = { instructionManifest: undefined }) {
-  if (!instructionManifest || instructionManifest.complete !== true || !Array.isArray(instructionManifest.files))
-    instructionError('INSTRUCTION_CHANGED', 'Для рекомендаций нужен полный актуальный список инструкций.');
+  requireCompleteInstructionManifest(instructionManifest);
   const bundle = readInstructionBundle({ projectRoot, expectedFingerprint: instructionManifest.fingerprint,
     paths: instructionManifest.files.map((file) => file.path) });
   const findings = [];
