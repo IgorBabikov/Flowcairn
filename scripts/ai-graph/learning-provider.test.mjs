@@ -128,6 +128,15 @@ test('unverified provider modes are explicit denials with no runnable command or
   assert.throws(() => fx.prepare({ model: 'provider-default' }), { code: 'LEARNING_MODEL_INVALID' });
 });
 
+test('усиление входит в неизменяемую подготовку и не допускает внедрение CLI-конфигурации', (t) => {
+  const fx = fixture(t), medium = fx.prepare({ reasoningEffort: 'medium' }), high = fx.prepare({ reasoningEffort: 'high' });
+  assert.equal(medium.inputHash, high.inputHash);
+  assert.notEqual(medium.preparationHash, high.preparationHash);
+  assert.equal(high.reasoningEffort, 'high');
+  for (const reasoningEffort of ['', 'high\nfeatures.hooks=true', '"high"', 42])
+    assert.throws(() => fx.prepare({ reasoningEffort }), { code: 'LEARNING_REASONING_INVALID' });
+});
+
 test('private preparation binds input/schema, propagates completion/policy errors and disposes only after a confirmed stop', (t) => {
   const fx = fixture(t), prepared = fx.prepare();
   if (process.platform !== 'win32') {

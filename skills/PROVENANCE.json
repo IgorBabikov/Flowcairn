@@ -1,0 +1,674 @@
+{
+  "schemaVersion": 1,
+  "reviewDate": "2026-10-09",
+  "purpose": "Pinned provenance for scoped Flowcairn method adaptations; not an executable registry or automatic trust decision",
+  "verification": {
+    "sourceReview": "Complete adopted entrypoints and listed references read; no upstream script executed",
+    "structuralIntegration": "Existing trusted core/domain routes and separate saved-material lesson route; exact content hashes are pinned by current runtime",
+    "measuredAIEfficacy": "not-measured",
+    "liveBenchmark": "not-run; budget/provider/fixtures require preparation"
+  },
+  "selected": [
+    {
+      "id": "systematic-debugging",
+      "repository": "https://github.com/obra/superpowers",
+      "commit": "8ca22dba9a94f28898bbce59f2537ff4d87c747d",
+      "catalogueUrl": "https://skills.sh/obra/superpowers/systematic-debugging",
+      "status": "adapted",
+      "sources": [
+        {
+          "path": "skills/systematic-debugging/SKILL.md",
+          "url": "https://raw.githubusercontent.com/obra/superpowers/8ca22dba9a94f28898bbce59f2537ff4d87c747d/skills/systematic-debugging/SKILL.md",
+          "sha256": "808fc5717aa88ad65efff312b11c186294d3e6ee301afb584e2f86599b137787",
+          "bytes": 9465
+        },
+        {
+          "path": "skills/systematic-debugging/condition-based-waiting.md",
+          "url": "https://raw.githubusercontent.com/obra/superpowers/8ca22dba9a94f28898bbce59f2537ff4d87c747d/skills/systematic-debugging/condition-based-waiting.md",
+          "sha256": "e89fec8400d6cd50f43407cec9fab50976ba4d55d0ec2eb51c0bd68036b54c26",
+          "bytes": 3516
+        },
+        {
+          "path": "skills/systematic-debugging/defense-in-depth.md",
+          "url": "https://raw.githubusercontent.com/obra/superpowers/8ca22dba9a94f28898bbce59f2537ff4d87c747d/skills/systematic-debugging/defense-in-depth.md",
+          "sha256": "1e175fb86fc357e58c6aebf5441e481e1b7868b4380c0456b63a17eefbd18ba7",
+          "bytes": 3650
+        },
+        {
+          "path": "skills/systematic-debugging/root-cause-tracing.md",
+          "url": "https://raw.githubusercontent.com/obra/superpowers/8ca22dba9a94f28898bbce59f2537ff4d87c747d/skills/systematic-debugging/root-cause-tracing.md",
+          "sha256": "75b933b6a8c40bdb2031b10f21654395b56ec6ab6bc7b018c18d3fe57aeb7fb8",
+          "bytes": 5321
+        }
+      ],
+      "license": {
+        "spdx": "MIT",
+        "path": "LICENSE",
+        "url": "https://raw.githubusercontent.com/obra/superpowers/8ca22dba9a94f28898bbce59f2537ff4d87c747d/LICENSE",
+        "sha256": "a37e0e9697144819e1d965176ac4ae5bc3fa02d11e7812036bbcadf6dafe2400",
+        "bundledPath": "skills/licenses/obra-superpowers-MIT.txt"
+      },
+      "noticeReview": {
+        "skillSpecificNoticeFound": false,
+        "importedThirdPartyScriptsOrAssets": false
+      },
+      "dependencies": {
+        "importedExecutables": [],
+        "addedPackages": [],
+        "runtimeNetworkFetch": false,
+        "upstreamToolsOrSkills": [
+          "superpowers:test-driven-development",
+          "superpowers:verification-before-completion",
+          "bash/npm diagnostic helpers (not imported)"
+        ],
+        "disposition": "No executable/helper/dependent-skill transfer; existing registered project toolchain remains authoritative."
+      },
+      "targets": [
+        "skills/core-debugging/SKILL.md"
+      ],
+      "applicability": {
+        "actions": [
+          "ai-implement"
+        ],
+        "positive": "Failure/findings inside assigned work scope",
+        "negative": "Not ordinary implementation without a failure"
+      },
+      "adaptationChanges": [
+        "Root-cause/data-flow tracing and falsifiable single hypotheses",
+        "Use Executor finite repair budget instead of upstream three-fix architecture gate",
+        "No mandatory TDD, instrumentation, upstream scripts or subskills",
+        "Related polluter/example helpers inspected, hashed and rejected; no fixed 10ms polling or unrelated Lace imports"
+      ],
+      "inspectedNotImported": [
+        {
+          "path": "skills/systematic-debugging/condition-based-waiting-example.ts",
+          "url": "https://raw.githubusercontent.com/obra/superpowers/8ca22dba9a94f28898bbce59f2537ff4d87c747d/skills/systematic-debugging/condition-based-waiting-example.ts",
+          "sha256": "40ae5ebe497fdf310200e43fe986552546d0a22837c0d39e855db1cfd33eb88e",
+          "bytes": 5054
+        },
+        {
+          "path": "skills/systematic-debugging/find-polluter.sh",
+          "url": "https://raw.githubusercontent.com/obra/superpowers/8ca22dba9a94f28898bbce59f2537ff4d87c747d/skills/systematic-debugging/find-polluter.sh",
+          "sha256": "dd7b8f13c4cc2a24b33ff87b18da9248f3e1c80a085c3316224f69ff0fa5c43c",
+          "bytes": 1986
+        }
+      ]
+    },
+    {
+      "id": "requesting-code-review",
+      "repository": "https://github.com/obra/superpowers",
+      "commit": "8ca22dba9a94f28898bbce59f2537ff4d87c747d",
+      "catalogueUrl": "https://skills.sh/obra/superpowers/requesting-code-review",
+      "status": "adapted",
+      "sources": [
+        {
+          "path": "skills/requesting-code-review/SKILL.md",
+          "url": "https://raw.githubusercontent.com/obra/superpowers/8ca22dba9a94f28898bbce59f2537ff4d87c747d/skills/requesting-code-review/SKILL.md",
+          "sha256": "cfcee1b06774e7c0517f1e09be1a11f2d5680257072723e709ddbcf7e08b795a",
+          "bytes": 2977
+        },
+        {
+          "path": "skills/requesting-code-review/code-reviewer.md",
+          "url": "https://raw.githubusercontent.com/obra/superpowers/8ca22dba9a94f28898bbce59f2537ff4d87c747d/skills/requesting-code-review/code-reviewer.md",
+          "sha256": "82e370be6b3447523816286195571e4216ba56ba1ad6ad0e87862294c4c78dcb",
+          "bytes": 6449
+        }
+      ],
+      "license": {
+        "spdx": "MIT",
+        "path": "LICENSE",
+        "url": "https://raw.githubusercontent.com/obra/superpowers/8ca22dba9a94f28898bbce59f2537ff4d87c747d/LICENSE",
+        "sha256": "a37e0e9697144819e1d965176ac4ae5bc3fa02d11e7812036bbcadf6dafe2400",
+        "bundledPath": "skills/licenses/obra-superpowers-MIT.txt"
+      },
+      "noticeReview": {
+        "skillSpecificNoticeFound": false,
+        "importedThirdPartyScriptsOrAssets": false
+      },
+      "dependencies": {
+        "importedExecutables": [],
+        "addedPackages": [],
+        "runtimeNetworkFetch": false,
+        "upstreamToolsOrSkills": [
+          "native general-purpose subagent dispatch",
+          "Git commit ranges"
+        ],
+        "disposition": "No executable/helper/dependent-skill transfer; existing registered project toolchain remains authoritative."
+      },
+      "targets": [
+        "skills/code-review/SKILL.md"
+      ],
+      "applicability": {
+        "actions": [
+          "ai-review"
+        ],
+        "positive": "Actual diff, requirements and current review bundle",
+        "negative": "Not permission to mutate or add another review lifecycle"
+      },
+      "adaptationChanges": [
+        "Review artifact independently of implementer narrative; calibrate concrete findings",
+        "Use requirementAssessments, current citations and reviewEvidenceHash",
+        "Remove native subagent dispatch, Git range requirement and merge decision; out-of-contract risk does not invent requirement"
+      ]
+    },
+    {
+      "id": "frontend-design",
+      "repository": "https://github.com/anthropics/skills",
+      "commit": "dbd4588f9e1033efb41dad4bef2f7947c8993d44",
+      "catalogueUrl": "https://skills.sh/anthropics/skills/frontend-design",
+      "status": "adapted",
+      "sources": [
+        {
+          "path": "skills/frontend-design/SKILL.md",
+          "url": "https://raw.githubusercontent.com/anthropics/skills/dbd4588f9e1033efb41dad4bef2f7947c8993d44/skills/frontend-design/SKILL.md",
+          "sha256": "d91970639e9f5c37682ac7ab60094d35f1c7c1f38d731bd56396563aee10c1d3",
+          "bytes": 9390
+        }
+      ],
+      "license": {
+        "spdx": "Apache-2.0",
+        "path": "skills/frontend-design/LICENSE.txt",
+        "url": "https://raw.githubusercontent.com/anthropics/skills/dbd4588f9e1033efb41dad4bef2f7947c8993d44/skills/frontend-design/LICENSE.txt",
+        "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+        "bundledPath": "skills/licenses/anthropics-frontend-design-Apache-2.0.txt"
+      },
+      "noticeReview": {
+        "skillSpecificNoticeFound": false,
+        "importedThirdPartyScriptsOrAssets": false
+      },
+      "dependencies": {
+        "importedExecutables": [],
+        "addedPackages": [],
+        "runtimeNetworkFetch": false,
+        "upstreamToolsOrSkills": [
+          "optional screenshot/browser tools",
+          "optional persistent design notes"
+        ],
+        "disposition": "No executable/helper/dependent-skill transfer; existing registered project toolchain remains authoritative."
+      },
+      "targets": [
+        "skills/domain-frontend/SKILL.md"
+      ],
+      "applicability": {
+        "actions": [
+          "ai-plan",
+          "ai-analyze",
+          "ai-implement",
+          "ai-review"
+        ],
+        "positive": "Frontend domain within node action/scope; visual choice only if new/redesigned surface",
+        "negative": "No redesign for a scoped bugfix; not backend/mobile-only"
+      },
+      "adaptationChanges": [
+        "Preserve project visual direction, content hierarchy and clear action/result copy",
+        "Remove blanket aesthetics, automatic notes and additional design approval lifecycle"
+      ]
+    },
+    {
+      "id": "webapp-testing",
+      "repository": "https://github.com/anthropics/skills",
+      "commit": "dbd4588f9e1033efb41dad4bef2f7947c8993d44",
+      "catalogueUrl": "https://skills.sh/anthropics/skills/webapp-testing",
+      "status": "adapted",
+      "sources": [
+        {
+          "path": "skills/webapp-testing/SKILL.md",
+          "url": "https://raw.githubusercontent.com/anthropics/skills/dbd4588f9e1033efb41dad4bef2f7947c8993d44/skills/webapp-testing/SKILL.md",
+          "sha256": "51b7349e77ec63b7744a6f63647e7566a0b4d2e301121cc10e8c2113af6556a2",
+          "bytes": 3913
+        },
+        {
+          "path": "skills/webapp-testing/examples/console_logging.py",
+          "url": "https://raw.githubusercontent.com/anthropics/skills/dbd4588f9e1033efb41dad4bef2f7947c8993d44/skills/webapp-testing/examples/console_logging.py",
+          "sha256": "ea46877289acb82da7e7ce59d0bc37c8977cd57e2a006d0c88d7a1c625bf95da",
+          "bytes": 1027
+        },
+        {
+          "path": "skills/webapp-testing/examples/element_discovery.py",
+          "url": "https://raw.githubusercontent.com/anthropics/skills/dbd4588f9e1033efb41dad4bef2f7947c8993d44/skills/webapp-testing/examples/element_discovery.py",
+          "sha256": "d63c89604a22f8845d724e95dda45db49b1bf57c25ce0a83afbb7b8da3d402f0",
+          "bytes": 1463
+        },
+        {
+          "path": "skills/webapp-testing/examples/static_html_automation.py",
+          "url": "https://raw.githubusercontent.com/anthropics/skills/dbd4588f9e1033efb41dad4bef2f7947c8993d44/skills/webapp-testing/examples/static_html_automation.py",
+          "sha256": "9d533aafb875ee3ab8b8ebf8f5b9003ac8d999da3d09b285cce252e623140064",
+          "bytes": 953
+        },
+        {
+          "path": "skills/webapp-testing/scripts/with_server.py",
+          "url": "https://raw.githubusercontent.com/anthropics/skills/dbd4588f9e1033efb41dad4bef2f7947c8993d44/skills/webapp-testing/scripts/with_server.py",
+          "sha256": "b0dcf4918935b795f4eda9821579b9902119235ff4447f687a30286e7d0925fd",
+          "bytes": 3693
+        }
+      ],
+      "license": {
+        "spdx": "Apache-2.0",
+        "path": "skills/webapp-testing/LICENSE.txt",
+        "url": "https://raw.githubusercontent.com/anthropics/skills/dbd4588f9e1033efb41dad4bef2f7947c8993d44/skills/webapp-testing/LICENSE.txt",
+        "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362",
+        "bundledPath": "skills/licenses/anthropics-webapp-testing-Apache-2.0.txt"
+      },
+      "noticeReview": {
+        "skillSpecificNoticeFound": false,
+        "importedThirdPartyScriptsOrAssets": false
+      },
+      "dependencies": {
+        "importedExecutables": [],
+        "addedPackages": [],
+        "runtimeNetworkFetch": false,
+        "upstreamToolsOrSkills": [
+          "Python",
+          "Playwright Python bindings",
+          "shell subprocess server commands",
+          "with_server.py"
+        ],
+        "disposition": "No executable/helper/dependent-skill transfer; existing registered project toolchain remains authoritative."
+      },
+      "targets": [
+        "skills/testing/SKILL.md"
+      ],
+      "applicability": {
+        "actions": [
+          "ai-implement",
+          "ai-review"
+        ],
+        "positive": "Propose applicable browser scenario when registered verifier/contract permits",
+        "negative": "No browser launch or server lifecycle in read-only AI action; unit checks do not prove browser behavior"
+      },
+      "adaptationChanges": [
+        "Rendered-state inspection then real interaction/assertion retained",
+        "Remove Python dependency, black-box script execution, unconditional networkidle and arbitrary sleeps",
+        "Official Playwright docs support condition/locator readiness; no upstream code transferred"
+      ]
+    },
+    {
+      "id": "context-map",
+      "repository": "https://github.com/github/awesome-copilot",
+      "commit": "82701c24b99488536ca399ff4789a458b7a05db7",
+      "catalogueUrl": "https://skills.sh/github/awesome-copilot/context-map",
+      "status": "adapted",
+      "sources": [
+        {
+          "path": "skills/context-map/SKILL.md",
+          "url": "https://raw.githubusercontent.com/github/awesome-copilot/82701c24b99488536ca399ff4789a458b7a05db7/skills/context-map/SKILL.md",
+          "sha256": "af0037b06a0b56a5014e16a32538ac419725638659428b7e229ed5bbb9087a37",
+          "bytes": 1146
+        }
+      ],
+      "license": {
+        "spdx": "MIT",
+        "path": "LICENSE",
+        "url": "https://raw.githubusercontent.com/github/awesome-copilot/82701c24b99488536ca399ff4789a458b7a05db7/LICENSE",
+        "sha256": "e32449d23085399adc1222f7a17408b730550258e51627c153cb108ca9955823",
+        "bundledPath": "skills/licenses/github-awesome-copilot-MIT.txt"
+      },
+      "noticeReview": {
+        "skillSpecificNoticeFound": false,
+        "importedThirdPartyScriptsOrAssets": false
+      },
+      "dependencies": {
+        "importedExecutables": [],
+        "addedPackages": [],
+        "runtimeNetworkFetch": false,
+        "upstreamToolsOrSkills": [],
+        "disposition": "No executable/helper/dependent-skill transfer; existing registered project toolchain remains authoritative."
+      },
+      "targets": [
+        "skills/project-context/SKILL.md"
+      ],
+      "applicability": {
+        "actions": [
+          "ai-plan",
+          "ai-analyze",
+          "ai-implement",
+          "ai-review"
+        ],
+        "positive": "Bounded task requirements, callers, consumers, tests, local patterns",
+        "negative": "No whole-repository mandatory scan or new map approval gate"
+      },
+      "adaptationChanges": [
+        "Map task-relevant relationships in existing output fields; source-bound reuse",
+        "Remove fixed Markdown template and second approval step",
+        "Source policy/readPaths govern reads; gitignore status alone does not deny safe explicitly allowed and classified inputs"
+      ]
+    },
+    {
+      "id": "improve-codebase-architecture",
+      "repository": "https://github.com/mattpocock/skills",
+      "commit": "49dd158d1076134a641b33efb035946536778336",
+      "catalogueUrl": "https://skills.sh/mattpocock/skills/improve-codebase-architecture",
+      "status": "adapted",
+      "sources": [
+        {
+          "path": "skills/engineering/improve-codebase-architecture/HTML-REPORT.md",
+          "url": "https://raw.githubusercontent.com/mattpocock/skills/49dd158d1076134a641b33efb035946536778336/skills/engineering/improve-codebase-architecture/HTML-REPORT.md",
+          "sha256": "581e8bb5a521e46bbda8ca7e19b15948bed882187108092ebb90c62513b77528",
+          "bytes": 6641
+        },
+        {
+          "path": "skills/engineering/improve-codebase-architecture/SKILL.md",
+          "url": "https://raw.githubusercontent.com/mattpocock/skills/49dd158d1076134a641b33efb035946536778336/skills/engineering/improve-codebase-architecture/SKILL.md",
+          "sha256": "552240a5ab5cec6b67c15dd1ad6e9f6962b1bca6ce870059a8c2713760c20392",
+          "bytes": 6000
+        }
+      ],
+      "license": {
+        "spdx": "MIT",
+        "path": "LICENSE",
+        "url": "https://raw.githubusercontent.com/mattpocock/skills/49dd158d1076134a641b33efb035946536778336/LICENSE",
+        "sha256": "0e7ac423bf2c6e223b7c5b156f8cf72da49d748e56a1641402c31f22ad07dbb5",
+        "bundledPath": "skills/licenses/mattpocock-skills-MIT.txt"
+      },
+      "noticeReview": {
+        "skillSpecificNoticeFound": false,
+        "importedThirdPartyScriptsOrAssets": false
+      },
+      "dependencies": {
+        "importedExecutables": [],
+        "addedPackages": [],
+        "runtimeNetworkFetch": false,
+        "upstreamToolsOrSkills": [
+          "codebase-design",
+          "grilling",
+          "domain-modeling",
+          "native subagents",
+          "Tailwind CDN",
+          "Mermaid CDN",
+          "OS file opener",
+          "glossary/ADR writes"
+        ],
+        "disposition": "No executable/helper/dependent-skill transfer; existing registered project toolchain remains authoritative."
+      },
+      "targets": [
+        "skills/clean-implementation/SKILL.md"
+      ],
+      "applicability": {
+        "actions": [
+          "ai-implement"
+        ],
+        "positive": "Touched mixed-responsibility module with concrete friction",
+        "negative": "No broad architecture scan, redesign or documentation-only refactor"
+      },
+      "adaptationChanges": [
+        "Evaluate interface/coupling and actual caller test surface; one state owner",
+        "Remove dependent skills, mandatory subagents, CDN HTML, auto glossary/ADR writes and interview lifecycle"
+      ]
+    },
+    {
+      "id": "teach",
+      "repository": "https://github.com/mattpocock/skills",
+      "commit": "49dd158d1076134a641b33efb035946536778336",
+      "catalogueUrl": "https://skills.sh/mattpocock/skills/teach",
+      "status": "adapted",
+      "sources": [
+        {
+          "path": "skills/productivity/teach/GLOSSARY-FORMAT.md",
+          "url": "https://raw.githubusercontent.com/mattpocock/skills/49dd158d1076134a641b33efb035946536778336/skills/productivity/teach/GLOSSARY-FORMAT.md",
+          "sha256": "9b99859ec28437668130d8f2ce5a342938970f8a1ed4fd38c3eab4f4b5fff210",
+          "bytes": 2122
+        },
+        {
+          "path": "skills/productivity/teach/LEARNING-RECORD-FORMAT.md",
+          "url": "https://raw.githubusercontent.com/mattpocock/skills/49dd158d1076134a641b33efb035946536778336/skills/productivity/teach/LEARNING-RECORD-FORMAT.md",
+          "sha256": "701fa34b6748aa89e6c960ffb815257f481a7d77fb2900f9028f7edf3fdd6052",
+          "bytes": 2747
+        },
+        {
+          "path": "skills/productivity/teach/MISSION-FORMAT.md",
+          "url": "https://raw.githubusercontent.com/mattpocock/skills/49dd158d1076134a641b33efb035946536778336/skills/productivity/teach/MISSION-FORMAT.md",
+          "sha256": "8cacbb3c0644d3ae0ea4965564797099401a6930a23f7cf462918576587f2418",
+          "bytes": 1540
+        },
+        {
+          "path": "skills/productivity/teach/RESOURCES-FORMAT.md",
+          "url": "https://raw.githubusercontent.com/mattpocock/skills/49dd158d1076134a641b33efb035946536778336/skills/productivity/teach/RESOURCES-FORMAT.md",
+          "sha256": "e9cacf34026e11a8d1c8f9de88abe5bcbf654f4ebdb25cae8c0de0d5f48f44ec",
+          "bytes": 1924
+        },
+        {
+          "path": "skills/productivity/teach/SKILL.md",
+          "url": "https://raw.githubusercontent.com/mattpocock/skills/49dd158d1076134a641b33efb035946536778336/skills/productivity/teach/SKILL.md",
+          "sha256": "550482c2d674b085c9043b87bfdc14a8f2ec453c736119e7fcbb1e9332bffeba",
+          "bytes": 9733
+        }
+      ],
+      "license": {
+        "spdx": "MIT",
+        "path": "LICENSE",
+        "url": "https://raw.githubusercontent.com/mattpocock/skills/49dd158d1076134a641b33efb035946536778336/LICENSE",
+        "sha256": "0e7ac423bf2c6e223b7c5b156f8cf72da49d748e56a1641402c31f22ad07dbb5",
+        "bundledPath": "skills/licenses/mattpocock-skills-MIT.txt"
+      },
+      "noticeReview": {
+        "skillSpecificNoticeFound": false,
+        "importedThirdPartyScriptsOrAssets": false
+      },
+      "dependencies": {
+        "importedExecutables": [],
+        "addedPackages": [],
+        "runtimeNetworkFetch": false,
+        "upstreamToolsOrSkills": [
+          "HTML/CSS lesson assets",
+          "teaching workspace records",
+          "external research/community discovery",
+          "OS file opener"
+        ],
+        "disposition": "No executable/helper/dependent-skill transfer; existing registered project toolchain remains authoritative."
+      },
+      "targets": [
+        "skills/implementation-lesson/SKILL.md"
+      ],
+      "applicability": {
+        "actions": [
+          "lesson",
+          "question"
+        ],
+        "positive": "Saved real-code material, exact sources and optional reasoning",
+        "negative": "No external research, runtime observation extractor, course store or mastery claim"
+      },
+      "adaptationChanges": [
+        "Use own-code goal, retrieval/feedback questions and exposure-versus-learning distinction",
+        "Preserve current schema/limits, exact quotes, source hashes and data origins",
+        "Remove HTML/course files, mission interview, auto-memory, community work and reminder lifecycle"
+      ]
+    },
+    {
+      "id": "typescript-advanced-types",
+      "repository": "https://github.com/wshobson/agents",
+      "commit": "46891e7e60da0e52baf1050b7b6391b64e84c6d9",
+      "catalogueUrl": "https://skills.sh/wshobson/agents/typescript-advanced-types",
+      "status": "adapted",
+      "sources": [
+        {
+          "path": "plugins/javascript-typescript/skills/typescript-advanced-types/SKILL.md",
+          "url": "https://raw.githubusercontent.com/wshobson/agents/46891e7e60da0e52baf1050b7b6391b64e84c6d9/plugins/javascript-typescript/skills/typescript-advanced-types/SKILL.md",
+          "sha256": "c32101c65134d94ef1a3305ef486020b57be6408f97ed952c9c560e3fe04188d",
+          "bytes": 8035
+        },
+        {
+          "path": "plugins/javascript-typescript/skills/typescript-advanced-types/references/details.md",
+          "url": "https://raw.githubusercontent.com/wshobson/agents/46891e7e60da0e52baf1050b7b6391b64e84c6d9/plugins/javascript-typescript/skills/typescript-advanced-types/references/details.md",
+          "sha256": "036a1dd41283384f086ac0eeb4f63c899b042ad68815a8ce00afebf606b55c44",
+          "bytes": 9027
+        }
+      ],
+      "license": {
+        "spdx": "MIT",
+        "path": "LICENSE",
+        "url": "https://raw.githubusercontent.com/wshobson/agents/46891e7e60da0e52baf1050b7b6391b64e84c6d9/LICENSE",
+        "sha256": "8ceaab71b527eb5db43810b74afc618ee36556197d2d51c45fd00aac483988c1",
+        "bundledPath": "skills/licenses/wshobson-agents-MIT.txt"
+      },
+      "noticeReview": {
+        "skillSpecificNoticeFound": false,
+        "importedThirdPartyScriptsOrAssets": false
+      },
+      "dependencies": {
+        "importedExecutables": [],
+        "addedPackages": [],
+        "runtimeNetworkFetch": false,
+        "upstreamToolsOrSkills": [
+          "TypeScript compiler for applicable project; no executable helper"
+        ],
+        "disposition": "No executable/helper/dependent-skill transfer; existing registered project toolchain remains authoritative."
+      },
+      "targets": [
+        "skills/clean-implementation/SKILL.md",
+        "skills/code-review/SKILL.md"
+      ],
+      "applicability": {
+        "actions": [
+          "ai-implement",
+          "ai-review"
+        ],
+        "positive": "Only changed TS type/runtime boundary; inline supplement in existing methods",
+        "negative": "Skip docs/styles/other-language work; no unconditional advanced generics"
+      },
+      "adaptationChanges": [
+        "Keep unknown/narrowing, simple types, explicit optional values and discriminated states",
+        "Official TypeScript docs verify exhaustiveness/runtime distinction",
+        "Remove tutorial/examples, blanket strict config changes, type-only proof and skipping production checks"
+      ]
+    },
+    {
+      "id": "web-interface-guidelines",
+      "repository": "https://github.com/vercel-labs/web-interface-guidelines",
+      "commit": "434b7f91364665f2f733b310ec54809bf8f37937",
+      "catalogueUrl": null,
+      "status": "adapted",
+      "sources": [
+        {
+          "path": "command.md",
+          "url": "https://raw.githubusercontent.com/vercel-labs/web-interface-guidelines/434b7f91364665f2f733b310ec54809bf8f37937/command.md",
+          "sha256": "d246b026f4f29b5823a9cc857f9edf3d2507002e055e32040cadeaf3b38e0234",
+          "bytes": 8055
+        }
+      ],
+      "license": {
+        "spdx": "MIT",
+        "path": "LICENSE",
+        "url": "https://raw.githubusercontent.com/vercel-labs/web-interface-guidelines/434b7f91364665f2f733b310ec54809bf8f37937/LICENSE",
+        "sha256": "6cd1609c9c12233507cdd2ce0d32e9a721e3c27494951be06b90090deeeb7af2",
+        "bundledPath": "skills/licenses/vercel-web-interface-guidelines-MIT.txt"
+      },
+      "noticeReview": {
+        "skillSpecificNoticeFound": false,
+        "importedThirdPartyScriptsOrAssets": false
+      },
+      "dependencies": {
+        "importedExecutables": [],
+        "addedPackages": [],
+        "runtimeNetworkFetch": false,
+        "upstreamToolsOrSkills": [],
+        "disposition": "No executable/helper/dependent-skill transfer; existing registered project toolchain remains authoritative."
+      },
+      "targets": [
+        "skills/domain-frontend/SKILL.md"
+      ],
+      "applicability": {
+        "actions": [
+          "ai-plan",
+          "ai-analyze",
+          "ai-implement",
+          "ai-review"
+        ],
+        "positive": "Relevant web interactions, focus/forms/motion/layout",
+        "negative": "Not blanket typography conventions or optimization thresholds"
+      },
+      "adaptationChanges": [
+        "Keep semantic controls, focus, labels, motion alternatives, long-content handling",
+        "Drop universal word/typography choices, mandatory URL state sync, >50 list threshold and unsolicited dependencies"
+      ],
+      "discovery": "Direct upstream public guidance; exact skills.sh listing not found by Exa. Not represented as an installed catalogue skill."
+    }
+  ],
+  "notImported": [
+    {
+      "repository": "https://github.com/vercel-labs/agent-skills",
+      "commit": "063bee94c3f4df8453406c830b0a7df0f2860278",
+      "status": "not-imported-license-unverified",
+      "artifacts": [
+        {
+          "path": "skills/composition-patterns/SKILL.md",
+          "url": "https://raw.githubusercontent.com/vercel-labs/agent-skills/063bee94c3f4df8453406c830b0a7df0f2860278/skills/composition-patterns/SKILL.md",
+          "sha256": "e38e0eaa609316b10423a9a138ed95e35099accd3f735585295c8a8f165c28a3",
+          "bytes": 2886
+        },
+        {
+          "path": "skills/react-best-practices/SKILL.md",
+          "url": "https://raw.githubusercontent.com/vercel-labs/agent-skills/063bee94c3f4df8453406c830b0a7df0f2860278/skills/react-best-practices/SKILL.md",
+          "sha256": "71ed7794962fa6e803ee83030517b5b93a9f70fbfeb431ec4535c5480a8d8355",
+          "bytes": 7251
+        }
+      ],
+      "reason": "Both SKILL.md entrypoints declare MIT; exact complete tree has no LICENSE/NOTICE artifact. Metadata alone is insufficient. Rule references were not transferred or adopted. Existing project-owned guidance retained.",
+      "dependenciesAdded": []
+    }
+  ],
+  "officialDocumentation": [
+    {
+      "tool": "Context7",
+      "libraryId": "/microsoft/typescript-website",
+      "topics": [
+        "unknown narrowing",
+        "discriminated unions and never exhaustiveness"
+      ],
+      "urls": [
+        "https://www.typescriptlang.org/docs/handbook/2/narrowing.html"
+      ]
+    },
+    {
+      "tool": "Context7",
+      "libraryId": "/microsoft/playwright",
+      "topics": [
+        "web-first locator assertions",
+        "readiness rather than unconditional networkidle"
+      ],
+      "urls": [
+        "https://playwright.dev/docs/best-practices#use-web-first-assertions"
+      ]
+    }
+  ],
+  "adaptedFiles": [
+    {
+      "path": "skills/clean-implementation/SKILL.md",
+      "sha256": "8db892a9da3205749cd837d2a437860e012c5367b525b8688896c3e9e2cad3d7",
+      "bytes": 2348
+    },
+    {
+      "path": "skills/code-review/SKILL.md",
+      "sha256": "0d794c945e18a504f9c5014b27f9d12580a4794a57570181fb436bcacfe0c151",
+      "bytes": 2924
+    },
+    {
+      "path": "skills/core-debugging/SKILL.md",
+      "sha256": "8cbefad931cd290c891a0b56e5493934a02e115e0f95c59cff365df52a23b579",
+      "bytes": 2392
+    },
+    {
+      "path": "skills/domain-frontend/SKILL.md",
+      "sha256": "b00bbd1b07f88c4097e715ef9a264a9e7b61f8642b98c5bcccb1a922cf5bf7b3",
+      "bytes": 2554
+    },
+    {
+      "path": "skills/implementation-lesson/SKILL.md",
+      "sha256": "2154a1a3f59b609569c986edf8203fb73f9cd3ae63b784b97a40671899a27b6e",
+      "bytes": 5209
+    },
+    {
+      "path": "skills/project-context/SKILL.md",
+      "sha256": "65358b2509d83fbcdfb075718c2de2eee511d8f633661740812d09f4b036a01a",
+      "bytes": 1916
+    },
+    {
+      "path": "skills/testing/SKILL.md",
+      "sha256": "becf207c2d6446eb726445694191c2e4445c26de0635bfa969859d5e68ef34a3",
+      "bytes": 2685
+    }
+  ],
+  "layers": {
+    "developmentTeam": "Use existing installed specialist skills when applicable; no global duplicates installed",
+    "shippedProduct": "Only adapted self-contained method text and license notices; no upstream tools/lifecycle"
+  }
+}

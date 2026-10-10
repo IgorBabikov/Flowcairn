@@ -1,0 +1,719 @@
+{
+  "schemaVersion": 1,
+  "visualRevision": "fantasy-v2",
+  "rootApprovedBasis": true,
+  "visualPreviewProofs": {
+    "analyst-work-nw.png": "3e205dd8e52e90360c6af89ee3924ad6a3bd631b1db6b60eceea85cefe46e26c",
+    "mentor-work-nw.png": "f35fa6f8f185399e3bd7f02e1e0b05f8cdb3fa11de7a6b6d26559dac7ac560f8",
+    "checker-idle-se.png": "40fc9b8dafe4fb4ae60f22559be9d634d0c4b469583f533cfe28da47e2b9da18",
+    "mage-idle-se.png": "8a7ad42a80e6842fcfb9c7d9214618becffb1319e51141b2a26056233b59164f",
+    "reviewer-idle-se.png": "ff6d5a898c9f819c9b03ac0df358f24b52f94e2b439f86eae526c6dde5197243",
+    "checker-work-nw.png": "0c65b8e51685e224c99b4f71148e8afd36132468867c1e89781b957bf8eb2d44",
+    "mage-work-nw.png": "7cb6782891924f8c1f4250ac41182d89ac7cb95681136e86cc11745980bf34fe",
+    "reviewer-work-nw.png": "513e399fbaf1255a03c09600574449ffcc0302aa885073f428a0deb2b8455912",
+    "fantasy-cast-contact-sheet.png": "d9b79305d43075795ea983edc0c7b389e75607ddeac1510e1cfa4fff8995f0ef",
+    "fantasy-guild-room-preview.png": "1e9b7fd2cce03d29bbc971bcef45d5cecd288744fc183d3d4f2d317defab712b",
+    "analyst-idle-se.png": "83f3b55a7ca3ac4f45cbac00de59d7c2479241da9841e9acd03f4099346e8125",
+    "mentor-idle-se.png": "ad7fc6ed9bbc90dbf19caaa638a0c9d1ad358c309cc5dfeee78c94c10d393612"
+  },
+  "geometryProofs": {
+    "checks.json": "0645886dc92e10e218b77a57f092a20556cbaa69f9c8914c3c0d73072959f622",
+    "walk-clearance-sheet.png": "73c714c355526bb94365dbbc7b2c8b419fc8fab89456751bc00069b47efef586",
+    "light-clearance-sheet.png": "38d5cca7c138bda1d64637b698df7d52359ca65a89d582ac13a02295605d78e0",
+    "dark-clearance-sheet.png": "c2224225eaddce954da1877ab15ef66b498c759560f80f7ef814c7ef001e50de"
+  },
+  "license": "CC0-1.0",
+  "author": "Quaternius",
+  "sources": [
+    {
+      "pack": "medieval-village-megakit",
+      "edition": "Standard",
+      "filename": "Medieval Village MegaKit[Standard].zip",
+      "uploadId": "12563480",
+      "source": "https://quaternius.com/packs/medievalvillagemegakit.html",
+      "downloadPage": "https://quaternius.itch.io/medieval-village-megakit",
+      "sha256": "e60dea67c10f30dccccfbff92a7933f5ea5cfe99be0e2a0fa5118cceabeec5c4",
+      "bytes": 161003471,
+      "license": "CC0-1.0",
+      "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "version": "No semantic version published; exact upload ID and SHA256 identify snapshot"
+    },
+    {
+      "pack": "modular-character-outfits-fantasy",
+      "edition": "Standard",
+      "filename": "Modular Character Outfits - Fantasy[Standard].zip",
+      "uploadId": "16289385",
+      "source": "https://quaternius.com/packs/modularcharacteroutfitsfantasy.html",
+      "downloadPage": "https://quaternius.itch.io/modular-character-outfits-fantasy",
+      "sha256": "c3468b18871cc8c8f05ab14df7712baf22cb9f389cbd870babf130e595187f70",
+      "bytes": 294347394,
+      "license": "CC0-1.0",
+      "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "version": "No semantic version published; exact upload ID and SHA256 identify snapshot"
+    },
+    {
+      "pack": "universal-animation-library",
+      "edition": "Standard",
+      "filename": "Universal Animation Library[Standard].zip",
+      "uploadId": "17958403",
+      "source": "https://quaternius.com/packs/universalanimationlibrary.html",
+      "downloadPage": "https://quaternius.itch.io/universal-animation-library",
+      "sha256": "cc73fc4e495b82958207316596317a3f40b9fa38065bde1027937452da537724",
+      "bytes": 15904933,
+      "license": "CC0-1.0",
+      "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "version": "No semantic version published; exact upload ID and SHA256 identify snapshot"
+    },
+    {
+      "pack": "universal-base-characters",
+      "edition": "Standard",
+      "filename": "Universal Base Characters[Standard].zip",
+      "uploadId": "15861669",
+      "source": "https://quaternius.com/packs/universalbasecharacters.html",
+      "downloadPage": "https://quaternius.itch.io/universal-base-characters",
+      "sha256": "fdbf1804c90dfc1ea03e992bff7da2dfd1a79318e13270a660180f9308455f40",
+      "bytes": 128968391,
+      "license": "CC0-1.0",
+      "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "version": "No semantic version published; exact upload ID and SHA256 identify snapshot"
+    }
+  ],
+  "licenses": [
+    {
+      "path": "medieval-village-megakit-standard/Medieval Village MegaKit[Standard]/License_Standard.txt",
+      "sha256": "ec6fd5004514cb0515a7dc1065f474644d31698861597b32e1745945ffec71de",
+      "text": "This is the standard FREE version of the Medieval Village MegaKit, which only contains \na portion of the models . You can buy the PRO version which has all the models,\nor the SOURCE version which has all the models and also includes Unity(URP), Unreal Engine and Godot projects\nwith custom shaders already set up.\n\nYou can get the other versions from the website https://quaternius.com\n\n-------------------------------------------------------\nLicense:\nCC0 1.0 Universal (CC0 1.0) \nPublic Domain Dedication\nhttps://creativecommons.org/publicdomain/zero/1.0/\n\n------------------------------------------------------\nModels by @Quaternius\nConsider supporting me on Patreon!\n\nhttps://www.patreon.com/quaternius\n\n-------------------------------------------------------\nJoin the Discord Server:\nhttps://discord.gg/vJqnRUYRfT\n"
+    },
+    {
+      "path": "modular-character-outfits-fantasy-standard/Modular Character Outfits - Fantasy[Standard]/License_Standard.txt",
+      "sha256": "2202cc2f608c4210790b112e5f121bc2e7f8dced7b5b1c7f4be6203461bdebbb",
+      "text": "This is the standard FREE version of the the Modular Character Outfits - Fantasy, which only contains \na portion of the models. Get all remaining outfits and separate parts by buying the Source version. \n\nYou can get the other versions from the website https://quaternius.com\n\n-------------------------------------------------------\nLicense:\nCC0 1.0 Universal (CC0 1.0) \nPublic Domain Dedication\nhttps://creativecommons.org/publicdomain/zero/1.0/\n\n------------------------------------------------------\nModels by @Quaternius\nConsider supporting me on Patreon!\n\nhttps://www.patreon.com/quaternius\n\n-------------------------------------------------------\nJoin the Discord Server:\nhttps://discord.gg/vJqnRUYRfT\n"
+    },
+    {
+      "path": "universal-animation-library-standard/Universal Animation Library[Standard]/License.txt",
+      "sha256": "6d01f55c6e4c49a2c9963e147e561945ae2c83958c8ca667d90a6bffdbfac061",
+      "text": "-------------------------------------------------------\nLicense:\nCC0 1.0 Universal (CC0 1.0) \nPublic Domain Dedication\nhttps://creativecommons.org/publicdomain/zero/1.0/\n\n------------------------------------------------------\nModels by @Quaternius\nConsider supporting me on Patreon!\n\nhttps://www.patreon.com/quaternius\n\n"
+    },
+    {
+      "path": "universal-base-characters-standard/Universal Base Characters[Standard]/License_Standard.txt",
+      "sha256": "0f4beaf0fe360a7732e58bbe3dbf60a2422367fbea60cb9ea4add968f383268e",
+      "text": "This is the standard FREE version of the Universal Base Characters Kit, which only contains \na portion of the models . You can buy the SOURCE version which has all the models with rigged .blends,\nand Unity(URP), Unreal Engine and Godot projects\nwith custom shaders already set up.\n\nYou can get the other version from the website https://quaternius.com\n\n-------------------------------------------------------\nLicense:\nCC0 1.0 Universal (CC0 1.0) \nPublic Domain Dedication\nhttps://creativecommons.org/publicdomain/zero/1.0/\n\n------------------------------------------------------\nModels by @Quaternius\nConsider supporting me on Patreon!\n\nhttps://www.patreon.com/quaternius\n\n-------------------------------------------------------\nJoin the Discord Server:\nhttps://discord.gg/vJqnRUYRfT\n"
+    }
+  ],
+  "inputs": {
+    "modular-character-outfits-fantasy-standard/Modular Character Outfits - Fantasy[Standard]/Exports/glTF (Godot-Unreal)/Outfits/Female_Peasant.gltf": {
+      "sha256": "43ba98058b933cae9acbde0f3ef8c3dda4ba9f69f338606f9d87666d9efffb31"
+    },
+    "modular-character-outfits-fantasy-standard/Modular Character Outfits - Fantasy[Standard]/Exports/glTF (Godot-Unreal)/Outfits/Female_Peasant.bin": {
+      "sha256": "40eccaa2bd545c893142ef7dca0866ea8f20df3a86c67c5615024bc4fe546e83"
+    },
+    "modular-character-outfits-fantasy-standard/Modular Character Outfits - Fantasy[Standard]/Exports/glTF (Godot-Unreal)/Outfits/T_Peasant_Normal.png": {
+      "sha256": "7598fa7b63e46fd4dac29708bf5a81e05eb9a67280f7b13c61e28a9110eeb679"
+    },
+    "modular-character-outfits-fantasy-standard/Modular Character Outfits - Fantasy[Standard]/Exports/glTF (Godot-Unreal)/Outfits/T_Peasant_BaseColor.png": {
+      "sha256": "a43635628d95571cd62fd4db0cc3a6ea32778b2bc02f242dda224c89d07f1ade"
+    },
+    "modular-character-outfits-fantasy-standard/Modular Character Outfits - Fantasy[Standard]/Exports/glTF (Godot-Unreal)/Outfits/T_Peasant_ORM.png": {
+      "sha256": "e1932f5f91104afca89c501416a5fec09069b8552734237fc09045fabc4ca9b4"
+    },
+    "universal-base-characters-standard/Universal Base Characters[Standard]/Base Characters/Godot - UE/Superhero_Female_FullBody.gltf": {
+      "sha256": "adedf28000a0716f689b009a70314506fc62f827498f77ba852acb5610f3f3f4"
+    },
+    "universal-base-characters-standard/Universal Base Characters[Standard]/Base Characters/Godot - UE/Superhero_Female_FullBody.bin": {
+      "sha256": "3a8220a485b33d05d879115a50697728b45a151781106033afb8b8c243fca208"
+    },
+    "universal-base-characters-standard/Universal Base Characters[Standard]/Base Characters/Godot - UE/T_Hair_2_Normal.png": {
+      "sha256": "172f230aae0d4366c3cfc0402b2e6d1811b11f8487344bff28605eeacac1558d"
+    },
+    "universal-base-characters-standard/Universal Base Characters[Standard]/Base Characters/Godot - UE/T_Hair_2_BaseColor.png": {
+      "sha256": "f9f4f2fb3eeeefb0b6f0fdef38b0770fd6607640c1c680b8139dd76697e9f9b3"
+    },
+    "universal-base-characters-standard/Universal Base Characters[Standard]/Base Characters/Godot - UE/T_Eye_Normal_png.png": {
+      "missing": true,
+      "usedForFinalMaterial": false
+    },
+    "universal-base-characters-standard/Universal Base Characters[Standard]/Base Characters/Godot - UE/T_Eye_Brown.png": {
+      "sha256": "d08e3356a83211bc6ca21fe3a8e39f4b5c1a3b8f85457fc2c0fb57be09935025"
+    },
+    "universal-base-characters-standard/Universal Base Characters[Standard]/Base Characters/Godot - UE/T_Superhero_Female_Normal.png": {
+      "sha256": "cf922460b43ccd31e983e34db05514c9d451dd2f9cdd01a843978e797719f859"
+    },
+    "universal-base-characters-standard/Universal Base Characters[Standard]/Base Characters/Godot - UE/T_Superhero_Female_Dark_BaseColor.png": {
+      "sha256": "d366843ee7d9e9f37ec87a0e1c98c7f2e45573c08eeb80a51a6d9344e68cf288"
+    },
+    "universal-base-characters-standard/Universal Base Characters[Standard]/Base Characters/Godot - UE/T_Superhero_Female_Roughness.png": {
+      "sha256": "d2beabf2bd0313e32c68dcdbb80dca371a6e994fabf96efa97128bf9f14fa57b"
+    },
+    "universal-animation-library-standard/Universal Animation Library[Standard]/Unreal-Godot/UAL1_Standard.glb": {
+      "sha256": "69591853d817488edaa8fd9bf8fc1d821eaeaf789f8627b3cd23b41c4ed67997"
+    },
+    "modular-character-outfits-fantasy-standard/Modular Character Outfits - Fantasy[Standard]/Exports/glTF (Godot-Unreal)/Outfits/Female_Ranger.gltf": {
+      "sha256": "9b98b2ae6af3b4a1ec22bf8928b939e0751f08b25b636de82bfa7364fb34d3e1"
+    },
+    "modular-character-outfits-fantasy-standard/Modular Character Outfits - Fantasy[Standard]/Exports/glTF (Godot-Unreal)/Outfits/Female_Ranger.bin": {
+      "sha256": "d015964ba0a26eee9c9d2ea6f07aa660bba88aa536cf8bb6b67944b9e97c46df"
+    },
+    "modular-character-outfits-fantasy-standard/Modular Character Outfits - Fantasy[Standard]/Exports/glTF (Godot-Unreal)/Outfits/T_Ranger_Normal.png": {
+      "sha256": "dd64da2af3180f0c8f0b721cfc5f0d2720c351b97da8285c6cf49e7717c84147"
+    },
+    "modular-character-outfits-fantasy-standard/Modular Character Outfits - Fantasy[Standard]/Exports/glTF (Godot-Unreal)/Outfits/T_Ranger_BaseColor.png": {
+      "sha256": "846ef2170b04ee584ad83bb8a1e86dab57a9a43b1193204505912c274d949925"
+    },
+    "modular-character-outfits-fantasy-standard/Modular Character Outfits - Fantasy[Standard]/Exports/glTF (Godot-Unreal)/Outfits/T_Ranger_ORM.png": {
+      "sha256": "aca03d2fba12508ef07d5968ca22267fb207ea26ae898b6b2def8a296bd44f1c"
+    },
+    "modular-character-outfits-fantasy-standard/Modular Character Outfits - Fantasy[Standard]/Exports/glTF (Godot-Unreal)/Outfits/T_Regular_Female_Normal.png": {
+      "sha256": "e1051d3d56df9cf061bc14c769c37253aecd595f8275f9d4c0d6e0e953c00e18"
+    },
+    "modular-character-outfits-fantasy-standard/Modular Character Outfits - Fantasy[Standard]/Exports/glTF (Godot-Unreal)/Outfits/T_Regular_Female_Dark_BaseColor.png": {
+      "sha256": "3b6ab973f9f3d6f8961226a0dbd99cf6d1b72df3795a8a5c1620a55754c161c2"
+    },
+    "modular-character-outfits-fantasy-standard/Modular Character Outfits - Fantasy[Standard]/Exports/glTF (Godot-Unreal)/Outfits/T_Regular_Female_Roughness.png": {
+      "sha256": "da541fbd4b3bffe754fada5c29f8a0d8f836bf20ce7df8273607af4729a3a5ae"
+    },
+    "modular-character-outfits-fantasy-standard/Modular Character Outfits - Fantasy[Standard]/Exports/glTF (Godot-Unreal)/Outfits/Male_Ranger.gltf": {
+      "sha256": "e1033a212332d84d98c19bc4927c621635478d0aa15d13c79da68d3ba9e0196f"
+    },
+    "modular-character-outfits-fantasy-standard/Modular Character Outfits - Fantasy[Standard]/Exports/glTF (Godot-Unreal)/Outfits/Male_Ranger.bin": {
+      "sha256": "5bbb0d42cb324c6c27ce00417e68a876d92978f07d161f83590f0d7c0570eff6"
+    },
+    "modular-character-outfits-fantasy-standard/Modular Character Outfits - Fantasy[Standard]/Exports/glTF (Godot-Unreal)/Outfits/T_Regular_Male_Normal.png": {
+      "sha256": "10cd71e2453e577fdd43e912b6016a99baf64964f0593e524bdd304855e15e2a"
+    },
+    "modular-character-outfits-fantasy-standard/Modular Character Outfits - Fantasy[Standard]/Exports/glTF (Godot-Unreal)/Outfits/T_Regular_Male_Dark_BaseColor.png": {
+      "sha256": "b4dcc0f4139aab548d7c070c4655bd2080ef16caeaaabee6c4aeb693c524e802"
+    },
+    "modular-character-outfits-fantasy-standard/Modular Character Outfits - Fantasy[Standard]/Exports/glTF (Godot-Unreal)/Outfits/T_Regular_Male_Roughness.png": {
+      "sha256": "086c2eb25bddfdb77d8e639ccbffb8df723ef4a1910d8e1b217e852f8668bfe5"
+    },
+    "universal-base-characters-standard/Universal Base Characters[Standard]/Base Characters/Godot - UE/Superhero_Male_FullBody.gltf": {
+      "sha256": "e7fcea214ecf8855afbf910b50de6f9c7d1decfb71ca28bad8a4481452dafeb4"
+    },
+    "universal-base-characters-standard/Universal Base Characters[Standard]/Base Characters/Godot - UE/Superhero_Male_FullBody.bin": {
+      "sha256": "459003f9745853ae562a85506a2b94dd56515c1f37728f9fa3d2ce1a3e4cd92f"
+    },
+    "universal-base-characters-standard/Universal Base Characters[Standard]/Base Characters/Godot - UE/T_Hair_1_Normal_png.png": {
+      "missing": true,
+      "usedForFinalMaterial": false
+    },
+    "universal-base-characters-standard/Universal Base Characters[Standard]/Base Characters/Godot - UE/T_Hair_1_BaseColor.png": {
+      "sha256": "bc7aa863bd22ab0a995cd838cceb4d3a5186ee54ee2fb0108fad85d20c057e6e"
+    },
+    "universal-base-characters-standard/Universal Base Characters[Standard]/Base Characters/Godot - UE/T_Superhero_Male_Normal.png": {
+      "sha256": "9b25cf9200216eb754b79cf4c63b5380c419780788322f3c57cdd2b3e02679a6"
+    },
+    "universal-base-characters-standard/Universal Base Characters[Standard]/Base Characters/Godot - UE/T_Superhero_Male_Dark.png": {
+      "sha256": "df680cbc1967a61e85998bfafb8f7bc0a36dd604bb3266486c4b06b1a184bb45"
+    },
+    "universal-base-characters-standard/Universal Base Characters[Standard]/Base Characters/Godot - UE/T_Superhero_Male_Roughness.png": {
+      "sha256": "c70dabf48574cda55644d556beae1ee7cf1bdcf68a50d259d20f2f2358f27991"
+    },
+    "modular-character-outfits-fantasy-standard/Modular Character Outfits - Fantasy[Standard]/Exports/glTF (Godot-Unreal)/Outfits/Male_Peasant.gltf": {
+      "sha256": "8f5a6cf6c1cf96e0a0f8e1a861b4245d42b7f88d44e5076da3d48f3fc52f4e76"
+    },
+    "modular-character-outfits-fantasy-standard/Modular Character Outfits - Fantasy[Standard]/Exports/glTF (Godot-Unreal)/Outfits/Male_Peasant.bin": {
+      "sha256": "e46bde795f7b69b351d322d7a5628e07131cfb48ed0afe366293f1b3f530433c"
+    },
+    "medieval-village-megakit-standard/Medieval Village MegaKit[Standard]/glTF/Floor_WoodDark.gltf": {
+      "sha256": "2ee57724a06289164fee75ad62eb770f7f8cc9cb1b51c041da477c086775cd8d"
+    },
+    "medieval-village-megakit-standard/Medieval Village MegaKit[Standard]/glTF/Floor_WoodDark.bin": {
+      "sha256": "cb43341c0969b62d82c11e2759caec854ea97ecba3bcb505d3300d57ebba7b81"
+    },
+    "medieval-village-megakit-standard/Medieval Village MegaKit[Standard]/glTF/T_WoodTrim_Normal.png": {
+      "sha256": "5847623e4ed6c206e59f32d1718ee75dcb2b49a1d55ede7ef70a254739caf4a8"
+    },
+    "medieval-village-megakit-standard/Medieval Village MegaKit[Standard]/glTF/T_WoodTrim_BaseColor.png": {
+      "sha256": "a59f410b07a9bc5f0664df3ba7a2c1e37acffc7979795911f3fc8730ab60e33e"
+    },
+    "medieval-village-megakit-standard/Medieval Village MegaKit[Standard]/glTF/T_WoodTrim_Roughness.png": {
+      "sha256": "e888464fd4199d458d8cf39e00fa07d56f8a0bcb658aa03b4a7c95d466ceefa3"
+    },
+    "medieval-village-megakit-standard/Medieval Village MegaKit[Standard]/glTF/Wall_Plaster_Straight.gltf": {
+      "sha256": "3bef920cbba4d124df4ca401439d893e0569f88f56049239e3480a04008fd0ac"
+    },
+    "medieval-village-megakit-standard/Medieval Village MegaKit[Standard]/glTF/Wall_Plaster_Straight.bin": {
+      "sha256": "986bf171c62e9019eea9aab709d19d07a3bd5021ff76ab749f57563f364858f3"
+    },
+    "medieval-village-megakit-standard/Medieval Village MegaKit[Standard]/glTF/T_Plaster_Normal.png": {
+      "sha256": "8b9617b561466cce00d5a0628eae7bef208dcf63445d72570e7f8e5057fed0d4"
+    },
+    "medieval-village-megakit-standard/Medieval Village MegaKit[Standard]/glTF/T_Plaster_BaseColor.png": {
+      "sha256": "98547ca83888307e3ffa96384ce058b7622affe0a42add3b36d0b48618c5eda4"
+    },
+    "medieval-village-megakit-standard/Medieval Village MegaKit[Standard]/glTF/T_Plaster_ORM.png": {
+      "sha256": "7be9d64a6154ba12bb7086e1d6774a7d5bbbc95775efb614f6ff40a4787fe0c7"
+    },
+    "medieval-village-megakit-standard/Medieval Village MegaKit[Standard]/glTF/Prop_Crate.gltf": {
+      "sha256": "fb1d2ae668cc2761f9177110424e0c5c80a6698ef44f9cac642cb4a766d37883"
+    },
+    "medieval-village-megakit-standard/Medieval Village MegaKit[Standard]/glTF/Prop_Crate.bin": {
+      "sha256": "b7dbddf64868c84abd62515caac55ac1a9cd70d897d9bf8a6b9b7191210365c4"
+    }
+  },
+  "originalAuthoring": {
+    "assemblies": "Original fantasy cartographer layered robe/cowl/mantle/scrolls; ranger cowl/cloak/quiver; guardian cuirass/pauldrons/surcoat/helm/shield; sage floor-length robes/cowl/stole/rune staff/grimoire; approved unchanged mage conical hat. Original room props and stable-foot work/handoff IK gestures over static Idle_Loop base pose",
+    "license": "MIT (Flowcairn original additions); CC0-1.0 (Quaternius models and animation)",
+    "workClipClaim": false,
+    "handoffClipClaim": false
+  },
+  "renderer": {
+    "blender": "5.1.2",
+    "engine": "Cycles CPU",
+    "samples": 24,
+    "roomSamples": 48,
+    "fps": 12,
+    "transparent": true,
+    "rootMotion": false
+  },
+  "tools": {
+    "cast.py": "bc4d1aaaef468445aa087df7364d6b2e2cbe8d48d0e407acc0dfecb6555b8ca7",
+    "render_cast.py": "e6e74d7d490fca9d27799549dc1dafe61b1a070bb72a319bf37ed561d53336ab",
+    "render_cast_room.py": "b76c023341176b463a2448b36c4843221b0a65296e4c13d3e6bebd2df2de0eec",
+    "pack_cast.py": "5d80ef3b829975cff39c3a2989b20daba376bd475deb207545a4b5a3bdd10c9e",
+    "blender_common.py": "dcefec7dc54446e55167b343fc53657796f96fc010aa8373560c59192ff461d6",
+    "hero.py": "b3edfd488ba64a5bf648d92f1ec8413a8ef87fbe71c054d045dbbfe842254680",
+    "render_guild.py": "6ecccff3e28e17d09784c1189e2dfb83ad400d8f90c839279aea0d527f0320fe",
+    "check_cast.py": "e300ba76a8c728c79f6e10e11db1f0ce1af80e8bdd0a3d5429e85b4db038b1ae",
+    "render_room_reference.py": "4fac761b41f056edf21b587742d3ea0d2c36dca3a8599d23798db309f74fa5f5",
+    "fantasy_cast.py": "592553e1a7dacd1c34bb08e55cedb4f76f38abae627f80215c7b960d361ba6a0",
+    "render_fantasy_preview.py": "03c212f73160c29959fb5c3c8b58be460dc40b513941d9ba978ef89fccaa3596",
+    "render_fantasy_geometry_qa.py": "c0e38a63bbc9360514734061d2a6712e1ae1da77b437e3e5ecddf6adb7507462",
+    "compose_fantasy_preview.py": "ca46d46e7f3600972d33fccd608c745dfa1d27b02d76fbf155e2c2828303dc8b",
+    "compose_fantasy_geometry_qa.py": "c18eadb4cfd0c51e234e2a534862bddf49c46d21a3168349f34fb2683d066ff1"
+  },
+  "files": {
+    "guild-analyst-idle-se.png": {
+      "sha256": "2c75665a413208aaf8632549ec50b2a275fd2ab7ac8f38473ca000000ea8f4a9",
+      "bytes": 736599
+    },
+    "guild-analyst-idle-se.json": {
+      "sha256": "8578803bf9886a1a2b2ae38b85437c52e51c0e0ddb2e2e00347154484999d699",
+      "bytes": 7405
+    },
+    "guild-analyst-walk-se.png": {
+      "sha256": "be1389bddf4654f6f9fbd9b1cc0524aae3cfe6437662e2784c970fe1b5aae214",
+      "bytes": 426649
+    },
+    "guild-analyst-walk-se.json": {
+      "sha256": "351ae4fec92f1d3ba2cd5a1449bc14d43b11f3aa84336fd863a88986899fc0b9",
+      "bytes": 3994
+    },
+    "guild-analyst-work-se.png": {
+      "sha256": "d9f95cd53e765db11244ddf5cf9c98df8e91e9caa8bcbffb055f099552968eab",
+      "bytes": 167951
+    },
+    "guild-analyst-work-se.json": {
+      "sha256": "12b270354a85680c7dca714196d3143562c27c5b7ef16b60a31c5a351e1ef42c",
+      "bytes": 3024
+    },
+    "guild-analyst-handoff-se.png": {
+      "sha256": "0cbb62925f23b306a41445013e1c0a7a581120013519cf137d26fe35188937b8",
+      "bytes": 162591
+    },
+    "guild-analyst-handoff-se.json": {
+      "sha256": "2822c83e0ed0dda93739a36a6b5f0c1105150386de272bd0f68b1c725142f7c5",
+      "bytes": 3102
+    },
+    "guild-analyst-idle-nw.png": {
+      "sha256": "28e7b5f4c917169f39311b83b8ce8ec66e15466b5b233ef7ef7ef60e534da39e",
+      "bytes": 681162
+    },
+    "guild-analyst-idle-nw.json": {
+      "sha256": "d34e28f8daacd4b5aa7de16ade54018ba588c7da294257fbfd9013d156a39a3b",
+      "bytes": 7405
+    },
+    "guild-analyst-walk-nw.png": {
+      "sha256": "41970f0a4dbedd3ba40c9e58ba3902defd775917bdd385e032e3f669503e61e1",
+      "bytes": 394546
+    },
+    "guild-analyst-walk-nw.json": {
+      "sha256": "b13e2624c869c713de07004f4a8c1a9655428e8b0d62b280463f6d01c515c882",
+      "bytes": 3994
+    },
+    "guild-analyst-work-nw.png": {
+      "sha256": "0cd966848d42e30c0e6c141ba3a793b83fc784ed47d48ef522c1c0085a6be29e",
+      "bytes": 127819
+    },
+    "guild-analyst-work-nw.json": {
+      "sha256": "854eed476320e0bd5f206629dc63028d169b8e406d94d3e9d51f9beb94fbc0a3",
+      "bytes": 3024
+    },
+    "guild-analyst-handoff-nw.png": {
+      "sha256": "9afa56c9789fd9e012161a3fcc27155efa47b894d5c70e23b8dbc44e1e6b036b",
+      "bytes": 130018
+    },
+    "guild-analyst-handoff-nw.json": {
+      "sha256": "ade5a401b52df0fd4c40bad6948bcdb1eddc45ad510bf281aefb961f3703b7c1",
+      "bytes": 3102
+    },
+    "guild-analyst-walk-ne.png": {
+      "sha256": "a5db33dfc42872b1ffafb701b55e13a65799aa1fe6608909ddea172fd80cffb8",
+      "bytes": 432661
+    },
+    "guild-analyst-walk-ne.json": {
+      "sha256": "9589f1a3ce6210eee9cd3112f9474c229b5a01cdade232f9a47adabda31bebaf",
+      "bytes": 3994
+    },
+    "guild-analyst-walk-sw.png": {
+      "sha256": "14679a2d384c8e2ae9944c642438aff86493f64dfa30060c19ae07638140f4de",
+      "bytes": 395133
+    },
+    "guild-analyst-walk-sw.json": {
+      "sha256": "a35b37dd6ce54b047b952e8fe5fb03af152c082d85cbb1e2b6e86f6c23952469",
+      "bytes": 3994
+    },
+    "guild-mage-idle-se.png": {
+      "sha256": "c4a732be54c75bcdce7a12be46dd99c69f4ad2fa062416cafcacd7f89aebdfdc",
+      "bytes": 646585
+    },
+    "guild-mage-idle-se.json": {
+      "sha256": "9bc57f855eaf802de845a88378720b89792101a616c422cdd9157b6280965ed7",
+      "bytes": 7402
+    },
+    "guild-mage-walk-se.png": {
+      "sha256": "d22b4d93a05e6a63348ae94e093c35ac75e710520ac1e76d2a279df3cfb17023",
+      "bytes": 391006
+    },
+    "guild-mage-walk-se.json": {
+      "sha256": "9d49497cf6869b87c48ac65ecfa43c8fce1e87203abe1487d0b002da620337d0",
+      "bytes": 3991
+    },
+    "guild-mage-work-se.png": {
+      "sha256": "e480b9d15f68598f9ebb926f327b44ecd19deea5bca9471e193bc9742f701f15",
+      "bytes": 157725
+    },
+    "guild-mage-work-se.json": {
+      "sha256": "2e9d17bd1915b8281d575f0457aeab74a650b4b89dd8d8f188368d20a68b1df5",
+      "bytes": 3021
+    },
+    "guild-mage-handoff-se.png": {
+      "sha256": "0158861efd63628be3135bf432294215b8421e11262909f0caa36a24f8cf7575",
+      "bytes": 144023
+    },
+    "guild-mage-handoff-se.json": {
+      "sha256": "06fb9ce60ed5cf21077194d5252042684c0c7da91e8dab3f3aef02e4c8c2e845",
+      "bytes": 3099
+    },
+    "guild-mage-idle-nw.png": {
+      "sha256": "0e8d7a8e4e1e29e40c82dc074a73e8297078fbbc944a76ec9cf95eb913bc77e1",
+      "bytes": 644581
+    },
+    "guild-mage-idle-nw.json": {
+      "sha256": "0295dd6a4869a4422949ba273e76c1b793c0489ae4bbe79b31f369e05f08b84d",
+      "bytes": 7402
+    },
+    "guild-mage-walk-nw.png": {
+      "sha256": "bf0113d4dc0e871cdb62166db0211daea7245b74efb424bcd498f9c15a302714",
+      "bytes": 389717
+    },
+    "guild-mage-walk-nw.json": {
+      "sha256": "82d1161bd7e94dbf45c75979be9ee2e06eee102125181572fcf1fbeb53032d48",
+      "bytes": 3991
+    },
+    "guild-mage-work-nw.png": {
+      "sha256": "20f453f5cbf98ce26e07ea13a26fbf9b6a70e9c60904b2b95b68c49293c0fae9",
+      "bytes": 139396
+    },
+    "guild-mage-work-nw.json": {
+      "sha256": "8636260b01bd817fa62a5b7a8188169edb71af8580b33fa5769faac547d2e106",
+      "bytes": 3021
+    },
+    "guild-mage-handoff-nw.png": {
+      "sha256": "71de8045beea06fcb1045313da05741e593060a3ff366ae45752e78f1ebf2601",
+      "bytes": 135675
+    },
+    "guild-mage-handoff-nw.json": {
+      "sha256": "866a0ca269446867ae411ab0254f2b42b3f870f05d6db54603b675fe8c67f966",
+      "bytes": 3099
+    },
+    "guild-mage-walk-ne.png": {
+      "sha256": "de9668a96df28f67a2965f284545721afc4b1559b7f54380224b3d0707cec573",
+      "bytes": 394457
+    },
+    "guild-mage-walk-ne.json": {
+      "sha256": "3d52b85867ab69389dd0492ec25ce5515a9e4e891cf2455b63033215138791f1",
+      "bytes": 3991
+    },
+    "guild-mage-walk-sw.png": {
+      "sha256": "b26e4b0ff5ea58cc06d8cd40250d41a1b87287da747d747ec74bc85f430f01c5",
+      "bytes": 389379
+    },
+    "guild-mage-walk-sw.json": {
+      "sha256": "c4336a8cffbc4a7fed38729435c4261516c45086237a179be869bd48096d2029",
+      "bytes": 3991
+    },
+    "guild-checker-idle-se.png": {
+      "sha256": "da6f307db3bc911ac8357ab39778dc01d29578dc0240984e1969937e9e30834c",
+      "bytes": 795699
+    },
+    "guild-checker-idle-se.json": {
+      "sha256": "69fe27af7f9999b4bf82aa8bd20c76fdb89ba6e79f5daa50f30fd77988d26bdc",
+      "bytes": 7405
+    },
+    "guild-checker-walk-se.png": {
+      "sha256": "dd13d1330eb99cc0000d7d3cac2c8cedd1f49186a6e9649d0c7e81153bdfa855",
+      "bytes": 462377
+    },
+    "guild-checker-walk-se.json": {
+      "sha256": "6cbb336745a129b31d39911c25da4b2703c1bc19858b554cf6bec2be35ed20ad",
+      "bytes": 3994
+    },
+    "guild-checker-work-se.png": {
+      "sha256": "1749009b2240e2fb42151a34cab042fa777ec2c3fd13af70d55ba88930f78879",
+      "bytes": 166150
+    },
+    "guild-checker-work-se.json": {
+      "sha256": "4be7f6f2f9777ee276036240447ae379c64738e2392aa5bd599a75a84932cf2f",
+      "bytes": 3024
+    },
+    "guild-checker-handoff-se.png": {
+      "sha256": "8db03edaf819bb7e9a07233e0b58670dde47223612a17b4aff4afb14b32bd9e0",
+      "bytes": 155194
+    },
+    "guild-checker-handoff-se.json": {
+      "sha256": "f1dcfa1198562b8b51959ada17646035eeeab02d15c48aa73c7564c29ad21c5b",
+      "bytes": 3102
+    },
+    "guild-checker-idle-nw.png": {
+      "sha256": "864e06ca585dbff3a5edfdee5f75228fd8b23abb7cb356a58e81dc7c702e56ca",
+      "bytes": 728314
+    },
+    "guild-checker-idle-nw.json": {
+      "sha256": "5f803bf5635f878d6379dd214dd5031cd8dd11e6a4ba57af38eebe0a6e3ecbd7",
+      "bytes": 7405
+    },
+    "guild-checker-walk-nw.png": {
+      "sha256": "64e2ec7eb518488de10bf8806ee63840fd8a8084324e767f02d7d1cf1f7f937a",
+      "bytes": 434991
+    },
+    "guild-checker-walk-nw.json": {
+      "sha256": "a9614289692fa9c42372b6d4dc681ab02b869a007ef9ec259a9fc172edc83b1d",
+      "bytes": 3994
+    },
+    "guild-checker-work-nw.png": {
+      "sha256": "c91086a856a9b703569590877efaad2c7e22506818e59526cf3bf6379b8b5490",
+      "bytes": 127287
+    },
+    "guild-checker-work-nw.json": {
+      "sha256": "c63dfb8454ec16426fb6d2d17b44ff960d1881295bd774a63dc63663ae871154",
+      "bytes": 3024
+    },
+    "guild-checker-handoff-nw.png": {
+      "sha256": "1d95b32638ae02bcf65c4215211138d2efb31ae5628c4c8667d809f26557b660",
+      "bytes": 133506
+    },
+    "guild-checker-handoff-nw.json": {
+      "sha256": "afee6ed1457de0ed1c1835d1bab1766b7b44785ac4198774ae0793ece067d9bb",
+      "bytes": 3102
+    },
+    "guild-checker-walk-ne.png": {
+      "sha256": "ae9a41c2d8b7a2d45ed4d14d7088f58b971362508ffde5dfdc13812db5e0e06a",
+      "bytes": 421697
+    },
+    "guild-checker-walk-ne.json": {
+      "sha256": "d41fdad6605e1dd643b1bfe9579773228fd279c0e60e6af3c0c13a574e8c76c1",
+      "bytes": 3994
+    },
+    "guild-checker-walk-sw.png": {
+      "sha256": "6cae7b7347e02979578f9d03c85cf325b4f53a2c5aeb280b28cf108cbdb044fb",
+      "bytes": 425356
+    },
+    "guild-checker-walk-sw.json": {
+      "sha256": "5e5f32bef9ed587e36385d9ce4c6db26a4ab2d6238be40302fb6cab22e3285a9",
+      "bytes": 3994
+    },
+    "guild-reviewer-idle-se.png": {
+      "sha256": "5a4e6fd35380e0c552a94b6ac2a95c5e8b63463a0521e7f8cf3cf8b56c504bc6",
+      "bytes": 811997
+    },
+    "guild-reviewer-idle-se.json": {
+      "sha256": "5cd36eb4a56e9c5530194492c1134e6f608b3b335300555c0acc9b81fa52332e",
+      "bytes": 7406
+    },
+    "guild-reviewer-walk-se.png": {
+      "sha256": "c4c161852c6d5abcc8b00a7b3e33b2a952cd1be84f751b868efd32af2d3f3370",
+      "bytes": 469847
+    },
+    "guild-reviewer-walk-se.json": {
+      "sha256": "0b27ea6049be5949bb38a7e52ae3f3e35d13e99398829caccbab199365ca21e1",
+      "bytes": 3995
+    },
+    "guild-reviewer-work-se.png": {
+      "sha256": "9bb3ecfd27059e8488c0f80e7ae88ca7a10a3785bede18114d0a59bb6bfa4174",
+      "bytes": 173810
+    },
+    "guild-reviewer-work-se.json": {
+      "sha256": "8cf73a72a5e65719626b92631c3477bdf08e075e038a2496eaa4a935227b2ac1",
+      "bytes": 3025
+    },
+    "guild-reviewer-handoff-se.png": {
+      "sha256": "02551ede4447ba3074725466acb8f7f0aa83a61678cfe7a5fee1129fffbadfda",
+      "bytes": 168467
+    },
+    "guild-reviewer-handoff-se.json": {
+      "sha256": "371dae08d5b9458c769bf57445e97accb7e018144d741a86c08d9fd4317befd4",
+      "bytes": 3103
+    },
+    "guild-reviewer-idle-nw.png": {
+      "sha256": "00f2e45efe18510590f2df9beeec4d62df458756d0a4fe14f2d278a5fe848ff9",
+      "bytes": 756873
+    },
+    "guild-reviewer-idle-nw.json": {
+      "sha256": "9898dc6a7e35dc5118245535c56c1af0343406435e20cc04b08b8aee5bc26991",
+      "bytes": 7406
+    },
+    "guild-reviewer-walk-nw.png": {
+      "sha256": "150a5b01e3e1f392c15047dc73bb28382e2b96a7019a1f4dc2e005919fcb3df0",
+      "bytes": 453129
+    },
+    "guild-reviewer-walk-nw.json": {
+      "sha256": "bbd9b5fc3817c86f11639c65c98fba096e5fbaae963cffa01e334d288434e3de",
+      "bytes": 3995
+    },
+    "guild-reviewer-work-nw.png": {
+      "sha256": "00267d234719604ec75ae5b187ea1d0f786c0b46d3c5ee8ec67ee24352eb1285",
+      "bytes": 135434
+    },
+    "guild-reviewer-work-nw.json": {
+      "sha256": "8656daee0c5c4f647810baf69332fc42008bd1eadaddc5e104ea5ee4584837b6",
+      "bytes": 3025
+    },
+    "guild-reviewer-handoff-nw.png": {
+      "sha256": "43248d62dd6d8b0c358097b81364a436328ae8eafccb8759d04ce7412b2cdb59",
+      "bytes": 139631
+    },
+    "guild-reviewer-handoff-nw.json": {
+      "sha256": "2f0bbca363ad1d93639b93c16153b24fc3afee7fecd0b1062842910371901dfb",
+      "bytes": 3103
+    },
+    "guild-reviewer-walk-ne.png": {
+      "sha256": "cec955d8e704309e837a689e49d76254d2fd8b764f585f4a26bde5e41c815470",
+      "bytes": 468307
+    },
+    "guild-reviewer-walk-ne.json": {
+      "sha256": "28f83c8d86eb40e7cca5822403b9332f4ff0f86b9fe8b43dd4e23180d7478eac",
+      "bytes": 3995
+    },
+    "guild-reviewer-walk-sw.png": {
+      "sha256": "d91eaacb3bc68ca06cb366e52816c52a810deddc8fbf5acfe2cddb988fb34cd2",
+      "bytes": 456001
+    },
+    "guild-reviewer-walk-sw.json": {
+      "sha256": "ae35d3764ac5e0e59a94b715617e4c228783ed98344525dc7b931743bb34dac7",
+      "bytes": 3995
+    },
+    "guild-mentor-idle-se.png": {
+      "sha256": "f073497d4eaf0b3c760e9bc9ff24b11b457d701149a830ebb1367d98e71e6220",
+      "bytes": 841591
+    },
+    "guild-mentor-idle-se.json": {
+      "sha256": "925b5180cc33fa13e354e6579b388bcaa6f03d44d42bd135befbd8ab115eb43a",
+      "bytes": 7404
+    },
+    "guild-mentor-walk-se.png": {
+      "sha256": "98f2f47f2823cf2ddc2cf4685fd1c106c30959551da9200196f7cb76f0ef0f2a",
+      "bytes": 489625
+    },
+    "guild-mentor-walk-se.json": {
+      "sha256": "20990b0307cd31563142e39c24a2a63790704968e70cd4d4fccb16f61cb1d380",
+      "bytes": 3993
+    },
+    "guild-mentor-work-se.png": {
+      "sha256": "fea4a82080d97e41cb7c19a2a005f9e9364725a732bd234e131531502ab843ac",
+      "bytes": 181184
+    },
+    "guild-mentor-work-se.json": {
+      "sha256": "0fd9e25202abf0c0faee53476fdcbc61e451d601c72c5df7ad3260c350e096e3",
+      "bytes": 3023
+    },
+    "guild-mentor-handoff-se.png": {
+      "sha256": "98ad36b0f1fca9feb4ba8438bb3dff4e21643ad88725c5362c6d4d5cc431fe63",
+      "bytes": 172138
+    },
+    "guild-mentor-handoff-se.json": {
+      "sha256": "ece185414fc3a5682bc2cf2f5a1d5141d3f7a132bd1c91cdb7d9f3546cfbc98c",
+      "bytes": 3101
+    },
+    "guild-mentor-idle-nw.png": {
+      "sha256": "a590b86283711cee9d6aa6230ee1259bd76d06088ee3ba4b321e5a524286c47a",
+      "bytes": 725554
+    },
+    "guild-mentor-idle-nw.json": {
+      "sha256": "6715ae8215c486a7c525e5b2a514582e143b156dae13561e48bed6139463d61e",
+      "bytes": 7404
+    },
+    "guild-mentor-walk-nw.png": {
+      "sha256": "b3ad63b6da1944f691d999a4bc36bff339ab062af3dfc7acd9256c38dee0f247",
+      "bytes": 417381
+    },
+    "guild-mentor-walk-nw.json": {
+      "sha256": "8052e88658b986e7c55e632563136352dae44f386fd736a397ccf18256e32e5a",
+      "bytes": 3993
+    },
+    "guild-mentor-work-nw.png": {
+      "sha256": "6a912b4527f99f1ee3d9d828bc6920890e49e702876a16073762cfa43cc933ca",
+      "bytes": 131059
+    },
+    "guild-mentor-work-nw.json": {
+      "sha256": "c02c505f5bdb5864cc0beddb3bba769c1a752d56934b665c9f5eca52bf7384c3",
+      "bytes": 3023
+    },
+    "guild-mentor-handoff-nw.png": {
+      "sha256": "f7022920b8c74573de1b433c0e9f6c8e2e6c2e8654f6b9fcce21df46ff1f3130",
+      "bytes": 131664
+    },
+    "guild-mentor-handoff-nw.json": {
+      "sha256": "c200e294081b788e93fe0edf213fef0b97febe4ef5fcaa2222d997826a26f69c",
+      "bytes": 3101
+    },
+    "guild-mentor-walk-ne.png": {
+      "sha256": "3c977c18adb718f95f345f4c20929dff4c3a3278f7994f7161b99d85e8f6c33f",
+      "bytes": 505881
+    },
+    "guild-mentor-walk-ne.json": {
+      "sha256": "1cf556cfe26fd5b3cf3a94b371f839cab7e5045bcbb3909fbfa5c16b01e14511",
+      "bytes": 3993
+    },
+    "guild-mentor-walk-sw.png": {
+      "sha256": "f2609f65c82a6a348b7c20e9c2a714e285df3bbbca4111d8c9e4210da7016ef0",
+      "bytes": 441897
+    },
+    "guild-mentor-walk-sw.json": {
+      "sha256": "8bdd3bc2dab7d7b13e7b74b19b8101b02c8d7307af5595355508e7d863829edc",
+      "bytes": 3993
+    },
+    "guild-room.png": {
+      "sha256": "39cdb9230d2d34792f7bd0909bcfb62a3cb000601048ac66bd30f49d57ebb340",
+      "bytes": 1151200
+    },
+    "guild-foreground-analyst.png": {
+      "sha256": "9fce78d45c35673ebc89db1b655496e3214df6df9b4635ae5db92fa64c1204d5",
+      "bytes": 190884
+    },
+    "guild-foreground-mage.png": {
+      "sha256": "d765cef9e4d5b1e138b1e37615d58eec95e3517b77a606b5fc0ef6aa2fa775c5",
+      "bytes": 196242
+    },
+    "guild-foreground-checker.png": {
+      "sha256": "e0d5328541558642d461c763d2fbb9d3f2354d025136e1f3ccb0ff8c63c0a715",
+      "bytes": 160492
+    },
+    "guild-foreground-reviewer.png": {
+      "sha256": "f3ae3410d5a621c1ed8eba83292851af5b4a524366f3a8fbdb9b6d451d872674",
+      "bytes": 180102
+    },
+    "guild-foreground-mentor.png": {
+      "sha256": "f48e047220c50e4a386ac7c144d7bfd5ed6b1d58fb4001dd3a61ead7b76243e7",
+      "bytes": 173417
+    },
+    "guild-mentor-portrait.png": {
+      "sha256": "b761364a82f43351de138b676da0c203836b7a946b9b2031a83278fb2b5450c2",
+      "bytes": 55030
+    },
+    "guild-cast.json": {
+      "sha256": "720b04922cbdb1b2a7b572deb118fa14de986a75900c0dbc4348882839c5954b",
+      "bytes": 27348
+    }
+  }
+}

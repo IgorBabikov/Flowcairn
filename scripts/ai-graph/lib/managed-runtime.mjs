@@ -140,9 +140,7 @@ function installExact(provider, version, target, spawnSyncImpl = spawnSync) {
   if (result.error || result.status !== 0) throw new Error('RUNTIME_INSTALL_FAILED');
   if (provider === 'claude') {
     const wrapper = path.join(packageRoot(provider, target), 'package.json');
-    const report = process.platform === 'linux' ? process.report.getReport() : null;
-    const musl = report && !Reflect.get(Reflect.get(report, 'header'), 'glibcVersionRuntime') ? '-musl' : '';
-    const name = `@anthropic-ai/claude-code-${process.platform}-${process.arch}${musl}`;
+    const name = `@anthropic-ai/claude-code-${process.platform}-${process.arch}`;
     const manifest = createRequire(wrapper).resolve(`${name}/package.json`);
     const meta = JSON.parse(readFileSync(manifest, 'utf8'));
     if (meta.name !== name || meta.version !== version) throw new Error('RUNTIME_NATIVE_MISMATCH');

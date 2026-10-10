@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import { URL, fileURLToPath, pathToFileURL } from 'node:url';
 import test from 'node:test';
 import { build } from 'esbuild';
+import { coverageFixture } from './coverage-fixtures.test-support.mjs';
 import { fixture, H } from './learning-fixtures.test-support.mjs';
 
 const require = createRequire(import.meta.url);
@@ -91,4 +92,13 @@ test('UI historical targets require the explicit predecessor chain; drift readin
  const html=m.render(m.LearningStageMap,{controller:controller(drift),onOpen:()=>{},onClose:()=>{}});
  assert.match(html,/>Открыть сохраненный материал<\/button>/);
  assert.equal(m.learningCommandCapability(drift,{action:'continue-learning',holdId:H,disposition:'continue'}).allowed,false);
+});
+
+test('coverage UI rechecks a cached lesson when link metadata changes and never exposes fabricated full coverage',()=>{
+ const f=coverageFixture();
+ const props={material:f.response,lesson:{id:f.lessonHash,lesson:f.lesson},canRead:true,onSource:()=>{}};
+ const partial=m.render(m.MaterialOverview,props);assert.match(partial,/Привязка к части строк/);assert.doesNotMatch(partial,/Все строки привязаны/);
+ f.response.coverage.links[0].status='linked';
+ const tampered=m.render(m.MaterialOverview,props);assert.doesNotMatch(tampered,/Все строки привязаны/);assert.match(tampered,/Привязки к шагам не подтверждены/);
+ const denied=m.render(m.MaterialOverview,{...props,canRead:false});assert.match(denied,/disabled=""/);assert.doesNotMatch(denied,/Все строки привязаны/);
 });

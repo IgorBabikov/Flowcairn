@@ -491,7 +491,8 @@ export interface SavedSource {
 }
 export interface SourceCatalog { version: 1; sources: SavedSource[] }
 export interface StageMaterial {
-  version: 1;
+  version: 1 | 2;
+  coverageHash?: string;
   kind: 'stage' | 'task';
   runId: string;
   planHash: string;
@@ -577,9 +578,26 @@ export interface SetLearningMode extends ControlEnvelope { mode: LearningMode }
 export interface GenerateLesson extends ControlEnvelope { materialHash: string }
 export interface AskLesson extends GenerateLesson { lessonHash: string; anchor: SourceAnchor; question: string }
 export interface SetLearningProgress extends GenerateLesson { progress: LearningProgress }
+export interface CoverageSource {
+  sourceId: string; fileHash: string; range: { startLine: number; endLine: number } | null;
+}
+export interface CoverageEntry {
+  id: string; kind: 'change' | 'context' | 'gap'; path: string | null;
+  change: 'added' | 'removed' | 'modified' | 'metadata' | 'unknown' | 'unchanged' | null;
+  precision: 'conservative' | 'exact' | 'unavailable'; before: CoverageSource | null; after: CoverageSource | null; reason: string | null;
+}
+export interface LearningCoverage {
+  id: string;
+  inventory: { version: 1; binding: Pick<StageMaterial, 'runId' | 'planHash' | 'taskHash' | 'contractHash' | 'sourceCatalogHash' | 'beforeHash' | 'resultHash'>;
+    algorithm: 'line-prefix-suffix-v1'; entryCount: number; pageCount: number; firstPageHash: string | null };
+  pages: Array<{ version: 1; entries: CoverageEntry[]; next: string | null }>;
+  lessonHash: string | null; linking: 'absent' | 'validated' | 'unavailable';
+  links: Array<{ entryId: string; status: 'unlinked' | 'partial' | 'linked'; stepIds: string[] }>;
+}
 export interface LearningMaterialResponse {
   id: string;
   material: StageMaterial;
+  coverage?: LearningCoverage;
   sources: SavedSource[];
   sourceCatalog?: { version: 2; pageHashes: string[] };
   progress: LearningProgress;
@@ -587,6 +605,38 @@ export interface LearningMaterialResponse {
   lessonHash: string | null;
   capabilities: { generateLesson: Capability; askLesson: Capability; setLearningProgress: Capability };
 }
+export interface ChapterFlowEdge { id: string; from: string; to: string; kind: 'calls' | 'returns' | 'branches' | 'reads' | 'writes' | 'depends-on' | 'hands-off'; label: string | null; anchors: SourceAnchor[] }
+export interface LearningChapterStep {
+  id: string; title: string; caller: string; anchors: SourceAnchor[]; coverageEntryIds: string[]; dependencyEntryIds: string[];
+  input: string; transformations: string[]; output: string; next: string | null; purpose: string; changeConsequence: string;
+  alternatives: string[]; origin: { kind: 'manual-trace' | 'test-fixture' | 'teaching-example' | 'runtime-observation'; label: string; observationIds: string[] };
+}
+export interface LearningChapter {
+  version: 1; materialHash: string; order: number; title: string; scope: string; coverageEntryIds: string[]; dependencyEntryIds: string[];
+  flowNodeIds: string[]; flowEdges: ChapterFlowEdge[]; steps: LearningChapterStep[]; wholeFlow: string; limitations: string[];
+}
+export interface LearningChapterBook {
+  id: string; book: { version: 1; materialHash: string; chapterCount: number; pageCount: number; firstPageHash: string | null; chapters: Array<{ id: string; order: number; title: string }> };
+  chapters: Array<{ id: string; chapter: LearningChapter }>;
+}
+export interface LearningObservationResponse {
+  id: string; observation: {
+    version: 1; runId: string; planHash: string; taskHash: string; materialHash: string; chapterId: string; stepId: string;
+    extractorId: string; extractorHash: string; commandHash: string | null; fixtureHash: string | null; inputHash: string; outputHash: string;
+    sourceHash: string; sourceAnchors: SourceAnchor[]; value: string | null; redaction: { version: 1; applied: boolean; rulesHash: string; removedFields: string[] };
+    receiptId: string; status: 'observed' | 'missing' | 'uncertain'; limitation: string | null; createdAt: string;
+  }; extractor: Record<string, unknown>; freshness: 'current' | 'stale';
+}
+export interface PracticeHint { id: string; text: string; createdAt: string }
+export interface PracticeAssessment { status: 'unassessed' | 'correct' | 'partially-correct' | 'incorrect' | 'uncertain'; evaluator: 'none' | 'human' | 'ai'; score: number | null; feedback: string | null; limitations: string[] }
+export interface LearningPracticeAttempt { id: string; attempt: {
+  version: 1; runId: string; planHash: string; taskHash: string; materialHash: string; chapterBookHash: string | null; lessonHash: string | null;
+  ownerId: string; operationId: string; promptId: string; question: string; answer: string; hints: PracticeHint[]; assessment: PracticeAssessment;
+  limitations: string[]; status: 'draft' | 'submitted' | 'assessed'; previousVersionHash: string | null; createdAt: string; updatedAt: string;
+} }
+export interface LearningPracticeLog { logHash: string | null; log: Record<string, unknown> | null; attempts: LearningPracticeAttempt[] }
+export interface PracticeAppendRequest { operationId: string; expectedRevision: number; planHash: string; materialHash: string; logHash: string | null; chapterBookHash: string | null; lessonHash: string | null; promptId: string; question: string; answer: string; hints: PracticeHint[]; limitations: string[] }
+export interface PracticeFeedbackRequest { operationId: string; expectedRevision: number; planHash: string; materialHash: string; logHash: string; attemptHash: string; feedback: { hints?: PracticeHint[]; assessment?: PracticeAssessment; limitations?: string[] } }
 export interface LearningSourceResponse {
   sourceId: string;
   fileHash: string;

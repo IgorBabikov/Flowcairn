@@ -29,7 +29,7 @@ export function NpcConversation({ controller: c, onPlan, onReports, onLearning, 
   const opensLearning = !unknown && !hasPlan && Boolean(hold || hasMaterial);
   const primary = opensLearning ? onLearning : !s || hasPlan ? onPlan : onReports;
   return <section className="npc-conversation">
-    <div className="npc-portrait" aria-hidden="true"><img src="/assets/rpg/mentor-idle.png" alt="" /></div>
+    <div className="npc-portrait guild-mentor-portrait" aria-hidden="true"><img src="/assets/rpg/guild-mentor-portrait.png" alt="" /></div>
     <CloseObject label="Закрыть разговор" onClose={onClose} />
     <h2 data-overlay-heading tabIndex={-1}>Наставник</h2>
     <p className="npc-reply">{message}</p>

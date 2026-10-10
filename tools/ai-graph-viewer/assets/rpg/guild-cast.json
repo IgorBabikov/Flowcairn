@@ -1,0 +1,1092 @@
+{
+  "schemaVersion": 1,
+  "visualRevision": "fantasy-v2",
+  "rootApprovedBasis": true,
+  "alpha": "straight RGBA PNG",
+  "trimmed": false,
+  "sourceFps": 24,
+  "frameSize": [
+    256,
+    320
+  ],
+  "fps": 12,
+  "pivot": [
+    128.00009155,
+    241.91650391
+  ],
+  "anchor": [
+    0.5000003576,
+    0.7559890747
+  ],
+  "spriteScale": 0.8323699421965317,
+  "resolution": [
+    1440,
+    1080
+  ],
+  "camera": {
+    "type": "orthographic",
+    "yawDegrees": 45,
+    "elevationDegrees": 35.04,
+    "orthoScale": 17.3
+  },
+  "projection": {
+    "origin": [
+      720.0,
+      601.3232
+    ],
+    "unitX": [
+      778.8575,
+      635.1297
+    ],
+    "unitY": [
+      778.8575,
+      567.5168
+    ],
+    "unitZ": [
+      720.0,
+      533.1862
+    ],
+    "worldUnits": "meters"
+  },
+  "room": "guild-room.png",
+  "directions": {
+    "se": {
+      "yawRadians": 0,
+      "forwardLocal": [
+        0,
+        -1,
+        0
+      ],
+      "forwardWorld": [
+        0,
+        -1,
+        0
+      ],
+      "screenVector": [
+        -58.85749999999996,
+        33.80640000000005
+      ]
+    },
+    "nw": {
+      "yawRadians": 3.141592653589793,
+      "forwardLocal": [
+        0,
+        -1,
+        0
+      ],
+      "forwardWorld": [
+        0,
+        1,
+        0
+      ],
+      "screenVector": [
+        58.85749999999996,
+        -33.80640000000005
+      ]
+    },
+    "ne": {
+      "yawRadians": 1.5707963267948966,
+      "forwardLocal": [
+        0,
+        -1,
+        0
+      ],
+      "forwardWorld": [
+        1,
+        0,
+        0
+      ],
+      "screenVector": [
+        58.85749999999996,
+        33.806499999999915
+      ]
+    },
+    "sw": {
+      "yawRadians": 4.71238898038469,
+      "forwardLocal": [
+        0,
+        -1,
+        0
+      ],
+      "forwardWorld": [
+        -1,
+        0,
+        0
+      ],
+      "screenVector": [
+        -58.85749999999996,
+        -33.806499999999915
+      ]
+    }
+  },
+  "roles": {
+    "analyst": {
+      "station": {
+        "world": [
+          -3,
+          0.9,
+          0
+        ],
+        "pixel": [
+          596.3993,
+          469.4781
+        ],
+        "direction": "nw"
+      },
+      "states": {
+        "idle": {
+          "se": {
+            "image": "guild-analyst-idle-se.png",
+            "atlas": "guild-analyst-idle-se.json",
+            "frames": 30,
+            "durationSeconds": 2.5,
+            "atlasSize": [
+              1536,
+              1600
+            ],
+            "rootMotion": false,
+            "clip": "Idle_Loop",
+            "authored": false,
+            "loop": true,
+            "metersPerSecond": null
+          },
+          "nw": {
+            "image": "guild-analyst-idle-nw.png",
+            "atlas": "guild-analyst-idle-nw.json",
+            "frames": 30,
+            "durationSeconds": 2.5,
+            "atlasSize": [
+              1536,
+              1600
+            ],
+            "rootMotion": false,
+            "clip": "Idle_Loop",
+            "authored": false,
+            "loop": true,
+            "metersPerSecond": null
+          }
+        },
+        "walk": {
+          "se": {
+            "image": "guild-analyst-walk-se.png",
+            "atlas": "guild-analyst-walk-se.json",
+            "frames": 16,
+            "durationSeconds": 1.3333333333333333,
+            "atlasSize": [
+              1536,
+              960
+            ],
+            "rootMotion": false,
+            "clip": "Walk_Loop",
+            "authored": false,
+            "loop": true,
+            "metersPerSecond": 0.9955431818962097
+          },
+          "nw": {
+            "image": "guild-analyst-walk-nw.png",
+            "atlas": "guild-analyst-walk-nw.json",
+            "frames": 16,
+            "durationSeconds": 1.3333333333333333,
+            "atlasSize": [
+              1536,
+              960
+            ],
+            "rootMotion": false,
+            "clip": "Walk_Loop",
+            "authored": false,
+            "loop": true,
+            "metersPerSecond": 0.9955431818962097
+          },
+          "ne": {
+            "image": "guild-analyst-walk-ne.png",
+            "atlas": "guild-analyst-walk-ne.json",
+            "frames": 16,
+            "durationSeconds": 1.3333333333333333,
+            "atlasSize": [
+              1536,
+              960
+            ],
+            "rootMotion": false,
+            "clip": "Walk_Loop",
+            "authored": false,
+            "loop": true,
+            "metersPerSecond": 0.9955431818962097
+          },
+          "sw": {
+            "image": "guild-analyst-walk-sw.png",
+            "atlas": "guild-analyst-walk-sw.json",
+            "frames": 16,
+            "durationSeconds": 1.3333333333333333,
+            "atlasSize": [
+              1536,
+              960
+            ],
+            "rootMotion": false,
+            "clip": "Walk_Loop",
+            "authored": false,
+            "loop": true,
+            "metersPerSecond": 0.9955431818962097
+          }
+        },
+        "work": {
+          "se": {
+            "image": "guild-analyst-work-se.png",
+            "atlas": "guild-analyst-work-se.json",
+            "frames": 12,
+            "durationSeconds": 1.0,
+            "atlasSize": [
+              1536,
+              640
+            ],
+            "rootMotion": false,
+            "clip": null,
+            "authored": true,
+            "loop": true,
+            "metersPerSecond": null
+          },
+          "nw": {
+            "image": "guild-analyst-work-nw.png",
+            "atlas": "guild-analyst-work-nw.json",
+            "frames": 12,
+            "durationSeconds": 1.0,
+            "atlasSize": [
+              1536,
+              640
+            ],
+            "rootMotion": false,
+            "clip": null,
+            "authored": true,
+            "loop": true,
+            "metersPerSecond": null
+          }
+        },
+        "handoff": {
+          "se": {
+            "image": "guild-analyst-handoff-se.png",
+            "atlas": "guild-analyst-handoff-se.json",
+            "frames": 12,
+            "durationSeconds": 1.0,
+            "atlasSize": [
+              1536,
+              640
+            ],
+            "rootMotion": false,
+            "clip": null,
+            "authored": true,
+            "loop": false,
+            "metersPerSecond": null
+          },
+          "nw": {
+            "image": "guild-analyst-handoff-nw.png",
+            "atlas": "guild-analyst-handoff-nw.json",
+            "frames": 12,
+            "durationSeconds": 1.0,
+            "atlasSize": [
+              1536,
+              640
+            ],
+            "rootMotion": false,
+            "clip": null,
+            "authored": true,
+            "loop": false,
+            "metersPerSecond": null
+          }
+        }
+      }
+    },
+    "mage": {
+      "station": {
+        "world": [
+          0.25,
+          0.3,
+          0
+        ],
+        "pixel": [
+          752.3716,
+          599.6329
+        ],
+        "direction": "nw"
+      },
+      "states": {
+        "idle": {
+          "se": {
+            "image": "guild-mage-idle-se.png",
+            "atlas": "guild-mage-idle-se.json",
+            "frames": 30,
+            "durationSeconds": 2.5,
+            "atlasSize": [
+              1536,
+              1600
+            ],
+            "rootMotion": false,
+            "clip": "Idle_Loop",
+            "authored": false,
+            "loop": true,
+            "metersPerSecond": null
+          },
+          "nw": {
+            "image": "guild-mage-idle-nw.png",
+            "atlas": "guild-mage-idle-nw.json",
+            "frames": 30,
+            "durationSeconds": 2.5,
+            "atlasSize": [
+              1536,
+              1600
+            ],
+            "rootMotion": false,
+            "clip": "Idle_Loop",
+            "authored": false,
+            "loop": true,
+            "metersPerSecond": null
+          }
+        },
+        "walk": {
+          "se": {
+            "image": "guild-mage-walk-se.png",
+            "atlas": "guild-mage-walk-se.json",
+            "frames": 16,
+            "durationSeconds": 1.3333333333333333,
+            "atlasSize": [
+              1536,
+              960
+            ],
+            "rootMotion": false,
+            "clip": "Walk_Loop",
+            "authored": false,
+            "loop": true,
+            "metersPerSecond": 1.0140268430113792
+          },
+          "nw": {
+            "image": "guild-mage-walk-nw.png",
+            "atlas": "guild-mage-walk-nw.json",
+            "frames": 16,
+            "durationSeconds": 1.3333333333333333,
+            "atlasSize": [
+              1536,
+              960
+            ],
+            "rootMotion": false,
+            "clip": "Walk_Loop",
+            "authored": false,
+            "loop": true,
+            "metersPerSecond": 1.0140268430113792
+          },
+          "ne": {
+            "image": "guild-mage-walk-ne.png",
+            "atlas": "guild-mage-walk-ne.json",
+            "frames": 16,
+            "durationSeconds": 1.3333333333333333,
+            "atlasSize": [
+              1536,
+              960
+            ],
+            "rootMotion": false,
+            "clip": "Walk_Loop",
+            "authored": false,
+            "loop": true,
+            "metersPerSecond": 1.0140268430113792
+          },
+          "sw": {
+            "image": "guild-mage-walk-sw.png",
+            "atlas": "guild-mage-walk-sw.json",
+            "frames": 16,
+            "durationSeconds": 1.3333333333333333,
+            "atlasSize": [
+              1536,
+              960
+            ],
+            "rootMotion": false,
+            "clip": "Walk_Loop",
+            "authored": false,
+            "loop": true,
+            "metersPerSecond": 1.0140268430113792
+          }
+        },
+        "work": {
+          "se": {
+            "image": "guild-mage-work-se.png",
+            "atlas": "guild-mage-work-se.json",
+            "frames": 12,
+            "durationSeconds": 1.0,
+            "atlasSize": [
+              1536,
+              640
+            ],
+            "rootMotion": false,
+            "clip": null,
+            "authored": true,
+            "loop": true,
+            "metersPerSecond": null
+          },
+          "nw": {
+            "image": "guild-mage-work-nw.png",
+            "atlas": "guild-mage-work-nw.json",
+            "frames": 12,
+            "durationSeconds": 1.0,
+            "atlasSize": [
+              1536,
+              640
+            ],
+            "rootMotion": false,
+            "clip": null,
+            "authored": true,
+            "loop": true,
+            "metersPerSecond": null
+          }
+        },
+        "handoff": {
+          "se": {
+            "image": "guild-mage-handoff-se.png",
+            "atlas": "guild-mage-handoff-se.json",
+            "frames": 12,
+            "durationSeconds": 1.0,
+            "atlasSize": [
+              1536,
+              640
+            ],
+            "rootMotion": false,
+            "clip": null,
+            "authored": true,
+            "loop": false,
+            "metersPerSecond": null
+          },
+          "nw": {
+            "image": "guild-mage-handoff-nw.png",
+            "atlas": "guild-mage-handoff-nw.json",
+            "frames": 12,
+            "durationSeconds": 1.0,
+            "atlasSize": [
+              1536,
+              640
+            ],
+            "rootMotion": false,
+            "clip": null,
+            "authored": true,
+            "loop": false,
+            "metersPerSecond": null
+          }
+        }
+      }
+    },
+    "checker": {
+      "station": {
+        "world": [
+          3,
+          -1.5,
+          0
+        ],
+        "pixel": [
+          808.2861,
+          753.4522
+        ],
+        "direction": "nw"
+      },
+      "states": {
+        "idle": {
+          "se": {
+            "image": "guild-checker-idle-se.png",
+            "atlas": "guild-checker-idle-se.json",
+            "frames": 30,
+            "durationSeconds": 2.5,
+            "atlasSize": [
+              1536,
+              1600
+            ],
+            "rootMotion": false,
+            "clip": "Idle_Loop",
+            "authored": false,
+            "loop": true,
+            "metersPerSecond": null
+          },
+          "nw": {
+            "image": "guild-checker-idle-nw.png",
+            "atlas": "guild-checker-idle-nw.json",
+            "frames": 30,
+            "durationSeconds": 2.5,
+            "atlasSize": [
+              1536,
+              1600
+            ],
+            "rootMotion": false,
+            "clip": "Idle_Loop",
+            "authored": false,
+            "loop": true,
+            "metersPerSecond": null
+          }
+        },
+        "walk": {
+          "se": {
+            "image": "guild-checker-walk-se.png",
+            "atlas": "guild-checker-walk-se.json",
+            "frames": 16,
+            "durationSeconds": 1.3333333333333333,
+            "atlasSize": [
+              1536,
+              960
+            ],
+            "rootMotion": false,
+            "clip": "Walk_Loop",
+            "authored": false,
+            "loop": true,
+            "metersPerSecond": 0.9955431818962097
+          },
+          "nw": {
+            "image": "guild-checker-walk-nw.png",
+            "atlas": "guild-checker-walk-nw.json",
+            "frames": 16,
+            "durationSeconds": 1.3333333333333333,
+            "atlasSize": [
+              1536,
+              960
+            ],
+            "rootMotion": false,
+            "clip": "Walk_Loop",
+            "authored": false,
+            "loop": true,
+            "metersPerSecond": 0.9955431818962097
+          },
+          "ne": {
+            "image": "guild-checker-walk-ne.png",
+            "atlas": "guild-checker-walk-ne.json",
+            "frames": 16,
+            "durationSeconds": 1.3333333333333333,
+            "atlasSize": [
+              1536,
+              960
+            ],
+            "rootMotion": false,
+            "clip": "Walk_Loop",
+            "authored": false,
+            "loop": true,
+            "metersPerSecond": 0.9955431818962097
+          },
+          "sw": {
+            "image": "guild-checker-walk-sw.png",
+            "atlas": "guild-checker-walk-sw.json",
+            "frames": 16,
+            "durationSeconds": 1.3333333333333333,
+            "atlasSize": [
+              1536,
+              960
+            ],
+            "rootMotion": false,
+            "clip": "Walk_Loop",
+            "authored": false,
+            "loop": true,
+            "metersPerSecond": 0.9955431818962097
+          }
+        },
+        "work": {
+          "se": {
+            "image": "guild-checker-work-se.png",
+            "atlas": "guild-checker-work-se.json",
+            "frames": 12,
+            "durationSeconds": 1.0,
+            "atlasSize": [
+              1536,
+              640
+            ],
+            "rootMotion": false,
+            "clip": null,
+            "authored": true,
+            "loop": true,
+            "metersPerSecond": null
+          },
+          "nw": {
+            "image": "guild-checker-work-nw.png",
+            "atlas": "guild-checker-work-nw.json",
+            "frames": 12,
+            "durationSeconds": 1.0,
+            "atlasSize": [
+              1536,
+              640
+            ],
+            "rootMotion": false,
+            "clip": null,
+            "authored": true,
+            "loop": true,
+            "metersPerSecond": null
+          }
+        },
+        "handoff": {
+          "se": {
+            "image": "guild-checker-handoff-se.png",
+            "atlas": "guild-checker-handoff-se.json",
+            "frames": 12,
+            "durationSeconds": 1.0,
+            "atlasSize": [
+              1536,
+              640
+            ],
+            "rootMotion": false,
+            "clip": null,
+            "authored": true,
+            "loop": false,
+            "metersPerSecond": null
+          },
+          "nw": {
+            "image": "guild-checker-handoff-nw.png",
+            "atlas": "guild-checker-handoff-nw.json",
+            "frames": 12,
+            "durationSeconds": 1.0,
+            "atlasSize": [
+              1536,
+              640
+            ],
+            "rootMotion": false,
+            "clip": null,
+            "authored": true,
+            "loop": false,
+            "metersPerSecond": null
+          }
+        }
+      }
+    },
+    "reviewer": {
+      "station": {
+        "world": [
+          2.8,
+          1.25,
+          0
+        ],
+        "pixel": [
+          958.3726,
+          653.7232
+        ],
+        "direction": "nw"
+      },
+      "states": {
+        "idle": {
+          "se": {
+            "image": "guild-reviewer-idle-se.png",
+            "atlas": "guild-reviewer-idle-se.json",
+            "frames": 30,
+            "durationSeconds": 2.5,
+            "atlasSize": [
+              1536,
+              1600
+            ],
+            "rootMotion": false,
+            "clip": "Idle_Loop",
+            "authored": false,
+            "loop": true,
+            "metersPerSecond": null
+          },
+          "nw": {
+            "image": "guild-reviewer-idle-nw.png",
+            "atlas": "guild-reviewer-idle-nw.json",
+            "frames": 30,
+            "durationSeconds": 2.5,
+            "atlasSize": [
+              1536,
+              1600
+            ],
+            "rootMotion": false,
+            "clip": "Idle_Loop",
+            "authored": false,
+            "loop": true,
+            "metersPerSecond": null
+          }
+        },
+        "walk": {
+          "se": {
+            "image": "guild-reviewer-walk-se.png",
+            "atlas": "guild-reviewer-walk-se.json",
+            "frames": 16,
+            "durationSeconds": 1.3333333333333333,
+            "atlasSize": [
+              1536,
+              960
+            ],
+            "rootMotion": false,
+            "clip": "Walk_Loop",
+            "authored": false,
+            "loop": true,
+            "metersPerSecond": 1.0140268430113792
+          },
+          "nw": {
+            "image": "guild-reviewer-walk-nw.png",
+            "atlas": "guild-reviewer-walk-nw.json",
+            "frames": 16,
+            "durationSeconds": 1.3333333333333333,
+            "atlasSize": [
+              1536,
+              960
+            ],
+            "rootMotion": false,
+            "clip": "Walk_Loop",
+            "authored": false,
+            "loop": true,
+            "metersPerSecond": 1.0140268430113792
+          },
+          "ne": {
+            "image": "guild-reviewer-walk-ne.png",
+            "atlas": "guild-reviewer-walk-ne.json",
+            "frames": 16,
+            "durationSeconds": 1.3333333333333333,
+            "atlasSize": [
+              1536,
+              960
+            ],
+            "rootMotion": false,
+            "clip": "Walk_Loop",
+            "authored": false,
+            "loop": true,
+            "metersPerSecond": 1.0140268430113792
+          },
+          "sw": {
+            "image": "guild-reviewer-walk-sw.png",
+            "atlas": "guild-reviewer-walk-sw.json",
+            "frames": 16,
+            "durationSeconds": 1.3333333333333333,
+            "atlasSize": [
+              1536,
+              960
+            ],
+            "rootMotion": false,
+            "clip": "Walk_Loop",
+            "authored": false,
+            "loop": true,
+            "metersPerSecond": 1.0140268430113792
+          }
+        },
+        "work": {
+          "se": {
+            "image": "guild-reviewer-work-se.png",
+            "atlas": "guild-reviewer-work-se.json",
+            "frames": 12,
+            "durationSeconds": 1.0,
+            "atlasSize": [
+              1536,
+              640
+            ],
+            "rootMotion": false,
+            "clip": null,
+            "authored": true,
+            "loop": true,
+            "metersPerSecond": null
+          },
+          "nw": {
+            "image": "guild-reviewer-work-nw.png",
+            "atlas": "guild-reviewer-work-nw.json",
+            "frames": 12,
+            "durationSeconds": 1.0,
+            "atlasSize": [
+              1536,
+              640
+            ],
+            "rootMotion": false,
+            "clip": null,
+            "authored": true,
+            "loop": true,
+            "metersPerSecond": null
+          }
+        },
+        "handoff": {
+          "se": {
+            "image": "guild-reviewer-handoff-se.png",
+            "atlas": "guild-reviewer-handoff-se.json",
+            "frames": 12,
+            "durationSeconds": 1.0,
+            "atlasSize": [
+              1536,
+              640
+            ],
+            "rootMotion": false,
+            "clip": null,
+            "authored": true,
+            "loop": false,
+            "metersPerSecond": null
+          },
+          "nw": {
+            "image": "guild-reviewer-handoff-nw.png",
+            "atlas": "guild-reviewer-handoff-nw.json",
+            "frames": 12,
+            "durationSeconds": 1.0,
+            "atlasSize": [
+              1536,
+              640
+            ],
+            "rootMotion": false,
+            "clip": null,
+            "authored": true,
+            "loop": false,
+            "metersPerSecond": null
+          }
+        }
+      }
+    },
+    "mentor": {
+      "station": {
+        "world": [
+          -2.8,
+          -2.4,
+          0
+        ],
+        "pixel": [
+          413.9413,
+          587.8006
+        ],
+        "direction": "nw"
+      },
+      "states": {
+        "idle": {
+          "se": {
+            "image": "guild-mentor-idle-se.png",
+            "atlas": "guild-mentor-idle-se.json",
+            "frames": 30,
+            "durationSeconds": 2.5,
+            "atlasSize": [
+              1536,
+              1600
+            ],
+            "rootMotion": false,
+            "clip": "Idle_Loop",
+            "authored": false,
+            "loop": true,
+            "metersPerSecond": null
+          },
+          "nw": {
+            "image": "guild-mentor-idle-nw.png",
+            "atlas": "guild-mentor-idle-nw.json",
+            "frames": 30,
+            "durationSeconds": 2.5,
+            "atlasSize": [
+              1536,
+              1600
+            ],
+            "rootMotion": false,
+            "clip": "Idle_Loop",
+            "authored": false,
+            "loop": true,
+            "metersPerSecond": null
+          }
+        },
+        "walk": {
+          "se": {
+            "image": "guild-mentor-walk-se.png",
+            "atlas": "guild-mentor-walk-se.json",
+            "frames": 16,
+            "durationSeconds": 1.3333333333333333,
+            "atlasSize": [
+              1536,
+              960
+            ],
+            "rootMotion": false,
+            "clip": "Walk_Loop",
+            "authored": false,
+            "loop": true,
+            "metersPerSecond": 1.0140268430113792
+          },
+          "nw": {
+            "image": "guild-mentor-walk-nw.png",
+            "atlas": "guild-mentor-walk-nw.json",
+            "frames": 16,
+            "durationSeconds": 1.3333333333333333,
+            "atlasSize": [
+              1536,
+              960
+            ],
+            "rootMotion": false,
+            "clip": "Walk_Loop",
+            "authored": false,
+            "loop": true,
+            "metersPerSecond": 1.0140268430113792
+          },
+          "ne": {
+            "image": "guild-mentor-walk-ne.png",
+            "atlas": "guild-mentor-walk-ne.json",
+            "frames": 16,
+            "durationSeconds": 1.3333333333333333,
+            "atlasSize": [
+              1536,
+              960
+            ],
+            "rootMotion": false,
+            "clip": "Walk_Loop",
+            "authored": false,
+            "loop": true,
+            "metersPerSecond": 1.0140268430113792
+          },
+          "sw": {
+            "image": "guild-mentor-walk-sw.png",
+            "atlas": "guild-mentor-walk-sw.json",
+            "frames": 16,
+            "durationSeconds": 1.3333333333333333,
+            "atlasSize": [
+              1536,
+              960
+            ],
+            "rootMotion": false,
+            "clip": "Walk_Loop",
+            "authored": false,
+            "loop": true,
+            "metersPerSecond": 1.0140268430113792
+          }
+        },
+        "work": {
+          "se": {
+            "image": "guild-mentor-work-se.png",
+            "atlas": "guild-mentor-work-se.json",
+            "frames": 12,
+            "durationSeconds": 1.0,
+            "atlasSize": [
+              1536,
+              640
+            ],
+            "rootMotion": false,
+            "clip": null,
+            "authored": true,
+            "loop": true,
+            "metersPerSecond": null
+          },
+          "nw": {
+            "image": "guild-mentor-work-nw.png",
+            "atlas": "guild-mentor-work-nw.json",
+            "frames": 12,
+            "durationSeconds": 1.0,
+            "atlasSize": [
+              1536,
+              640
+            ],
+            "rootMotion": false,
+            "clip": null,
+            "authored": true,
+            "loop": true,
+            "metersPerSecond": null
+          }
+        },
+        "handoff": {
+          "se": {
+            "image": "guild-mentor-handoff-se.png",
+            "atlas": "guild-mentor-handoff-se.json",
+            "frames": 12,
+            "durationSeconds": 1.0,
+            "atlasSize": [
+              1536,
+              640
+            ],
+            "rootMotion": false,
+            "clip": null,
+            "authored": true,
+            "loop": false,
+            "metersPerSecond": null
+          },
+          "nw": {
+            "image": "guild-mentor-handoff-nw.png",
+            "atlas": "guild-mentor-handoff-nw.json",
+            "frames": 12,
+            "durationSeconds": 1.0,
+            "atlasSize": [
+              1536,
+              640
+            ],
+            "rootMotion": false,
+            "clip": null,
+            "authored": true,
+            "loop": false,
+            "metersPerSecond": null
+          }
+        }
+      }
+    }
+  },
+  "foregrounds": [
+    {
+      "role": "analyst",
+      "file": "guild-foreground-analyst.png",
+      "depthY": 435.6717,
+      "position": [
+        0,
+        0
+      ],
+      "size": [
+        1440,
+        1080
+      ],
+      "alphaFrame": [
+        547,
+        301,
+        764,
+        487
+      ]
+    },
+    {
+      "role": "mage",
+      "file": "guild-foreground-mage.png",
+      "depthY": 557.3749,
+      "position": [
+        0,
+        0
+      ],
+      "size": [
+        1440,
+        1080
+      ],
+      "alphaFrame": [
+        714,
+        414,
+        938,
+        610
+      ]
+    },
+    {
+      "role": "checker",
+      "file": "guild-foreground-checker.png",
+      "depthY": 721.3361,
+      "position": [
+        0,
+        0
+      ],
+      "size": [
+        1440,
+        1080
+      ],
+      "alphaFrame": [
+        843,
+        648,
+        885,
+        730
+      ]
+    },
+    {
+      "role": "reviewer",
+      "file": "guild-foreground-reviewer.png",
+      "depthY": 623.2974,
+      "position": [
+        0,
+        0
+      ],
+      "size": [
+        1440,
+        1080
+      ],
+      "alphaFrame": [
+        938,
+        514,
+        1085,
+        659
+      ]
+    },
+    {
+      "role": "mentor",
+      "file": "guild-foreground-mentor.png",
+      "depthY": 559.0651,
+      "position": [
+        0,
+        0
+      ],
+      "size": [
+        1440,
+        1080
+      ],
+      "alphaFrame": [
+        414,
+        464,
+        514,
+        585
+      ]
+    }
+  ],
+  "mentorPortrait": "guild-mentor-portrait.png"
+}

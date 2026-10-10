@@ -15,7 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [macos-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
@@ -72,3 +72,7 @@ jobs:
         run: node --test scripts/ai-graph/native-windows-filesystem.test.mjs scripts/ai-graph/host-process.test.mjs scripts/ai-graph/windows-job.test.mjs tests/install-platform.test.mjs tests/native-windows.test.mjs
       - name: Сборка интерфейса
         run: npm run build
+      - name: Проверка публичного состава
+        run: npm run check:public
+      - name: Состав устанавливаемого архива
+        run: npm run check:package

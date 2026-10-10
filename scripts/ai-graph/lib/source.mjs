@@ -140,8 +140,8 @@ function runGit(
   ]) {
     if (typeof process.env[key] === 'string') environment[key] = process.env[key];
   }
-  if (!['darwin', 'linux', 'win32'].includes(process.platform)) {
-    fail('UNSUPPORTED_PLATFORM', 'Source bundle поддерживает только macOS/Linux system Git');
+  if (!['darwin', 'win32'].includes(process.platform)) {
+    fail('UNSUPPORTED_PLATFORM', 'Source bundle поддерживает только macOS и native Windows system Git');
   }
   let gitStat;
   try {

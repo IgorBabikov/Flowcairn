@@ -70,13 +70,17 @@ function supportsCursorSafeExecution(executable) {
 }
 function hasExternalAuthentication(provider, executable, env) {
   const authenticationEnvironment = providerEnvironment(env);
-  const run = spawnSync(executable, provider === 'claude' ? ['auth', 'status'] : ['status'], {
+  const run = spawnSync(executable, provider === 'claude' ? ['auth', 'status'] : ['status', '--format', 'json'], {
     encoding: 'utf8', timeout: 10_000, maxBuffer: 16 * 1024,
     env: authenticationEnvironment, shell: false,
   });
   if (run.error || run.status !== 0) return false;
-  if (provider !== 'claude') return true;
-  try { return JSON.parse(`${run.stdout ?? ''}`).loggedIn === true; } catch { return false; }
+  // Cursor can successfully report that the user is not authenticated. Exit 0
+  // confirms the status command, not permission to send a project to the AI.
+  try {
+    const status = JSON.parse(`${run.stdout ?? ''}`);
+    return provider === 'claude' ? status?.loggedIn === true : status?.isAuthenticated === true;
+  } catch { return false; }
 }
 /** @param {'claude'|'cursor'} provider @param {{executable?: string, env?: NodeJS.ProcessEnv}} [options] */
 export function probeExternalProvider(provider, { executable, env = process.env } = {}) {

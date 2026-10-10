@@ -1,1 +1,3 @@
-tools/ai-graph-viewer/dist/* linguist-generated=true
+# Generated RPG JSON is hash-bound binary-like payload; keep bytes stable on Windows.
+tools/ai-graph-viewer/assets/rpg/*.json -text
+tools/ai-graph-viewer/dist/assets/rpg/*.json -text

@@ -22,7 +22,7 @@ const deferred = () => { let resolve; const promise = new Promise((done) => { re
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 const executionPart = ({ learning: _learning, operations: _operations, revision: _revision, ...state }) => state;
 
-function fixture(t) {
+function fixture(t, { reasoningEffort } = {}) {
   const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'flowcairn-learning-jobs-'))), store = new GraphStore(root);
   const preparedHandles = [], calls = { prepared: 0, executed: 0, dispatched: 0, disposed: 0, inspected: 0 };
   const runtime = { output: null, completion: null, throwAfterStart: false, beforeGo: null, prepareGate: null,
@@ -96,7 +96,8 @@ function fixture(t) {
       const prepared = prepareLearningProvider({ ...input, provider: 'codex', model: 'fixture-model' });
       const handle = { prepared, input: readPreparedLearningInput(prepared), inputHash: prepared.inputHash, schemaHash: prepared.schemaHash,
         methodHash: prepared.methodHash, materialHash: prepared.materialHash, preparationHash: prepared.preparationHash, kind: prepared.kind,
-        providerBinding: { provider: 'fixture', model: 'fixture-model', toolchainHash: hashObject('toolchain'), preflightHash: hashObject('preflight'), policyHash: hashObject('sandbox-policy') },
+        providerBinding: { provider: 'fixture', model: 'fixture-model', ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
+          toolchainHash: hashObject('toolchain'), preflightHash: hashObject('preflight'), policyHash: hashObject('sandbox-policy') },
         command: { executable: process.execPath, args: ['fixture-only-no-spawn'], cwd: prepared.scratch, env: {} },
         output: runtime.output ?? JSON.stringify(input.question ? { text: 'Значение счетчика равно 2.', anchors: [anchor], limitations: ['Fixture'] } : body), wait: deferred() };
       preparedHandles.push(handle);
@@ -159,6 +160,16 @@ async function generate(fx) {
   assert.equal(job.status, 'ready', JSON.stringify(job));
   return { started, job, lessonHash: job.result.lessonHash };
 }
+
+test('усиление сохраняется в учебной job и его поздняя подмена нарушает привязку согласия', async (t) => {
+  const fx = fixture(t, { reasoningEffort: 'xhigh' });
+  const { started, job } = await generate(fx);
+  const reopened = new GraphStore(fx.root);
+  const saved = readLearningJobs(reopened, reopened.readRun(fx.runId)).find(({ job: record }) => record.id === started.jobId).job;
+  assert.equal(saved.providerBinding.reasoningEffort, 'xhigh');
+  fx.replaceJob(started.jobId, { providerBinding: { ...job.providerBinding, reasoningEffort: 'low' } });
+  assert.throws(() => readLearningJobs(reopened, reopened.readRun(fx.runId)), { code: 'LEARNING_JOB_INTEGRITY' });
+});
 
 test('start returns a durable 202-style job before execute; exact replay never invokes a second provider', async (t) => {
   const fx = fixture(t), request = fx.request(), before = executionPart(fx.state());

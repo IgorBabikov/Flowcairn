@@ -137,8 +137,8 @@ function gitEnvironment() {
 }
 
 function assertSystemGit() {
-  if (!['darwin', 'linux', 'win32'].includes(process.platform)) {
-    fail('UNSUPPORTED_PLATFORM', 'Workspace fingerprint поддерживает macOS/Linux system Git');
+  if (!['darwin', 'win32'].includes(process.platform)) {
+    fail('UNSUPPORTED_PLATFORM', 'Workspace fingerprint поддерживает macOS и native Windows system Git');
   }
   let stat;
   try {

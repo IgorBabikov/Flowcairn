@@ -1,8 +1,9 @@
-import type { LearningMaterialResponse, SavedSource, GenerateLesson, AskLesson, SetLearningProgress } from '../contracts';
+import type { LearningMaterialResponse, SavedSource, GenerateLesson, AskLesson, SetLearningProgress, LearningChapterBook, LearningPracticeLog, LearningObservationResponse, PracticeAppendRequest, PracticeFeedbackRequest } from '../contracts';
 import { assertLearning, hash, id, integer } from './validation';
 import { decodeLearningMaterial, decodeLearningSource } from './material-decoder';
 import { decodeLearningCommand, decodeProgressResponse, decodeLearningJob, decodeLearningAnswer } from './job-decoder';
 import { decodeLearningLesson } from './lesson-decoder';
+import { decodeLearningChapterBook, decodeLearningChapter, decodeLearningObservation, decodeLearningPracticeLog, decodePracticeMutation } from './learning-s5b-decoder';
 
 type ReadJson = (url: string, init?: RequestInit) => Promise<unknown>;
 function materialUrl(runId: string, materialHash: string) {
@@ -47,6 +48,31 @@ export function createLearningApi(read: ReadJson) {
     async learningLesson(runId: string, lessonHash: string, material: LearningMaterialResponse, signal?: AbortSignal) {
       assertLearning(id(runId) && hash(lessonHash) && hash(material.id) && material.lessonHash === lessonHash, 'Разбор не связан с выбранным материалом.');
       return decodeLearningLesson(await read(`/api/runs/${encodeURIComponent(runId)}/learning/lessons/${lessonHash}`, readOptions(signal)), lessonHash, material);
+    },
+    async learningChapterBook(runId: string, materialHash: string, bookHash?: string, signal?: AbortSignal): Promise<LearningChapterBook> {
+      assertLearning(id(runId) && hash(materialHash) && (bookHash === undefined || hash(bookHash)));
+      const url = bookHash ? `${materialUrl(runId, materialHash)}/chapters/books/${bookHash}` : `${materialUrl(runId, materialHash)}/chapters`;
+      return decodeLearningChapterBook(await read(url, readOptions(signal)), materialHash, bookHash);
+    },
+    async learningChapter(runId: string, materialHash: string, bookHash: string, chapterHash: string, signal?: AbortSignal) {
+      assertLearning(id(runId) && hash(materialHash) && hash(bookHash) && hash(chapterHash));
+      return decodeLearningChapter(await read(`${materialUrl(runId, materialHash)}/chapters/books/${bookHash}/chapters/${chapterHash}`, readOptions(signal)), materialHash, chapterHash);
+    },
+    async learningObservation(runId: string, materialHash: string, observationHash: string, signal?: AbortSignal): Promise<LearningObservationResponse> {
+      assertLearning(id(runId) && hash(materialHash) && hash(observationHash));
+      return decodeLearningObservation(await read(`${materialUrl(runId, materialHash)}/observations/${observationHash}`, readOptions(signal)), materialHash, observationHash);
+    },
+    async learningPractice(runId: string, materialHash: string, logHash: string, signal?: AbortSignal): Promise<LearningPracticeLog> {
+      assertLearning(id(runId) && hash(materialHash) && hash(logHash));
+      return decodeLearningPracticeLog(await read(`${materialUrl(runId, materialHash)}/practice/${logHash}`, readOptions(signal)), materialHash, logHash);
+    },
+    async appendLearningPractice(runId: string, request: PracticeAppendRequest) {
+      assertLearning(id(runId) && hash(request.materialHash) && id(request.operationId) && hash(request.planHash));
+      return decodePracticeMutation(await post(`${materialUrl(runId, request.materialHash)}/practice`, request), request.materialHash);
+    },
+    async appendLearningPracticeFeedback(runId: string, request: PracticeFeedbackRequest) {
+      assertLearning(id(runId) && hash(request.materialHash) && id(request.operationId) && hash(request.planHash) && hash(request.logHash) && hash(request.attemptHash));
+      return decodePracticeMutation(await post(`${materialUrl(runId, request.materialHash)}/practice/feedback`, request), request.materialHash);
     },
   };
 }

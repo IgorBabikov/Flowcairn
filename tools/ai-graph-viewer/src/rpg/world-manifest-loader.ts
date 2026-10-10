@@ -1,5 +1,6 @@
 import { LOCATION_LABELS, type Hotspot, type WorldAsset, type WorldManifest, type LocationId } from './world-manifest';
 import type { Point } from './world-navigation';
+import { decodeGuildManifest } from './guild-manifest';
 
 const invalid = () => { throw new Error('Некорректная карта мира'); };
 function record(value: unknown): Record<string, unknown> {
@@ -63,6 +64,7 @@ export function decodeWorldManifest(value: unknown): WorldManifest {
   if (!['guild', 'workshop', 'archive'].every(id => hotspots.some(h => h.id === id))) return invalid();
   const rooms: WorldManifest['rooms'] = {};
   for (const id of ['workshop', 'archive'] as const) {
+    if (!Object.hasOwn(record(data.rooms), id)) continue;
     const entry = record(record(data.rooms)[id]);
     rooms[id] = { background: asset(string(entry.background)), hero: asset('hero-idle'),
       heroPosition: point(entry.heroPositionPx), heroHeight: number(entry.heroVisibleHeightPx, 1),
@@ -71,7 +73,8 @@ export function decodeWorldManifest(value: unknown): WorldManifest {
   const matte = string(record(data.viewport).matte);
   if (!/^#[0-9a-f]{6}$/i.test(matte)) return invalid();
   return { bounds, background: asset(string(data.background)), hero: asset('hero-idle'), mentor: null,
-    navigation: { points, roads, snapTolerance: number(nav.clickSnapTolerancePx, 0, 100), speed: number(nav.speedPxPerSecond, 1, 1000) }, spawn, hotspots, matte, rooms };
+    navigation: { points, roads, snapTolerance: number(nav.clickSnapTolerancePx, 0, 100), speed: number(nav.speedPxPerSecond, 1, 1000) }, spawn, hotspots, matte, rooms,
+    guild: null, guildUrl: data.guildManifest === undefined ? null : data.guildManifest === 'guild-cast.json' ? '/assets/rpg/guild-cast.json' : invalid() };
 }
 
 export async function loadWorldManifest(signal: AbortSignal): Promise<WorldManifest> {
@@ -85,6 +88,12 @@ export async function loadWorldManifest(signal: AbortSignal): Promise<WorldManif
     if (!response.ok) throw new Error('Карта недоступна');
     const text = await response.text();
     if (text.length > 65536) return invalid();
-    return decodeWorldManifest(JSON.parse(text));
+    const decoded = decodeWorldManifest(JSON.parse(text));
+    if (!decoded.guildUrl) return decoded;
+    const cast = await fetch(decoded.guildUrl, { cache: 'no-store', signal: controller.signal });
+    if (!cast.ok) throw new Error('Гильдия недоступна');
+    const castText = await cast.text();
+    if (castText.length > 65536) return invalid();
+    return { ...decoded, guild: decodeGuildManifest(JSON.parse(castText)) };
   } finally { window.clearTimeout(timeout); signal.removeEventListener('abort', forward); }
 }

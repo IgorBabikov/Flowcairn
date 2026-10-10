@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { linkSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { sha256 } from './lib/io.mjs';
@@ -22,6 +24,77 @@ function fixture(t, { source = 'first\nsecond\nthird\n', method = 'source-review
   return { input, file, worktree, assessment, verification, validate: () => validateRequirementAssessments(input) };
 }
 const rejected = (action) => assert.throws(action, (error) => error.code === 'REQUIREMENT_EVIDENCE_INVALID');
+
+function observeReads(t, read, action) {
+  const original = fs.readSync;
+  const whole = t.mock.method(fs, 'readFileSync', () => assert.fail('Citation verification must not retain a whole source file'));
+  const chunk = t.mock.method(fs, 'readSync', (...args) => read(original, args));
+  syncBuiltinESMExports();
+  try { action(); } finally { chunk.mock.restore(); whole.mock.restore(); syncBuiltinESMExports(); }
+}
+
+test('citations beyond 2 MiB stream the complete source including a huge unquoted line', t => {
+  const source = `${'x'.repeat(3 * 1024 * 1024)}\nsecond\n${'z'.repeat(2 * 1024 * 1024)}`;
+  const f = fixture(t, { source });
+  let bytes = 0, eof = false;
+  observeReads(t, (read, args) => {
+    assert.ok(args[3] <= 64 * 1024);
+    const count = read(...args); bytes += count; eof ||= count === 0; return count;
+  }, () => assert.doesNotThrow(f.validate));
+  assert.equal(bytes, Buffer.byteLength(source));
+  assert.equal(eof, true);
+  writeFileSync(f.file, `${source.slice(0, -1)}y`);
+  rejected(f.validate);
+});
+
+test('UTF-8 and CRLF chunk boundaries preserve exact multiline quotations', t => {
+  for (const prefix of ['x'.repeat(65534) + '\n', 'x'.repeat(65535) + '\r\n']) {
+    const f = fixture(t, { source: `${prefix}Я🙂\r\nконец\r\n` });
+    f.assessment.citations[0].quote = 'Я🙂\nконец\n';
+    assert.doesNotThrow(f.validate);
+    f.assessment.citations[0].quote = 'Я🙂\nконе';
+    rejected(f.validate);
+  }
+  const bom = fixture(t, { source: '\uFEFFfirst\nsecond\r' });
+  bom.assessment.citations[0].quote = 'second\r';
+  assert.doesNotThrow(bom.validate);
+});
+
+test('a short quotation cannot accept a prefix of a huge selected line', t => {
+  const f = fixture(t, { source: `first\nsecond${'x'.repeat(3 * 1024 * 1024)}` });
+  rejected(f.validate);
+});
+
+test('valid quoted lines never hide invalid UTF-8 or binary tails after 2 MiB', t => {
+  for (const tail of [Buffer.from([255]), Buffer.from([0xe2, 0x82]), Buffer.from([0])]) {
+    const f = fixture(t, { source: Buffer.concat([Buffer.from(`first\nsecond\n${'x'.repeat(3 * 1024 * 1024)}`), tail]) });
+    rejected(f.validate);
+  }
+});
+
+test('a matching quote is rejected on premature EOF or concurrent source changes', t => {
+  for (const change of ['early-eof', 'grow', 'truncate', 'replace', 'ancestor']) {
+    const source = `first\nsecond\n${'x'.repeat(192 * 1024)}`;
+    const f = fixture(t, { source });
+    let changed = false;
+    observeReads(t, (read, args) => {
+      if (changed && change === 'early-eof') return 0;
+      const count = read(...args);
+      if (!changed && count) {
+        changed = true;
+        if (change === 'grow') fs.appendFileSync(f.file, 'extra');
+        if (change === 'truncate') fs.truncateSync(f.file, 65536);
+        if (change === 'replace') { fs.renameSync(f.file, `${f.file}.old`); writeFileSync(f.file, source); }
+        if (change === 'ancestor') {
+          const parent = path.dirname(f.file), moved = `${parent}-old`;
+          fs.renameSync(parent, moved); symlinkSync(moved, parent);
+        }
+      }
+      return count;
+    }, () => rejected(f.validate));
+    assert.equal(changed, true);
+  }
+});
 
 test('real LF and CRLF files accept exact single-line and multiline citations', (t) => {
   for (const newline of ['\n', '\r\n']) {

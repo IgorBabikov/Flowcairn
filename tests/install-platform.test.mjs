@@ -1,31 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import { assertProjectPlatform, assertRuntimePlatform, defaultProvider } from '../scripts/ai-graph/lib/platform.mjs';
 import { openBrowser } from '../bin/browser.mjs';
 import { checkUpdate } from '../bin/update.mjs';
 import { instructionsCommand } from '../bin/instructions.mjs';
 
-test('native Windows supports Node22 while WSL requires its own Linux filesystem', (t) => {
+test('native macOS and Windows support Node22 and local Windows drives', () => {
   assertRuntimePlatform({ platform: 'win32', node: '22.13.1' });
   assertProjectPlatform('C:\\Projects\\fixture', { platform: 'win32' });
   assert.throws(() => assertProjectPlatform('\\\\server\\share', { platform: 'win32' }), { code: 'WINDOWS_FILESYSTEM' });
-  assert.throws(() => assertRuntimePlatform({ platform: 'linux', node: '24.0.0' }), { code: 'NODE_VERSION' });
-  for (const platform of ['linux', 'darwin']) assertRuntimePlatform({ platform, node: '22.13.1' });
-  assert.equal(defaultProvider('linux'), 'codex');
+  for (const platform of ['darwin', 'win32']) assertRuntimePlatform({ platform, node: '22.13.1' });
   assert.equal(defaultProvider('darwin'), 'codex');
   assert.equal(defaultProvider('win32'), 'codex');
-  const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'flowcairn-platform-')));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
-  const opts = { platform: 'linux', kernel: '6.6.87-microsoft-standard-WSL2', filesystem: () => ({ type: 0xef53 }), mountInfo: () => `1 0 8:1 / ${root} rw - ext4 /dev/sda rw` };
-  assertProjectPlatform(root, opts);
-  assert.throws(() => assertProjectPlatform(root, { ...opts, kernel: '4.4-Microsoft' }), { code: 'WSL_VERSION' });
-  assert.throws(() => assertProjectPlatform(root, { ...opts, filesystem: () => ({ type: 0x9fa0 }) }), { code: 'WSL_FILESYSTEM' });
-  assert.throws(() => assertProjectPlatform(root, { ...opts, mountInfo: () => `1 0 8:1 / / rw - ext4 /dev/sda rw\n2 1 0:1 / ${root} rw - drvfs C: rw` }), { code: 'WSL_FILESYSTEM' });
-  assert.throws(() => assertProjectPlatform(root, { ...opts, mountInfo: () => '' }), { code: 'WSL_FILESYSTEM' });
 });
 
 test('browser launch uses fixed executables and a loopback URL, failure is a fallback', async () => {
@@ -43,7 +30,7 @@ test('browser launch uses fixed executables and a loopback URL, failure is a fal
   assert.equal(calls[0][2].shell, false);
   assert.equal(await openBrowser('https://example.invalid', { launcher }), false);
   assert.equal(calls.length, 1);
-  assert.equal(await openBrowser(url, { platform: 'linux', launcher: () => { throw Error('headless'); } }), false);
+  assert.equal(await openBrowser(url, { platform: 'freebsd', launcher: () => { throw Error('unsupported'); } }), false);
 });
 
 test('update is bounded metadata-only with fixed registry, no redirects and repository validation', async () => {

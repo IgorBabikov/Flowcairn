@@ -25,9 +25,7 @@ function installer(provider, fail = false) {
       writeFileSync(path.join(pkg, 'package.json'), JSON.stringify({ name: names[provider], version: '9.9.9' }));
       writeFileSync(path.join(pkg, 'bin', provider === 'codex' ? 'codex.js' : 'claude.exe'), 'fixture');
       if (provider === 'claude') {
-        const report = process.platform === 'linux' ? process.report.getReport() : null;
-        const suffix = report && !report.header.glibcVersionRuntime ? '-musl' : '';
-        const name = `${names[provider]}-${process.platform}-${process.arch}${suffix}`;
+        const name = `${names[provider]}-${process.platform}-${process.arch}`;
         const native = path.join(target, 'node_modules', name);
         mkdirSync(native, { recursive: true });
         writeFileSync(path.join(native, 'package.json'), JSON.stringify({ name, version: '9.9.9' }));

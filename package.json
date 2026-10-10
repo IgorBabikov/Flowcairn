@@ -1,12 +1,16 @@
 {
   "name": "flowcairn",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "description": "Выполнение задач и изучение своего кода в 2D-мире",
   "type": "module",
   "license": "MIT",
   "engines": {
     "node": ">=22 <23"
   },
+  "os": [
+    "darwin",
+    "win32"
+  ],
   "bin": {
     "flowcairn": "bin/flowcairn.mjs"
   },
@@ -48,6 +52,7 @@
   "dependencies": {
     "@anthropic-ai/claude-code": "2.1.198",
     "@openai/codex": "0.156.1",
+    "diff": "9.0.0",
     "picomatch": "4.0.7",
     "smol-toml": "1.9.0",
     "yaml": "2.9.1",

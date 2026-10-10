@@ -7,6 +7,7 @@ import path from 'node:path';
 import { parse as parseToml } from 'smol-toml';
 import { lstatHostSync as lstatSync, fstatHostSync as fstatSync, crossStatIdentity, isPrivateMode, isTrustedMode, noFollowReadFlags } from './host-filesystem.mjs';
 import { GraphError, hashObject } from './io.mjs';
+import { learningCodexNativeLayout, learningNativeEnvironment } from './learning-native-platform.mjs';
 
 /** @typedef {{node:string,codexEntry:string,digest:string,identity:{nodeVersion:string,nodeDigest:string,codexVersion:string,
  * codexEntryDigest:string,codexNativeDigest:string,codexManifestDigest:string,codexNativeManifestDigest:string}}} LearningToolchain */
@@ -23,9 +24,7 @@ const fail = (code, message) => { throw new GraphError(code, message); };
 const inode = (stat) => `${stat.dev}:${stat.ino}`;
 
 function environment() {
-  const env = { PATH: '/usr/bin:/bin:/usr/sbin:/sbin', LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8', NO_COLOR: '1', OPENSSL_CONF: os.devNull };
-  for (const key of ['HOME', 'CODEX_HOME']) if (process.env[key]) env[key] = process.env[key];
-  return env;
+  return { ...learningNativeEnvironment('codex'), OPENSSL_CONF: os.devNull };
 }
 
 function fileBytes(file, maximum) {
@@ -69,15 +68,15 @@ function digestFile(file) {
 /** The caller supplies the existing runner's verified toolchain, not HTTP paths.
  * Recheck pinned bytes before preflight/dispatch, without auth or version calls. */
 function verifyToolchain(toolchain) {
-  if (process.platform !== 'darwin') fail('LEARNING_CODEX_PLATFORM_UNVERIFIED', 'Учебный native profile пока проверен только на macOS.');
+  if (!['darwin', 'win32'].includes(process.platform)) fail('LEARNING_CODEX_PLATFORM_UNVERIFIED', 'Учебный native profile поддерживает только macOS и native Windows.');
   if (!toolchain?.identity || !CODEX_LEARNING_VERSIONS.includes(toolchain.identity.codexVersion) || !/^v22\./.test(toolchain.identity.nodeVersion))
     fail('LEARNING_CODEX_VERSION_UNSUPPORTED', 'Версия Codex/Node не проверена для учебного adapter.');
   if (hashObject(toolchain.identity) !== toolchain.digest || !path.isAbsolute(toolchain.node) || !path.isAbsolute(toolchain.codexEntry))
     fail('LEARNING_CODEX_TOOLCHAIN_INVALID', 'Нужен проверенный toolchain текущего runner.');
   const packageFile = path.resolve(path.dirname(toolchain.codexEntry), '..', 'package.json');
-  const nativePackage = createRequire(toolchain.codexEntry).resolve(`@openai/codex-${process.platform}-${process.arch}/package.json`);
-  const triple = `${process.arch === 'arm64' ? 'aarch64' : 'x86_64'}-apple-darwin`;
-  const native = path.join(path.dirname(nativePackage), 'vendor', triple, 'bin', 'codex');
+  const layout = learningCodexNativeLayout();
+  const nativePackage = createRequire(toolchain.codexEntry).resolve(`${layout.packageName}/package.json`);
+  const native = path.join(path.dirname(nativePackage), 'vendor', layout.triple, 'bin', layout.binary);
   for (const [file, expected] of [[toolchain.node, toolchain.identity.nodeDigest], [toolchain.codexEntry, toolchain.identity.codexEntryDigest],
     [packageFile, toolchain.identity.codexManifestDigest], [nativePackage, toolchain.identity.codexNativeManifestDigest], [native, toolchain.identity.codexNativeDigest]]) {
     if (digestFile(file) !== expected) fail('LEARNING_CODEX_TOOLCHAIN_DRIFT', 'Файлы Codex изменились после проверки runner.');
@@ -105,7 +104,7 @@ function mcpKeysFromFiles(candidates) {
   return [...names].sort();
 }
 function mcpMetadataKeys() {
-  return mcpKeysFromFiles([path.join(process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex'), 'config.toml'), '/etc/codex/config.toml', '/etc/codex/managed_config.toml']);
+  return mcpKeysFromFiles([path.join(process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex'), 'config.toml')]);
 }
 
 function filesystem(scratch) { return { ':root': 'deny', ':minimal': 'read', ':tmpdir': 'deny', ':slash_tmp': 'deny', [scratch]: 'read' }; }
@@ -226,24 +225,26 @@ export async function preflightCodexLearning({ toolchain, scratch }) {
 }
 
 /** Create the command only from a locally issued fresh preflight receipt. */
-export function codexLearningCommand({ receipt, scratch, schemaFile, resultFile, model }) {
+export function codexLearningCommand({ receipt, scratch, schemaFile, resultFile, model, reasoningEffort = undefined }) {
   const verified = receipts.get(receipt);
   if (!verified || verified.expiresAt < Date.now() || scratch !== verified.scratch || inode(lstatSync(scratch, { bigint: true })) !== verified.identity)
     fail('LEARNING_CODEX_PREFLIGHT_REQUIRED', 'Нужен свежий preflight именно этого учебного scratch.');
   verifyToolchain(verified.toolchain);
   if (hashObject(mcpMetadataKeys()) !== verified.metadataHash) fail('LEARNING_CODEX_CONFIG_DRIFT', 'Набор интеграций изменился после preflight.');
   if (schemaFile !== path.join(scratch, 'schema.json') || resultFile !== path.join(scratch, 'result.json')
-    || typeof model !== 'string' || model === 'provider-default' || !/^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,159}$/.test(model))
+    || typeof model !== 'string' || model === 'provider-default' || !/^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,159}$/.test(model)
+    || (reasoningEffort !== undefined && (typeof reasoningEffort !== 'string' || !/^[a-z][a-z0-9-]{0,31}$/.test(reasoningEffort))))
     fail('LEARNING_CODEX_COMMAND_INVALID', 'Неверные поля учебной команды.');
-  return buildCommand(verified.toolchain, verified.settings, scratch, schemaFile, resultFile, model);
+  return buildCommand(verified.toolchain, verified.settings, scratch, schemaFile, resultFile, model, reasoningEffort);
 }
 
-function buildCommand({ node, codexEntry }, settings, scratch, schemaFile, resultFile, model) {
+function buildCommand({ node, codexEntry }, settings, scratch, schemaFile, resultFile, model, reasoningEffort = undefined) {
   // Exec ignores user config; app-server preflight tolerates it, explicitly
   // disabling every discovered integration. Do not transfer exec-only flags.
   return Object.freeze({ executable: node, args: Object.freeze([codexEntry, 'exec', '--ignore-user-config', '--ignore-rules', '--strict-config', '--ephemeral',
     '--skip-git-repo-check', '--json', '--output-schema', schemaFile, '--output-last-message', resultFile, '--cd', scratch,
-    '--model', model, ...configArgs(settings), '-']), cwd: scratch, env: Object.freeze(environment()) });
+    '--model', model, ...configArgs([...settings,
+      ...(reasoningEffort === undefined ? [] : [`model_reasoning_effort=${JSON.stringify(reasoningEffort)}`])]), '-']), cwd: scratch, env: Object.freeze(environment()) });
 }
 
 export const LEARNING_RUNNER_TESTING = Object.freeze({ validateConfiguration, controls, filesystem, disabled: DISABLED, readConfiguration, mcpKeysFromFiles, buildCommand });

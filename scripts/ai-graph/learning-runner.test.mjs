@@ -74,6 +74,15 @@ test('Codex argv applies independent controls with exact read-only policy and no
   assert.equal(Object.isFrozen(command.args), true);
 });
 
+test('учебная команда передает усиление отдельным безопасным параметром конфигурации', (t) => {
+  const scratch = fixture(t), settings = helpers.controls(scratch, []);
+  const command = helpers.buildCommand({ node: process.execPath, codexEntry: '/verified/codex.js' }, settings, scratch,
+    path.join(scratch, 'schema.json'), path.join(scratch, 'result.json'), 'configured-model', 'xhigh');
+  assert.ok(command.args.includes('model_reasoning_effort="xhigh"'));
+  assert.equal(command.args.filter(value => value.startsWith('model_reasoning_effort=')).length, 1);
+  assert.equal(command.args.at(-1), '-');
+});
+
 test('read-only config protocol sends only initialize/read methods and terminates the helper', async (t) => {
   const scratch = fixture(t), entry = path.join(scratch, 'fake-cli.mjs'), record = path.join(scratch, 'methods.json');
   const data = effective(scratch);
@@ -100,6 +109,6 @@ test('unknown versions and forged preflight receipts never yield a command', asy
   const scratch = fixture(t);
   for (const codexVersion of ['unknown', '0.157.2', '0.158.0', '0.157.1-alpha.1'])
     await assert.rejects(preflightCodexLearning({ scratch, toolchain: { identity: { codexVersion, nodeVersion: process.version } } }),
-      { code: process.platform === 'darwin' ? 'LEARNING_CODEX_VERSION_UNSUPPORTED' : 'LEARNING_CODEX_PLATFORM_UNVERIFIED' });
+      { code: ['darwin', 'win32'].includes(process.platform) ? 'LEARNING_CODEX_VERSION_UNSUPPORTED' : 'LEARNING_CODEX_PLATFORM_UNVERIFIED' });
   assert.throws(() => codexLearningCommand({ receipt: { allowed: true }, scratch, schemaFile: '', resultFile: '', model: 'configured-model' }), { code: 'LEARNING_CODEX_PREFLIGHT_REQUIRED' });
 });

@@ -39,11 +39,11 @@ function fixture(t) {
   return { root, before, content };
 }
 
-test('attempt diff uses captured working bytes, applies cleanly and preserves user baseline', (t) => {
+test('attempt diff uses captured working bytes, applies cleanly and preserves user baseline', async (t) => {
   const { root, before, content } = fixture(t);
   writeFileSync(path.join(root, 'src/file.txt'), 'AI change\n');
   const after = fingerprintWorkspace(root),
-    diff = buildAttemptDiff(root, before, after, content);
+    diff = await buildAttemptDiff(root, before, after, content);
   assert.equal(diff.complete, true);
   assert.ok(diff.content.includes('-user staged baseline'));
   assert.ok(!diff.content.includes('-original'));
@@ -53,12 +53,12 @@ test('attempt diff uses captured working bytes, applies cleanly and preserves us
   assert.equal(readFileSync(path.join(root, 'src/file.txt'), 'utf8'), 'AI change\n');
 });
 
-test('new, deleted, Unicode and no-final-newline changes are hash-bound and readable', (t) => {
+test('new, deleted, Unicode and no-final-newline changes are hash-bound and readable', async (t) => {
   const { root, before, content } = fixture(t);
   unlinkSync(path.join(root, 'src/file.txt'));
   writeFileSync(path.join(root, 'src/новый.txt'), 'new content');
   const after = fingerprintWorkspace(root),
-    diff = buildAttemptDiff(root, before, after, content);
+    diff = await buildAttemptDiff(root, before, after, content);
   assert.equal(diff.complete, true);
   assert.ok(diff.content.includes('new file mode'));
   assert.ok(diff.content.includes('deleted file mode'));
@@ -69,18 +69,18 @@ test('new, deleted, Unicode and no-final-newline changes are hash-bound and read
   assert.equal(readFileSync(path.join(root, 'src/новый.txt'), 'utf8'), 'new content');
 });
 
-test('missing before bytes, changed after bytes and sensitive content cannot create complete proof', (t) => {
+test('missing before bytes, changed after bytes and sensitive content cannot create complete proof', async (t) => {
   const { root, before, content } = fixture(t);
   writeFileSync(path.join(root, 'src/file.txt'), 'after');
   const after = fingerprintWorkspace(root);
-  assert.throws(() => buildAttemptDiff(root, before, after, new Map()), {
+  await assert.rejects(() => buildAttemptDiff(root, before, after, new Map()), {
     code: 'DIFF_BEFORE_MISSING',
   });
   writeFileSync(path.join(root, 'src/file.txt'), 'changed again');
-  assert.throws(() => buildAttemptDiff(root, before, after, content), { code: 'ARTIFACT_SOURCE' });
+  await assert.rejects(() => buildAttemptDiff(root, before, after, content), { code: 'ARTIFACT_SOURCE' });
   writeFileSync(path.join(root, 'src/file.txt'), 'sk-aaaaaaaaaaaaaaaaaaaaaaaa');
   const sensitive = fingerprintWorkspace(root);
-  const diff = buildAttemptDiff(root, before, sensitive, content);
+  const diff = await buildAttemptDiff(root, before, sensitive, content);
   assert.equal(diff.complete, false);
   assert.ok(!diff.content.includes('sk-aaaa'));
 });
@@ -91,7 +91,7 @@ function capture(root) {
   return { before, contents: captureBeforeContents(root, before, { permissions: ['workspace.source.write'], resources: { writes: ['src'] } }) };
 }
 
-test('megabyte moves, JSON member edits and full deletions have exact compact operation evidence', (t) => {
+test('megabyte moves, JSON member edits and full deletions have exact compact operation evidence', async (t) => {
   const { root } = fixture(t);
   const moved = JSON.stringify(largeDictionary('move'), null, 2) + '\n';
   const edited = largeDictionary('edit');
@@ -104,7 +104,7 @@ test('megabyte moves, JSON member edits and full deletions have exact compact op
   unlinkSync(path.join(root, 'src/delete.json'));
   const removed = edited['key-17']; delete edited['key-17']; edited['key-27'] = 'replacement'; edited['new-key'] = { enabled: true };
   writeFileSync(path.join(root, 'src/edit.json'), JSON.stringify(edited, null, 2));
-  const after = fingerprintWorkspace(root), diff = buildAttemptDiff(root, before, after, contents);
+  const after = fingerprintWorkspace(root), diff = await buildAttemptDiff(root, before, after, contents);
   assert.equal(diff.complete, true); assert.equal(diff.mediaType, 'application/json');
   assert.ok(Buffer.byteLength(diff.content) < 10 * 1024);
   const report = validateChangeEvidence(diff.content, { changedFiles: ['src/move.json', 'src/moved.json', 'src/edit.json', 'src/delete.json'], beforeFingerprint: before.hash, afterFingerprint: after.hash });
@@ -121,7 +121,7 @@ test('megabyte moves, JSON member edits and full deletions have exact compact op
   assert.ok(!diff.content.includes('delete-4999'));
 });
 
-test('ordinary large source edits use bounded real hunks that reconstruct exact attempt bytes', (t) => {
+test('ordinary large source edits use bounded real hunks that reconstruct exact attempt bytes', async (t) => {
   const { root } = fixture(t);
   const lines = Array.from({ length: 6000 }, (_, index) => `export const value${index} = '${'text '.repeat(40)}';`);
   const original = lines.join('\n') + '\n'; assert.ok(Buffer.byteLength(original) > 1024 * 1024);
@@ -129,14 +129,14 @@ test('ordinary large source edits use bounded real hunks that reconstruct exact 
   const { before, contents } = capture(root);
   lines[3000] = 'export const value3000 = 42;'; const target = lines.join('\n') + '\n';
   writeFileSync(path.join(root, 'src/file.txt'), target);
-  const diff = buildAttemptDiff(root, before, fingerprintWorkspace(root), contents);
+  const diff = await buildAttemptDiff(root, before, fingerprintWorkspace(root), contents);
   assert.equal(diff.complete, true); assert.equal(diff.mediaType, 'text/x-diff'); assert.ok(Buffer.byteLength(diff.content) < 3000);
   writeFileSync(path.join(root, 'src/file.txt'), original);
   execFileSync('/usr/bin/git', ['apply', '-'], { cwd: root, input: diff.content });
   assert.equal(readFileSync(path.join(root, 'src/file.txt'), 'utf8'), target);
 });
 
-test('sensitive bytes cannot be hidden behind move, JSON or full deletion descriptors', (t) => {
+test('sensitive bytes cannot be hidden behind move, JSON or full deletion descriptors', async (t) => {
   for (const operation of ['move', 'json', 'delete']) {
     const { root } = fixture(t); const value = largeDictionary(operation); value.token = 'sk-aaaaaaaaaaaaaaaaaaaaaaaa';
     writeFileSync(path.join(root, 'src/sensitive-data.json'), JSON.stringify(value));
@@ -144,34 +144,34 @@ test('sensitive bytes cannot be hidden behind move, JSON or full deletion descri
     if (operation === 'move') renameSync(path.join(root, 'src/sensitive-data.json'), path.join(root, 'src/moved.json'));
     else if (operation === 'delete') unlinkSync(path.join(root, 'src/sensitive-data.json'));
     else { delete value['key-17']; writeFileSync(path.join(root, 'src/sensitive-data.json'), JSON.stringify(value)); }
-    const diff = buildAttemptDiff(root, before, fingerprintWorkspace(root), contents);
+    const diff = await buildAttemptDiff(root, before, fingerprintWorkspace(root), contents);
     assert.equal(diff.complete, false); assert.match(diff.content, /^Content withheld:/); assert.ok(!diff.content.includes('sk-aaaa'));
   }
 });
 
-test('equal-content rename with a mode change is never attested as byte-and-mode identical move', (t) => {
+test('equal-content rename with a mode change is never attested as byte-and-mode identical move', async (t) => {
   const { root } = fixture(t); const { before, contents } = capture(root);
   renameSync(path.join(root, 'src/file.txt'), path.join(root, 'src/renamed.txt'));
   chmodSync(path.join(root, 'src/renamed.txt'), 0o755);
-  const diff = buildAttemptDiff(root, before, fingerprintWorkspace(root), contents);
+  const diff = await buildAttemptDiff(root, before, fingerprintWorkspace(root), contents);
   assert.equal(diff.mediaType, 'text/x-diff'); assert.equal(diff.complete, true);
 });
 
-test('empty-file creation and mode-only changes remain applicable unified diffs', (t) => {
+test('empty-file creation and mode-only changes remain applicable unified diffs', async (t) => {
   const { root } = fixture(t); const { before, contents } = capture(root);
   writeFileSync(path.join(root, 'src/empty.txt'), ''); chmodSync(path.join(root, 'src/file.txt'), 0o755);
-  const diff = buildAttemptDiff(root, before, fingerprintWorkspace(root), contents);
+  const diff = await buildAttemptDiff(root, before, fingerprintWorkspace(root), contents);
   assert.equal(diff.complete, true); assert.equal(diff.mediaType, 'text/x-diff');
   unlinkSync(path.join(root, 'src/empty.txt')); chmodSync(path.join(root, 'src/file.txt'), 0o644);
   execFileSync('/usr/bin/git', ['apply', '-'], { cwd: root, input: diff.content });
   assert.equal(readFileSync(path.join(root, 'src/empty.txt')).length, 0); assert.ok(statSync(path.join(root, 'src/file.txt')).mode & 0o111);
 });
 
-test('oversized unstructured replacement never returns a truncated complete diff', (t) => {
+test('oversized unstructured replacement never returns a truncated complete diff', async (t) => {
   const { root } = fixture(t);
   writeFileSync(path.join(root, 'src/file.txt'), 'x'.repeat(2 * 1024 * 1024));
   const { before, contents } = capture(root);
   writeFileSync(path.join(root, 'src/file.txt'), 'y'.repeat(2 * 1024 * 1024));
-  const diff = buildAttemptDiff(root, before, fingerprintWorkspace(root), contents);
+  const diff = await buildAttemptDiff(root, before, fingerprintWorkspace(root), contents);
   assert.equal(diff.complete, false); assert.match(diff.content, /^Diff exceeds/); assert.ok(diff.content.length < 200);
 });

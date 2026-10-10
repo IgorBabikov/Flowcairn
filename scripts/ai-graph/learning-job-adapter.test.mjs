@@ -97,6 +97,31 @@ test('provider-default resolves to the configured Codex model and config changes
   assert.equal(f.adapter.capability().allowed, false);
 });
 
+test('учебный вызов закрепляет выбранное усиление и отклоняет его изменение до запуска', async () => {
+  for (const mode of ['manual', 'provider']) {
+    const f = fixture();
+    f.settings({ provider: 'codex', model: mode === 'provider' ? 'provider-default' : 'configured-model', modelMode: mode, reasoningEffort: 'medium' });
+    f.defaults({ model: 'configured-model', reasoningEffort: 'xhigh' });
+    const expected = mode === 'provider' ? 'xhigh' : 'medium';
+    const prepare = f.api.prepare;
+    f.api.prepare = options => { assert.equal(options.reasoningEffort, expected); return prepare(options); };
+    const handle = await f.adapter.prepare(f.input);
+    assert.equal(handle.providerBinding.reasoningEffort, expected);
+    if (mode === 'provider') f.defaults({ model: 'configured-model', reasoningEffort: 'high' });
+    else f.settings({ provider: 'codex', model: 'configured-model', modelMode: mode, reasoningEffort: 'high' });
+    assert.throws(() => f.adapter.beforeGo(handle), { code: 'LEARNING_PROVIDER_DRIFT' });
+    assert.equal(f.transportCalls.length, 0);
+  }
+});
+
+test('отсутствующее усиление CLI не подменяется значением профиля Flowcairn', async () => {
+  const f = fixture();
+  f.settings({ provider: 'codex', model: 'provider-default', modelMode: 'provider', reasoningEffort: 'high' });
+  f.defaults({ model: 'configured-model', reasoningEffort: null });
+  const handle = await f.adapter.prepare(f.input);
+  assert.equal('reasoningEffort' in handle.providerBinding, false);
+});
+
 test('failed or false preflight disposes unstarted scratch before returning any handle', async () => {
   for (const preflight of ['denied', 'throw']) {
     const f = fixture({ preflight });

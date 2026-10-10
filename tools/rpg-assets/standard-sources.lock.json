@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "snapshotDate": "2026-10-09",
+  "packs": [
+    {
+      "pack": "medieval-village-megakit",
+      "edition": "Standard",
+      "filename": "Medieval Village MegaKit[Standard].zip",
+      "uploadId": "12563480",
+      "source": "https://quaternius.com/packs/medievalvillagemegakit.html",
+      "downloadPage": "https://quaternius.itch.io/medieval-village-megakit",
+      "sha256": "e60dea67c10f30dccccfbff92a7933f5ea5cfe99be0e2a0fa5118cceabeec5c4",
+      "bytes": 161003471,
+      "license": "CC0-1.0",
+      "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "version": "No semantic version published; exact upload ID and SHA256 identify snapshot"
+    },
+    {
+      "pack": "modular-character-outfits-fantasy",
+      "edition": "Standard",
+      "filename": "Modular Character Outfits - Fantasy[Standard].zip",
+      "uploadId": "16289385",
+      "source": "https://quaternius.com/packs/modularcharacteroutfitsfantasy.html",
+      "downloadPage": "https://quaternius.itch.io/modular-character-outfits-fantasy",
+      "sha256": "c3468b18871cc8c8f05ab14df7712baf22cb9f389cbd870babf130e595187f70",
+      "bytes": 294347394,
+      "license": "CC0-1.0",
+      "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "version": "No semantic version published; exact upload ID and SHA256 identify snapshot"
+    },
+    {
+      "pack": "universal-animation-library",
+      "edition": "Standard",
+      "filename": "Universal Animation Library[Standard].zip",
+      "uploadId": "17958403",
+      "source": "https://quaternius.com/packs/universalanimationlibrary.html",
+      "downloadPage": "https://quaternius.itch.io/universal-animation-library",
+      "sha256": "cc73fc4e495b82958207316596317a3f40b9fa38065bde1027937452da537724",
+      "bytes": 15904933,
+      "license": "CC0-1.0",
+      "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "version": "No semantic version published; exact upload ID and SHA256 identify snapshot"
+    },
+    {
+      "pack": "universal-base-characters",
+      "edition": "Standard",
+      "filename": "Universal Base Characters[Standard].zip",
+      "uploadId": "15861669",
+      "source": "https://quaternius.com/packs/universalbasecharacters.html",
+      "downloadPage": "https://quaternius.itch.io/universal-base-characters",
+      "sha256": "fdbf1804c90dfc1ea03e992bff7da2dfd1a79318e13270a660180f9308455f40",
+      "bytes": 128968391,
+      "license": "CC0-1.0",
+      "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "version": "No semantic version published; exact upload ID and SHA256 identify snapshot"
+    }
+  ]
+}

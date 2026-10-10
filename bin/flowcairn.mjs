@@ -4,27 +4,37 @@ import { spawnSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { explainError, GraphError } from '../scripts/ai-graph/lib/io.mjs';
-import { loadProjectProfile, RUNTIME_ROOT, packageManagerLock, validatePackageManagerProject } from '../scripts/ai-graph/lib/project.mjs';
-import { inspectCheckProfile, MISSING_CHECK_GUIDANCE } from '../scripts/ai-graph/lib/check-profile.mjs';
-import { TaskInputSchema, TaskInputV3Schema } from '../scripts/ai-graph/lib/schemas.mjs';
-import { WorkflowService, sanitizeText } from '../scripts/ai-graph/lib/service.mjs';
-import { runCli } from '../scripts/ai-graph/cli.mjs';
-import { probeRunner, probeLocalChecks } from '../scripts/ai-graph/lib/runner.mjs';
-import { startViewer } from '../tools/ai-graph-viewer/server.mjs';
-import { assertRuntimePlatform, defaultProvider } from '../scripts/ai-graph/lib/platform.mjs';
-import { openBrowser } from './browser.mjs';
-import { checkUpdate } from './update.mjs';
-import { printCard, printReady } from './terminal.mjs';
-import { instructionsCommand } from './instructions.mjs';
-import { uninstallCommand } from './uninstall.mjs';
-import { selectProjectSkills } from './skills-selection.mjs';
-import { createTask } from '../scripts/ai-graph/lib/task-registration.mjs';
-import { ensureManagedRuntime } from '../scripts/ai-graph/lib/managed-runtime.mjs';
-import { inspectHarnesses } from '../scripts/ai-graph/lib/harnesses.mjs';
-import { collectOnboarding, inspectOnboarding, migrateLegacyCheckMode, onboardingInput, saveOnboarding } from './onboarding.mjs';
-import { initializeProject, assertProviderPlatform } from './installation.mjs';
-import { PROFILE, csv, existsNoFollow, git, projectRoot, readRegular } from './project-files.mjs';
+
+// Check before loading modules that require newer Node builtins or syntax.
+// Unsupported hosts must receive the same actionable diagnostic as requireNode.
+if (Number(process.versions.node.split('.')[0]) !== 22) {
+  process.stderr.write(JSON.stringify({ ok: false, error: {
+    code: 'NODE_VERSION', message: 'Нужен Node.js 22. Переключите версию в текущем терминале.',
+  } }, null, 2) + '\n');
+  process.exit(2);
+}
+
+const { explainError, GraphError } = await import('../scripts/ai-graph/lib/io.mjs');
+const { loadProjectProfile, RUNTIME_ROOT, packageManagerLock, validatePackageManagerProject } = await import('../scripts/ai-graph/lib/project.mjs');
+const { inspectCheckProfile, MISSING_CHECK_GUIDANCE } = await import('../scripts/ai-graph/lib/check-profile.mjs');
+const { TaskInputSchema, TaskInputV3Schema } = await import('../scripts/ai-graph/lib/schemas.mjs');
+const { WorkflowService, sanitizeText } = await import('../scripts/ai-graph/lib/service.mjs');
+const { runCli } = await import('../scripts/ai-graph/cli.mjs');
+const { probeRunner, probeLocalChecks } = await import('../scripts/ai-graph/lib/runner.mjs');
+const { startViewer } = await import('../tools/ai-graph-viewer/server.mjs');
+const { assertRuntimePlatform, defaultProvider } = await import('../scripts/ai-graph/lib/platform.mjs');
+const { openBrowser } = await import('./browser.mjs');
+const { checkUpdate } = await import('./update.mjs');
+const { printCard, printReady } = await import('./terminal.mjs');
+const { instructionsCommand } = await import('./instructions.mjs');
+const { uninstallCommand } = await import('./uninstall.mjs');
+const { selectProjectSkills } = await import('./skills-selection.mjs');
+const { createTask } = await import('../scripts/ai-graph/lib/task-registration.mjs');
+const { ensureManagedRuntime } = await import('../scripts/ai-graph/lib/managed-runtime.mjs');
+const { inspectHarnesses } = await import('../scripts/ai-graph/lib/harnesses.mjs');
+const { collectOnboarding, inspectOnboarding, migrateLegacyCheckMode, onboardingInput, saveOnboarding } = await import('./onboarding.mjs');
+const { initializeProject, assertProviderPlatform } = await import('./installation.mjs');
+const { PROFILE, csv, existsNoFollow, git, projectRoot, readRegular } = await import('./project-files.mjs');
 export { createTask, initializeProject };
 
 const VALUE_OPTIONS = new Set([

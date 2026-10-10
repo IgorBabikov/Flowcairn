@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { Hash, Id, RelativePath, Text } from './schema-primitives.mjs';
+import { CoverageResponseSchema } from './learning-coverage-schemas.mjs';
 import { LearningModeSchema } from './stage-schemas.mjs';
 
 export const LearningProgressSchema = z.enum(['unread', 'read', 'deferred']);
@@ -48,7 +49,7 @@ export const SavedSourceSchema = z.strictObject({
 export const SourceCatalogSchema = z.strictObject({
   version: z.literal(1), sources: z.array(SavedSourceSchema),
 });
-export const StageMaterialSchema = z.strictObject({
+const StageMaterialV1Schema = z.strictObject({
   version: z.literal(1), kind: z.enum(['stage', 'task']),
   runId: Id, planHash: Hash, taskHash: Hash, contractHash: Hash,
   stageId: Id.nullable(), goal: Text, outcome: Text, requirementIds: z.array(Id),
@@ -58,6 +59,9 @@ export const StageMaterialSchema = z.strictObject({
   findingsArtifactIds: z.array(Hash), status: z.enum(['complete', 'partial', 'unavailable']),
   gaps: z.array(MaterialGapSchema),
 });
+export const StageMaterialSchema = z.discriminatedUnion('version', [StageMaterialV1Schema,
+  StageMaterialV1Schema.extend({ version: z.literal(2), coverageHash: Hash }),
+]);
 export const SourceAnchorSchema = z.strictObject({
   sourceId: Id, fileHash: Hash, startLine: z.number().int().min(1), endLine: z.number().int().min(1),
   quote: z.string().min(1).max(8192).refine((quote) => Buffer.byteLength(quote, 'utf8') <= 8192, 'Quote exceeds 8 KiB'),
@@ -112,10 +116,11 @@ const CapabilitySchema = z.strictObject({ label: z.string().max(160).optional(),
 export const LearningMaterialResponseSchema = z.strictObject({
   id: Hash, material: StageMaterialSchema, sources: z.array(SavedSourceSchema),
   sourceCatalog: z.strictObject({ version: z.literal(2), pageHashes: z.array(Hash) }).optional(),
+  coverage: CoverageResponseSchema.optional(),
   progress: LearningProgressSchema,
   freshness: z.strictObject({ state: FreshnessSchema, reason: Text.nullable() }), lessonHash: Hash.nullable(),
   capabilities: z.strictObject({ generateLesson: CapabilitySchema, askLesson: CapabilitySchema, setLearningProgress: CapabilitySchema }),
-});
+}).refine(value => value.material.version === 1 ? value.coverage === undefined : value.coverage?.id === value.material.coverageHash);
 export const LearningSourceResponseSchema = z.strictObject({
   sourceId: Id, fileHash: Hash, text: z.string().max(65536),
   startLine: z.number().int().min(1), endLine: z.number().int().min(0), totalLines: z.number().int().min(0),

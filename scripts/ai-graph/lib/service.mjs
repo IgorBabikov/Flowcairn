@@ -18,6 +18,7 @@ import { buildTaskContract } from './task-contract.mjs';
 import { createTaskProofService } from './task-proof-service.mjs';
 import { executeNode } from './node-execution.mjs';
 import { recoverRun } from './service-recovery.mjs';
+import { AutonomousDriver } from './service-driver.mjs';
 import { replanRun, finishReplan } from './service-replan.mjs';
 import { projectSnapshot } from './task-snapshot.mjs';
 import { validateRequirementAcceptances } from './requirement-verification.mjs';
@@ -35,7 +36,6 @@ import {
   ArtifactSchema,
   NaturalIntakeSchema,
   IntakePreviewSchema,
-  AIReviewResultSchema,
   AIAnalysisResultSchema,
   AIPlanningResultSchema,
   assertJsonBounds,
@@ -55,6 +55,15 @@ import { learningCommand, learningCommands } from './learning-control.mjs';
 import { learningMaterial, learningSource, learningUnavailable, openLearningCapability } from './learning-view.mjs';
 import { LearningJobs } from './learning-jobs.mjs';
 import { readLearningJobs } from './learning-job-state.mjs';
+import { readLearningChapterBook, readLearningChapter } from './learning-chapters.mjs';
+import { readLearningObservation } from './learning-observations.mjs';
+import {
+  PracticeAppendRequestSchema,
+  PracticeFeedbackRequestSchema,
+  readLearningPracticeLog,
+  recordLearningPracticeAttempt,
+  recordLearningPracticeFeedback,
+} from './learning-practice.mjs';
 
 const fail = (code, message) => {
   throw new GraphError(code, message);
@@ -100,6 +109,7 @@ function assertConfiguredChecks(task, profile, draft = null) {
 
 /** The only control boundary. Injected adapters are trusted host code, never JSON/API data. */
 export class WorkflowService {
+  #driver;
   acquireViewerLease() {
     this.#assertOpen();
     return this.lifecycleRelease ? acquireRuntimeLease({ root: this.root, kind: 'viewer' }) : () => {};
@@ -279,9 +289,10 @@ export class WorkflowService {
   }
 
   #executionDeadline(state, plan) {
-    if (plan.workflow !== 'autonomous' || plan.stage !== 'execution' || state.nodes['approve-plan']?.status !== 'passed') return null;
-    const startedAt = state.policyGrant?.startedAt ?? this.store.readObject('receipts', state.nodes['approve-plan'].receipts.at(-1)).finishedAt;
-    return Date.parse(startedAt) + plan.autonomy.maxDurationMs;
+    if (plan.workflow !== 'autonomous' || plan.stage !== 'execution') return null;
+    const startedAt = state.policyGrant?.startedAt ?? (state.nodes['approve-plan']?.status === 'passed'
+      ? this.store.readObject('receipts', state.nodes['approve-plan'].receipts.at(-1)).finishedAt : null);
+    return startedAt ? Date.parse(startedAt) + plan.autonomy.maxDurationMs : null;
   }
 
   #workflowProgress(state, plan) {
@@ -419,104 +430,7 @@ export class WorkflowService {
     return inspectOnboarding(this.root);
   }
 
-  #resumeReadyWork() {
-    for (const runId of this.store.listRunIds()) {
-      const raw = this.store.readRun(runId);
-      if (![2,3].includes(raw.schemaVersion) || raw.learning?.failure || raw.continuation?.kind === 'learning-hold' || raw.finalDisposition || raw.activeOperation || raw.setupPending || raw.stopRequested ||
-          !['ready','passed'].includes(raw.status)) continue;
-      try {
-        const { state, plan } = this.#read(runId);
-        if (plan.workflow !== 'autonomous' || (plan.stage === 'execution' && state.status === 'passed')) continue;
-        if (plan.stage === 'planning' || state.nodes['approve-plan']?.status === 'passed') this.#schedule(runId);
-      } catch { /* Неисправное или устаревшее выполнение остается доступным только для диагностики. */ }
-    }
-  }
-
-  #schedule(runId) {
-    if (this.drives.has(runId)) return;
-    const promise = new Promise((resolve) => setImmediate(resolve)).then(() => this.#drive(runId)).catch((error) => {
-      const state = this.store.readRun(runId);
-      if (!state.activeOperation) this.#write(state, { failureReason: safeReason(error) });
-    }).finally(() => this.drives.delete(runId));
-    this.drives.set(runId, promise);
-  }
-
-  async #drive(initialRunId) {
-    let runId = initialRunId;
-    // Предел относится ко всему управляющему проходу, даже если адаптер вернул неожиданный state.
-    for (let turn = 0; turn < 12; turn++) {
-      const { state, task, plan } = this.#read(runId);
-      if ((state.schemaVersion === 3 && (state.learning.failure || state.continuation.kind === 'learning-hold')) || state.stopRequested || state.activeOperation || state.finalDisposition || plan.workflow !== 'autonomous') return;
-      const caps = this.#caps(state, plan);
-      const request = { operationId: `auto-${randomUUID()}`, expectedRevision: state.revision, planHash: state.planHash };
-      if (this.#executionDeadline(state, plan) !== null && Date.now() >= this.#executionDeadline(state, plan)) {
-        this.#write(state, { failureReason: 'Истек срок согласованного автономного выполнения; требуется личное ревью' });
-        return;
-      }
-      if (caps.run.run.allowed) {
-        // The current drive owns every successor in this bounded pass.
-        await this.#trackedCommand(runId, 'run', request, { actor: state.actor }, false);
-        continue;
-      }
-      const discovered = await this.#discoverPlanningContext(state, task, plan, request, caps);
-      if (discovered) { runId = discovered.runId; continue; }
-      if (plan.stage === 'planning' && state.status === 'passed') {
-        const next = await this.command(runId, 'replan', request, { actor: state.actor });
-        runId = next.runId;
-        continue;
-      }
-      if (plan.stage === 'planning' && state.status === 'failed' && caps.run.requestReplan.allowed) {
-        const planner = plan.nodes.find((node) => node.action.id === 'ai-plan');
-        const failed = planner && state.nodes[planner.id];
-        const receiptId = failed?.receipts.at(-1);
-        const receipt = receiptId && ReceiptSchema.parse(this.store.readObject('receipts', receiptId));
-        const reasonCode = failed?.reason?.split(':')[0];
-        if (failed?.status !== 'failed' || !['PLANNING_READ_SCOPE', 'CONTRACT_ANALYSIS_COVERAGE'].includes(reasonCode) ||
-            receipt?.phase !== 'finished' || receipt.termination?.stopped !== true ||
-            receipt.termination.uncertain || receipt.beforeFingerprint !== receipt.afterFingerprint) return;
-        const feedback = reasonCode === 'PLANNING_READ_SCOPE'
-          ? `Предыдущий план предложил чтение вне разрешенной области. Используй readPaths только внутри ${JSON.stringify([...new Set([...task.scope, ...task.contextPaths])].sort())}; не расширяй права.`
-          : 'Предыдущий план свел отдельные обязательные пункты анализа к одному требованию. Для каждого пункта создай отдельное mandatory requirement с проверкой и свяжи его с implementation step через requirementIds. Не расширяй scope или права.';
-        const next = await this.command(runId, 'replan', { ...request, feedback }, { actor: state.actor });
-        runId = next.runId;
-        continue;
-      }
-      if (plan.stage === 'execution' && state.status === 'failed') {
-        const failed = plan.nodes.filter((node) => state.nodes[node.id].status === 'failed');
-        const repairable = failed.length === 1 &&
-          (failed[0].action.id.startsWith('check-') || ['ai-review', 'ai-implement'].includes(failed[0].action.id));
-        const definition = failed[0];
-        const lastId = definition && state.nodes[definition.id].receipts.at(-1);
-        const receipt = lastId && ReceiptSchema.parse(this.store.readObject('receipts', lastId));
-        const semanticReview = definition?.action.id === 'ai-review' && state.nodes[definition.id].artifacts.some((id) => {
-          const artifact = this.#artifact(id);
-          if (artifact.kind !== 'review-findings') return false;
-          const result = AIReviewResultSchema.safeParse(JSON.parse(artifact.content));
-          return result.success && result.data.verdict === 'fail' && result.data.findings.some((finding) => finding.severity === 'blocking');
-        });
-        const knownCheck = definition?.action.id.startsWith('check-') && receipt?.checks.some((check) => check.exitCode !== null && check.exitCode !== 0 && !check.passed);
-        const rejectedImplementation = definition?.action.id === 'ai-implement' &&
-          receipt?.verdict === 'fail' && receipt.beforeFingerprint === receipt.afterFingerprint &&
-          receipt.changedFiles.length === 0;
-        if (!repairable || (!semanticReview && !knownCheck && !rejectedImplementation) ||
-            receipt?.phase !== 'finished' || !receipt.termination?.stopped || receipt.termination.uncertain) return;
-        const original = state.policyGrant ?? {
-          runId: state.runId, planHash: state.planHash,
-          receiptId: state.nodes['approve-plan'].receipts.at(-1),
-          startedAt: this.store.readObject('receipts', state.nodes['approve-plan'].receipts.at(-1)).finishedAt,
-          cycle: 0,
-        };
-        if (original.cycle >= plan.autonomy.maxRepairCycles || Date.now() - Date.parse(original.startedAt) > plan.autonomy.maxDurationMs) return;
-        const next = await this.#replan({ state, task, plan, request, digest: hashObject({ name: 'policy-repair', request }), actor: state.actor,
-          caps: { ...caps, run: { ...caps.run, requestReplan: { allowed: true, reason: null } } },
-          policyGrant: { ...original, cycle: original.cycle + 1 } });
-        runId = next.runId;
-        this.#activatePolicyGrant(runId);
-        continue;
-      }
-      return;
-    }
-  }
+  #schedule(runId) { this.#driver.schedule(runId); }
 
   #verifyAuthorization(state, task, plan) {
     const grant = state.policyGrant;
@@ -555,7 +469,9 @@ export class WorkflowService {
     const { state, task, plan } = this.#read(runId);
     this.#verifyAuthorization(state, task, plan);
     const definition = plan.nodes.find((node) => node.action.id === 'human-approve');
-    if (state.nodes[definition.id].status === 'passed') return;
+    if (state.nodes[definition.id].status === 'passed') return true;
+    // Repair authorization does not replace consent to the new provider context.
+    if (definition.needs.some((id) => state.nodes[id].status !== 'passed')) return false;
     const permissions = unique(plan.nodes.flatMap((node) => node.permissions));
     const receipt = this.#receipt(state, task, plan, definition, {
       phase: 'policy', verdict: 'pass', grantedPermissions: permissions,
@@ -565,6 +481,7 @@ export class WorkflowService {
     Object.assign(nodes[definition.id], { status: 'passed', attempts: 1, receipts: [receipt],
       startedAt: now(), finishedAt: now(), durationMs: 0, reason: 'Исправление в пределах ранее согласованного плана' });
     this.#write(state, reconcile({ ...state, nodes, permissions }, plan));
+    return true;
   }
 
   async #revise({ state, task, plan, request, digest, actor, caps }) {
@@ -605,7 +522,7 @@ export class WorkflowService {
       const service = new WorkflowService(resolved, adapters ?? (await defaultAdapters(resolved)));
       service.lifecycleRelease = release;
       await service.learningJobs.reconcileInterrupted();
-      service.#resumeReadyWork();
+      service.#driver.resumeReadyWork();
       return service;
     } catch (error) { release?.(); throw error; }
   }
@@ -617,6 +534,18 @@ export class WorkflowService {
     this.active = new Map();
     this.intakes = new Map();
     this.drives = new Map();
+    this.#driver = new AutonomousDriver({
+      listRunIds: () => this.store.listRunIds(),
+      readRun: (runId) => this.store.readRun(runId),
+      readReceipt: (id) => this.store.readObject('receipts', id),
+      read: this.#read.bind(this), artifact: this.#artifact.bind(this),
+      capabilities: this.#caps.bind(this), write: this.#write.bind(this),
+      executionDeadline: this.#executionDeadline.bind(this),
+      activatePolicyGrant: this.#activatePolicyGrant.bind(this),
+      discoverPlanningContext: this.#discoverPlanningContext.bind(this),
+      run: (runId, request, actor) => this.#trackedCommand(runId, 'run', request, { actor }, false),
+      command: this.command.bind(this), replan: this.#replan.bind(this),
+    }, this.drives);
     this.lifecycleRelease = null;
     this.closed = false;
     this.pendingMutations = 0;
@@ -880,6 +809,14 @@ export class WorkflowService {
     )
       fail('STATE_INTEGRITY', 'Permissions не подтверждены gate');
     if (state.policyGrant) this.#verifyAuthorization(state, task, plan);
+    const hasProviderGate = plan.nodes.some((node) => node.action.id === 'human-provider-consent');
+    const initialPermissions = plan.workflow === 'autonomous' && plan.stage === 'planning' ? ['ai.read'] : [];
+    if (hasProviderGate) {
+      const approved = plan.nodes.some((node) => node.action.id === 'human-approve' && state.nodes[node.id].status === 'passed');
+      const expected = approved ? unique(plan.nodes.flatMap((node) => node.permissions)).sort() : initialPermissions;
+      if (hashObject([...state.permissions].sort()) !== hashObject(expected))
+        fail('STATE_INTEGRITY', 'Provider consent не выдает права исполнения плана');
+    }
     for (const definition of plan.nodes) {
       const node = state.nodes[definition.id];
       if (!node) fail('STATE_INTEGRITY', 'Node state отсутствует');
@@ -914,7 +851,9 @@ export class WorkflowService {
             }) ||
           hashObject(receipt.skills) !==
             hashObject(plan.skills.filter((s) => definition.skills.includes(s.id))) ||
-          hashObject(receipt.grantedPermissions) !== hashObject(state.permissions)
+          // This gate precedes plan approval and never changes execution grants.
+          hashObject(receipt.grantedPermissions) !== hashObject(
+            definition.action.id === 'human-provider-consent' ? initialPermissions : state.permissions)
         )
           fail(
             'RECEIPT_INTEGRITY',
@@ -1175,6 +1114,80 @@ export class WorkflowService {
   learningSource(runId, hash, sourceId, options) { return learningSource(this.#learningHost(), runId, hash, sourceId, options); }
   learningUnavailable(runId, kind, id) { return learningUnavailable(this.#learningHost(), runId, kind, id); }
   learningObject(runId, kind, id) { return this.learningJobs.readObject(runId, kind, id); }
+  readLearningChapterBook(runId, materialHash, bookHash = null) {
+    const material = this.learningMaterial(runId, materialHash);
+    const binding = { runId: material.material.runId, planHash: material.material.planHash, taskHash: material.material.taskHash, materialHashes: [materialHash] };
+    let selected = bookHash;
+    if (!selected) {
+      let hashes = [];
+      try { hashes = this.store.listObjectHashes('learning-chapter-books'); } catch (error) {
+        if (!['STORE_NOT_FOUND', 'INSECURE_STORE'].includes(error.code)) throw error;
+      }
+      for (const candidate of hashes.reverse()) {
+        const book = this.store.readObject('learning-chapter-books', candidate);
+        if (book.materialHash === materialHash) { selected = candidate; break; }
+      }
+    }
+    if (!selected) fail('NOT_FOUND', 'Для материала нет сохраненной книги глав.');
+    return readLearningChapterBook({ store: this.store, bookHash: selected, material, materialHash, binding, policy: this.adapters.learningSourcePolicy?.() });
+  }
+  readLearningChapter(runId, materialHash, bookHash, chapterHash) {
+    const material = this.learningMaterial(runId, materialHash);
+    const binding = { runId: material.material.runId, planHash: material.material.planHash, taskHash: material.material.taskHash, materialHashes: [materialHash] };
+    return readLearningChapter({ store: this.store, bookHash, chapterHash, material, materialHash, binding, policy: this.adapters.learningSourcePolicy?.() });
+  }
+  readLearningObservation(runId, materialHash, observationHash) {
+    const material = this.learningMaterial(runId, materialHash);
+    const binding = { runId: material.material.runId, planHash: material.material.planHash, taskHash: material.material.taskHash, materialHashes: [materialHash] };
+    return readLearningObservation({ store: this.store, material, materialHash, binding, observationHash, policy: this.adapters.learningSourcePolicy?.() });
+  }
+  readLearningPractice(runId, materialHash, logHash, ownerId = 'local-operator') {
+    const material = this.learningMaterial(runId, materialHash);
+    const binding = { runId: material.material.runId, planHash: material.material.planHash, taskHash: material.material.taskHash, materialHashes: [materialHash] };
+    return readLearningPracticeLog({ store: this.store, material, materialHash, binding, ownerId, logHash });
+  }
+  appendLearningPractice(runId, input, actor = 'local-operator') {
+    return this.#learningPracticeMutation(runId, 'practice-append', input, actor, (request, binding, material) =>
+      recordLearningPracticeAttempt({ store: this.store, material, materialHash: request.materialHash, binding, ownerId: actor, logHash: request.logHash,
+        attempt: { operationId: request.operationId, chapterBookHash: request.chapterBookHash, lessonHash: request.lessonHash, promptId: request.promptId,
+          question: request.question, answer: request.answer, hints: request.hints, assessment: { status: 'unassessed', evaluator: 'none', score: null, feedback: null, limitations: [] },
+          limitations: request.limitations, status: 'draft', previousVersionHash: null } }));
+  }
+  appendLearningPracticeFeedback(runId, input, actor = 'local-operator') {
+    return this.#learningPracticeMutation(runId, 'practice-feedback', input, actor, (request, binding, material) =>
+      recordLearningPracticeFeedback({ store: this.store, material, materialHash: request.materialHash, binding, ownerId: actor, logHash: request.logHash,
+        attemptHash: request.attemptHash, feedback: request.feedback, operationId: request.operationId }));
+  }
+  #learningPracticeMutation(runId, name, input, actor, apply) {
+    this.#assertOpen();
+    const schema = name === 'practice-append' ? PracticeAppendRequestSchema : PracticeFeedbackRequestSchema;
+    const request = schema.parse(input);
+    const { state } = this.#read(runId, { current: false });
+    if (state.schemaVersion !== 3) fail('CONTROL_DENIED', 'Практика доступна только для нового плана V3.');
+    const digest = hashObject({ name, request, actor });
+    const prior = state.operations[request.operationId];
+    if (prior) {
+      if (prior.digest !== digest) fail('IDEMPOTENCY_CONFLICT', 'operationId уже связан с другим действием.');
+      if (!prior.learningResultHash) fail('LEARNING_PRACTICE_INTEGRITY', 'Повтор операции не содержит сохраненный журнал практики.');
+      const practice = this.readLearningPractice(runId, request.materialHash, prior.learningResultHash, actor);
+      const attempt = practice.attempts.find(item => item.attempt.operationId === request.operationId);
+      if (!attempt) fail('LEARNING_PRACTICE_INTEGRITY', 'Повтор операции не содержит исходную попытку.');
+      return { logHash: prior.learningResultHash, attempt, idempotent: true };
+    }
+    if (Object.keys(state.operations).length >= 200) fail('OPERATION_LIMIT', 'Лимит управляющих операций исчерпан.');
+    if (state.revision !== request.expectedRevision) fail('REVISION_CONFLICT', 'Откройте актуальное состояние.');
+    if (state.planHash !== request.planHash) fail('PLAN_CONFLICT', 'Запрос относится к другому плану.');
+    const busy = state.activeOperation || state.setupPending || this.store.inspectLock(runId)
+      || Object.values(state.operations).some(operation => ['running', 'creating'].includes(operation.status));
+    if (busy) fail('CONTROL_DENIED', 'Дождитесь завершения текущего действия запуска.');
+    const material = this.learningMaterial(runId, request.materialHash);
+    if (material.material.runId !== runId || material.material.planHash !== state.planHash)
+      fail('LEARNING_PRACTICE_BINDING', 'Практика должна быть связана с текущей версией запуска.');
+    const binding = { runId, planHash: state.planHash, taskHash: state.taskHash, materialHashes: [request.materialHash] };
+    const result = apply(request, binding, material);
+    const next = this.#write(state, { operations: { ...state.operations, [request.operationId]: { digest, status: 'finished', learningResultHash: result.id } } });
+    return { logHash: result.id, attempt: result.attempt, idempotent: result.idempotent ?? false, snapshot: this.snapshot(next.runId) };
+  }
 
   // SSE carries only persisted revision hints. It never evaluates execution permission.
   revision(runId) {
@@ -1466,7 +1479,7 @@ export class WorkflowService {
       }
       const receipt = this.#receipt(state, task, plan, definition, {
         phase: 'gate',
-        grantedPermissions: request.decision === 'approve' ? required : state.permissions,
+        grantedPermissions: request.decision === 'approve' && !providerGate ? required : state.permissions,
         verdict: rejected ? 'fail' : 'pass',
         actor,
         operationId: request.operationId,
