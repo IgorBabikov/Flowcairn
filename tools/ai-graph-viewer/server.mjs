@@ -13,12 +13,17 @@ const TYPES = {
   '.json': 'application/json; charset=utf-8',
   '.png': 'image/png',
 };
+// Package-owned exact names: neither manifest contents nor project files widen this list.
+export const GUILD_ROLES = Object.freeze(['analyst', 'mage', 'checker', 'reviewer', 'mentor']);
+export const RPG_ASSET_FILES = Object.freeze(['world.json', 'guild-cast.json', 'guild-provenance.json',
+  'guild-room.png', 'guild-mentor-portrait.png', 'ui-codex.png', 'ui-quest-scroll.png',
+  ...GUILD_ROLES.map(role => `guild-foreground-${role}.png`),
+  ...GUILD_ROLES.flatMap(role => ['idle', 'walk', 'work', 'handoff'].flatMap(state =>
+    (state === 'walk' ? ['se', 'nw', 'ne', 'sw'] : ['se', 'nw']).flatMap(direction => ['png', 'json'].map(extension => `guild-${role}-${state}-${direction}.${extension}`)))),
+]);
 const STATIC_FILES = new Set(['index.html', 'app.js', 'app.css',
   'fonts/Manrope-Cyrillic-Variable.woff2', 'fonts/Manrope-Latin-Variable.woff2',
-  'assets/rpg/world.json', 'assets/rpg/world.png',
-  'assets/rpg/workshop-room.png', 'assets/rpg/archive-room.png',
-  'assets/rpg/hero-idle.png', 'assets/rpg/mentor-idle.png',
-  'assets/rpg/ui-codex.png', 'assets/rpg/ui-quest-scroll.png']);
+  ...RPG_ASSET_FILES.map(file => `assets/rpg/${file}`)]);
 
 export function startViewer({ service, token, port = 4329, dist = path.join(DIRECTORY, 'dist') }) {
   if (!/^[a-zA-Z0-9_-]{24,128}$/.test(token))

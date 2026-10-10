@@ -138,7 +138,9 @@ export function buildTaskContract(task, { proposal = null, analysis = null, prev
   }
   if (new Set(requirements.map((item) => item.id)).size !== requirements.length)
     fail('CONTRACT_REQUIREMENT_DUPLICATE', 'Идентификаторы требований пересекаются с исходным контрактом');
-  const linkedSteps = decomposing ? steps.map((step) => ({ ...step,
+  const omittedOmnibus = decomposing && proposedById.get('req-001')?.title === task.acceptance[0] &&
+    !requirements.some((item) => item.id === 'req-001');
+  const linkedSteps = omittedOmnibus ? steps.map((step) => ({ ...step,
     ...(step.requirementIds ? { requirementIds: step.requirementIds.filter((id) => id !== 'req-001') } : {}),
   })) : steps;
   const bound = bindWork(requirements, linkedSteps);

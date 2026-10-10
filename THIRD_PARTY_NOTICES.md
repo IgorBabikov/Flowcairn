@@ -2,16 +2,23 @@
 
 Flowcairn распространяется по [MIT](LICENSE). Ниже указаны лицензии и notices зависимостей; для компонентов с отдельными условиями приведена ссылка на upstream terms. Тексты оставлены на языке оригинала.
 
+## Адаптированные инженерные методики
+
+Встроенные методы Flowcairn адаптируют отдельные рекомендации из obra/superpowers (Copyright (c) 2025 Jesse Vincent, MIT), github/awesome-copilot (Copyright GitHub, Inc., MIT), mattpocock/skills (Copyright (c) 2026 Matt Pocock, MIT), wshobson/agents (Copyright (c) 2024 Seth Hobson, MIT) и vercel-labs/web-interface-guidelines (Copyright (c) 2025 Vercel Labs, MIT). Frontend-design и webapp-testing из anthropics/skills адаптированы по Apache-2.0; изменения указаны в соответствующих SKILL.md.
+
+Полные [лицензии](skills/licenses/) входят в пакет. [PROVENANCE.json](skills/PROVENANCE.json) закрепляет источники, commits, hashes и отличия адаптаций. Исполняемые scripts, ассеты и отдельный процесс управления работой из этих наборов не импортированы. React/composition artifacts из vercel-labs/agent-skills не включены: полный LICENSE конкретной версии не подтвержден.
+
 ## Состав
 
 Состав соответствует текущим `package.json`, `package-lock.json` и production entrypoints интерфейса. Runtime-зависимости проверяются через `npm ls --omit=dev --all`, браузерные компоненты — через `inputs` esbuild metafile.
 
-Включены **6 runtime-зависимостей, 10 компонентов браузерного bundle и шрифт Manrope**. Runtime-пакеты устанавливает менеджер пакетов; браузерные компоненты и шрифт входят в собранный интерфейс. Инструменты разработки вне распространяемого bundle здесь не перечисляются. Каталог `node_modules` в пакет Flowcairn не копируется.
+Включены **7 runtime-зависимостей, 10 компонентов браузерного bundle и шрифт Manrope**. Runtime-пакеты устанавливает менеджер пакетов; браузерные компоненты и шрифт входят в собранный интерфейс. Инструменты разработки вне распространяемого bundle здесь не перечисляются. Каталог `node_modules` в пакет Flowcairn не копируется.
 
 | Компонент | Версия | Использование | Лицензия |
 | --- | --- | --- | --- |
 | `@openai/codex` | 0.156.1 | Поставляемый AI CLI | Apache-2.0 |
 | `@anthropic-ai/claude-code` | 2.1.198 | Поставляемый AI CLI | SEE LICENSE IN README.md |
+| `diff` | 9.0.0 | Текстовые hunks в отдельном Node worker | BSD-3-Clause |
 | `picomatch` | 4.0.7 | Runtime | MIT |
 | `react` | 19.2.7 | Браузерный bundle | MIT |
 | `react-dom` | 19.2.7 | Браузерный bundle | MIT |
@@ -33,6 +40,42 @@ Flowcairn распространяется по [MIT](LICENSE). Ниже ука�
 ## Manrope
 
 Лицензия: SIL Open Font License 1.1. Источник: [Google Fonts, Manrope](https://github.com/google/fonts/tree/main/ofl/manrope). В пакет входят официальные variable WOFF2 subsets для Latin и Cyrillic из Google Fonts v20. Полный текст лицензии сохранен в `tools/ai-graph-viewer/src/assets/OFL-Manrope.txt` и копируется в `dist/fonts/OFL-Manrope.txt`.
+
+## diff 9.0.0
+
+Лицензия: BSD-3-Clause. Источник: `diff/LICENSE` установленного exact npm-пакета; upstream: [kpdecker/jsdiff v9.0.0](https://github.com/kpdecker/jsdiff/tree/v9.0.0). Runtime использует только проверенный ESM-код создания unified hunks; Git для этой операции не нужен.
+
+```text
+BSD 3-Clause License
+
+Copyright (c) 2009-2015, Kevin Decker <kpdecker@gmail.com>
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its
+   contributors may be used to endorse or promote products derived from
+   this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
 
 ## picomatch 4.0.7
 

@@ -5,6 +5,8 @@ import { lstatHostSync as lstatSync, fstatHostSync as fstatSync, crossStatIdenti
 import { GraphError, hashObject, sha256 } from './io.mjs';
 import { buildLearningPrompt, validateLearningOutput, LEARNING_PROMPT_LIMITS } from './learning-prompt.mjs';
 import { preflightCodexLearning, codexLearningCommand } from './learning-runner.mjs';
+import { preflightExternalLearning, externalLearningCommand } from './learning-external-runner.mjs';
+import { cursorLearningCandidate } from './learning-native-cursor.mjs';
 
 /** @returns {never} */
 const fail = (code, message) => { throw new GraphError(code, message); };
@@ -19,11 +21,10 @@ export function learningProviderCapability({ provider, cliVersion = null }) {
     code: 'LEARNING_CODEX_PREFLIGHT_REQUIRED',
     reason: 'Перед учебным вызовом нужен preflight версии CLI, managed требований и effective ограничений.' });
   if (provider === 'claude') return Object.freeze({ allowed: false, provider, cliVersion,
-    code: 'LEARNING_CLAUDE_BOUNDARY_UNVERIFIED',
-    reason: 'Tools-disabled bare mode требует отдельной проверки политики и auth: он не использует subscription/OAuth-вход. Автоматическая смена способа доступа запрещена.' });
-  if (provider === 'cursor') return Object.freeze({ allowed: false, provider, cliVersion,
-    code: 'LEARNING_CURSOR_BOUNDARY_UNVERIFIED',
-    reason: 'Для этого CLI не подтвержден режим без инструментов и постороннего контекста. Режим ask сам по себе не ограничивает чтение только материалом.' });
+    code: 'LEARNING_CLAUDE_PREFLIGHT_REQUIRED',
+    reason: 'Перед учебным вызовом нужен native preflight safe-mode, managed policy и effective настроек Claude.' });
+  if (provider === 'cursor') { const candidate = cursorLearningCandidate();
+    return Object.freeze({ allowed: false, provider, cliVersion, code: candidate.code, reason: candidate.reason }); }
   return Object.freeze({ allowed: false, provider, cliVersion, code: 'LEARNING_PROVIDER_UNSUPPORTED', reason: 'Учебный adapter для выбранного provider не реализован.' });
 }
 
@@ -63,13 +64,16 @@ function safeScratchRead(state, name, maxBytes) {
 
 /** Prepare only host-verified saved data in a new private scratch. The returned
  * capability must be checked before a supervisor is allowed to start. Codex
- * becomes ready only after explicit preflight; other providers remain denied.
+ * and Claude become ready only after explicit preflight; Cursor remains denied.
  * This is preparation and validation infrastructure, not a sandbox or scheduler.
- * @param {import('./learning-prompt.mjs').LearningInput & {provider: string, model: string, cliVersion?: string}} options
+ * @param {import('./learning-prompt.mjs').LearningInput & {provider: string, model: string, cliVersion?: string, reasoningEffort?: string}} options
  */
 export function prepareLearningProvider(options) {
-  if (typeof options.model !== 'string' || options.model === 'provider-default' || !/^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,159}$/.test(options.model))
+  if (typeof options.model !== 'string' || options.model === 'provider-default' && options.provider !== 'claude'
+    || !/^[a-zA-Z0-9][a-zA-Z0-9._/[\]-]{0,159}$/.test(options.model))
     fail('LEARNING_MODEL_INVALID', 'Передайте конкретную настроенную модель; provider-default сначала разрешает host.');
+  if (options.reasoningEffort !== undefined && (typeof options.reasoningEffort !== 'string' || !/^[a-z][a-z0-9-]{0,31}$/.test(options.reasoningEffort)))
+    fail('LEARNING_REASONING_INVALID', 'Настройка усиления учебного вызова некорректна.');
   const capability = learningProviderCapability(options);
   if (capability.code === 'LEARNING_PROVIDER_UNSUPPORTED') fail(capability.code, capability.reason);
   const input = { store: options.store, binding: structuredClone(options.binding), materialHash: options.materialHash,
@@ -83,15 +87,16 @@ export function prepareLearningProvider(options) {
     privateFile(path.join(scratch, 'input.txt'), prompt.prompt);
     privateFile(path.join(scratch, 'schema.json'), JSON.stringify(prompt.schema));
     privateFile(path.join(scratch, 'result.json'), '');
-    const prepared = Object.freeze({ provider: options.provider, model: options.model,
-      get capability() { return preparations.get(this)?.codexReceipt ?? capability; },
-      get command() { return preparations.get(this)?.codexReceipt ? learningProviderCommand(this) : null; },
+    const effort = options.reasoningEffort === undefined ? {} : { reasoningEffort: options.reasoningEffort };
+    const prepared = Object.freeze({ provider: options.provider, model: options.model, ...effort,
+      get capability() { return preparations.get(this)?.receipt ?? capability; },
+      get command() { return preparations.get(this)?.receipt ? learningProviderCommand(this) : null; },
       scratch, schemaFile: path.join(scratch, 'schema.json'), resultFile: path.join(scratch, 'result.json'),
       inputHash: prompt.inputHash, schemaHash: prompt.schemaHash, kind: prompt.kind,
       materialHash: prompt.materialHash, methodHash: prompt.methodHash,
       timeoutMs: LEARNING_PROVIDER_LIMITS.timeoutMs, maxOutputBytes: LEARNING_PROVIDER_LIMITS.processOutputBytes,
       maxResultBytes: LEARNING_PROVIDER_LIMITS.resultBytes,
-      preparationHash: hashObject({ provider: options.provider, cliVersion: options.cliVersion ?? null, model: options.model, kind: prompt.kind,
+      preparationHash: hashObject({ provider: options.provider, cliVersion: options.cliVersion ?? null, model: options.model, ...effort, kind: prompt.kind,
         inputHash: prompt.inputHash, schemaHash: prompt.schemaHash, materialHash: prompt.materialHash, methodHash: prompt.methodHash }) });
     preparations.set(prepared, { scratch, identity: inode(stat), input, inputHash: prompt.inputHash,
       schemaHash: sha256(JSON.stringify(prompt.schema)), disposed: false });
@@ -102,21 +107,25 @@ export function prepareLearningProvider(options) {
 /** Runtime must call before dispatch. Never route denial to implementation AI. */
 export function learningProviderCommand(prepared) {
   const state = stateOf(prepared);
-  if (!state.codexReceipt) fail(prepared.capability.code, prepared.capability.reason);
+  if (!state.receipt) fail(prepared.capability.code, prepared.capability.reason);
   readPreparedLearningInput(prepared);
-  return codexLearningCommand({ receipt: state.codexReceipt, scratch: prepared.scratch, schemaFile: prepared.schemaFile, resultFile: prepared.resultFile, model: prepared.model });
+  const buildCommand = prepared.provider === 'codex' ? codexLearningCommand : externalLearningCommand;
+  return buildCommand({ receipt: state.receipt, scratch: prepared.scratch, schemaFile: prepared.schemaFile, resultFile: prepared.resultFile,
+    model: prepared.model, reasoningEffort: prepared.reasoningEffort });
 }
 
 /** Read-only, no-inference preflight after an explicit generation action.
  * @param {object} prepared
- * @param {{toolchain: import('./learning-runner.mjs').LearningToolchain}} options */
+ * @param {{toolchain: import('./learning-runner.mjs').LearningToolchain | ReturnType<typeof import('./learning-external-runner.mjs').externalLearningToolchain>}} options */
 export async function preflightLearningProvider(prepared, { toolchain }) {
   const state = stateOf(prepared);
-  if (prepared.provider !== 'codex') fail(prepared.capability.code, prepared.capability.reason);
+  if (!['codex', 'claude'].includes(prepared.provider)) fail(prepared.capability.code, prepared.capability.reason);
   readPreparedLearningInput(prepared);
-  const receipt = await preflightCodexLearning({ toolchain, scratch: prepared.scratch });
+  const receipt = prepared.provider === 'codex'
+    ? await preflightCodexLearning({ toolchain: /** @type {import('./learning-runner.mjs').LearningToolchain} */ (toolchain), scratch: prepared.scratch })
+    : await preflightExternalLearning({ toolchain, scratch: prepared.scratch, model: prepared.model, reasoningEffort: prepared.reasoningEffort });
   stateOf(prepared);
-  state.codexReceipt = receipt;
+  state.receipt = receipt;
   return receipt;
 }
 

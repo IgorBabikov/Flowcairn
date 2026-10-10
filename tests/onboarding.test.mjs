@@ -31,7 +31,7 @@ function requireVerifiedCodex(t) {
 
 function simulatedCursor(root) {
   const executable = path.join(root, 'cursor-agent');
-  writeFileSync(executable, '#!/bin/sh\nfor argument in "$@"; do\n  [ "$argument" = "--version" ] && { printf "fixture-cursor 1.0\\n"; exit 0; }\n  [ "$argument" = "--help" ] && { printf "%s\\n" "--print --output-format --sandbox --mode"; exit 0; }\ndone\n[ "$1" = "status" ] && { printf "{\\"authenticated\\":true}\\n"; exit 0; }\nprintf \'{"result":"{\\"summary\\":\\"ok\\"}"}\\n\'\n');
+  writeFileSync(executable, '#!/bin/sh\nfor argument in "$@"; do\n  [ "$argument" = "--version" ] && { printf "fixture-cursor 1.0\\n"; exit 0; }\n  [ "$argument" = "--help" ] && { printf "%s\\n" "--print --output-format --sandbox --mode"; exit 0; }\ndone\n[ "$1" = "status" ] && { printf "{\\"isAuthenticated\\":true}\\n"; exit 0; }\nprintf \'{"result":"{\\"summary\\":\\"ok\\"}"}\\n\'\n');
   chmodSync(executable, 0o700);
   return executable;
 }

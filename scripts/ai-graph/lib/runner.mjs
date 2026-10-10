@@ -36,6 +36,7 @@ import {
   verifyReviewEvidenceFile,
 } from './review-evidence.mjs';
 import { verifyToolchain } from './toolchain.mjs';
+import { externalLearningToolchain, externalLearningLocalPolicyPreflight } from './learning-external-runner.mjs';
 import { hasTrustedLocalChecksBinding, loadProjectProfile, resolveProjectCheckScript, validatePackageManagerProject, RUNTIME_ROOT } from './project.mjs';
 import { isGenericProfile, inspectProjectChecks, assertCheckRegistry } from './check-profile.mjs';
 import { makeRegisteredCheckCommand } from './check-command.mjs';
@@ -397,18 +398,18 @@ function runnerToolchain(profile) {
   if (profile.ai.provider === 'openai')
     fail('PROVIDER_RETIRED', 'OpenAI API больше не поддерживается. Выполните flowcairn setup и выберите Codex, Claude Code или Cursor.');
   if (['claude', 'cursor'].includes(profile.ai.provider)) {
-    if (!['darwin', 'linux', 'win32'].includes(process.platform) || !trustedRuntimeReadable(EXTERNAL_WORKER_FILE))
-      fail('RUNNER_PLATFORM_UNSUPPORTED', 'External CLI adapter требует macOS/Linux и trusted worker.');
+    if (!['darwin', 'win32'].includes(process.platform) || !trustedRuntimeReadable(EXTERNAL_WORKER_FILE))
+      fail('RUNNER_PLATFORM_UNSUPPORTED', 'External CLI adapter требует macOS/native Windows и trusted worker.');
     const provider = providerToolchain(profile.ai);
     const identity = { nodeVersion: process.version, nodeDigest: fileDigest(NODE_BINARY), provider: provider.provider, providerPath: provider.executable, providerVersion: provider.version, providerDigest: provider.digest, workerDigest: fileDigest(EXTERNAL_WORKER_FILE) };
     return Object.freeze({ node: NODE_BINARY, codexEntry: null, provider, digest: sha256(canonicalJson(identity)), identity: Object.freeze(identity) });
   }
-  if (!['darwin', 'linux', 'win32'].includes(process.platform) || !['arm64', 'x64'].includes(process.arch))
+  if (!['darwin', 'win32'].includes(process.platform) || !['arm64', 'x64'].includes(process.arch))
     fail('RUNNER_PLATFORM_UNSUPPORTED', 'Нужен официальный Codex CLI для текущей ОС и архитектуры.');
   const codex = discoverCodex(profile.ai);
   const platformName = `${process.platform}-${process.arch}`;
   const cpu = process.arch === 'arm64' ? 'aarch64' : 'x86_64';
-  const triple = `${cpu}-${process.platform === 'darwin' ? 'apple-darwin' : process.platform === 'win32' ? 'pc-windows-msvc' : 'unknown-linux-musl'}`;
+  const triple = `${cpu}-${process.platform === 'darwin' ? 'apple-darwin' : 'pc-windows-msvc'}`;
   let nativeRoot;
   try {
     nativeRoot = path.dirname(createRequire(codex.entry).resolve(`@openai/codex-${platformName}/package.json`));
@@ -1239,7 +1240,7 @@ export async function probeRunner({ root }) {
       };
     }
   }
-  if (!['darwin', 'linux', 'win32'].includes(process.platform)) {
+  if (!['darwin', 'win32'].includes(process.platform)) {
     return {
       ai: { available: false, reason: 'UNSUPPORTED_PLATFORM' },
       checks: { available: false, reason: 'UNSUPPORTED_PLATFORM' },
@@ -1332,13 +1333,18 @@ export function inspectCodexInstallation(ai = {}) {
   }
 }
 
-/** Verified CLI metadata for an explicit learning preflight; no login or inference.
+/** Verified CLI metadata for an explicit learning preflight; external clients
+ * reuse the runner's read-only auth status check, never login or inference.
  * The configured concrete model remains the caller's responsibility.
- * @returns {import('./learning-runner.mjs').LearningToolchain}
+ * @returns {import('./learning-runner.mjs').LearningToolchain | ReturnType<typeof externalLearningToolchain>}
  */
 export function learningProviderToolchain(ai) {
+  if (ai?.provider === 'claude' && ai.providerVersion && ai.providerPath) {
+    externalLearningLocalPolicyPreflight();
+    return externalLearningToolchain(runnerToolchain({ ai }));
+  }
   if (ai?.provider !== 'codex')
-    fail('LEARNING_PROVIDER_UNSUPPORTED', 'Учебный toolchain проверен только для Codex');
+    fail('LEARNING_PROVIDER_UNSUPPORTED', 'Для учебного toolchain нужен Codex или закрепленный Claude CLI');
   const toolchain = runnerToolchain({ ai });
   if (typeof toolchain.codexEntry !== 'string' || !('codexVersion' in toolchain.identity))
     throw new GraphError('LEARNING_CODEX_TOOLCHAIN_INVALID', 'Нет проверенного Codex toolchain');

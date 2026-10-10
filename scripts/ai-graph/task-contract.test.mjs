@@ -5,6 +5,8 @@ import { hashObject } from './lib/io.mjs';
 import { buildTaskContract, isOmnibusAcceptance, selectTaskRigor, validateTaskContract } from './lib/task-contract.mjs';
 import { boundPriorEvidence, taskContractForNode } from './lib/bounded-context.mjs';
 import { buildPrompt } from './lib/codex.mjs';
+import { compileTaskProposal } from './lib/planning.mjs';
+import { SKILL_ROUTES } from './lib/config.mjs';
 
 const task = TaskSpecSchema.parse({ schemaVersion: 2, sourceHash: hashObject('source'), id: 'TASK-PROOF',
   goal: 'Экспортировать заметки', instructions: 'Добавить экспорт заметок с заголовками', scope: ['src', 'tests'],
@@ -157,6 +159,36 @@ test('structured task keeps its one explicit criterion even when instructions us
   assert.equal(contract.requirements.length, 1);
   assert.equal(contract.requirements[0].origin, 'acceptance');
   assert.equal(contract.acceptanceHash, undefined);
+});
+
+test('natural decomposition keeps a concrete req-001 linked through compilation and repair', () => {
+  const description = 'Reject invalid email and save valid email';
+  const input = { ...task, intakeKind: 'natural', instructions: description, acceptance: [description] };
+  const details = ['Reject invalid email', 'Save valid email'];
+  const proposed = { ...proposal, requirements: details.map((title, index) => ({
+    id: `req-00${index + 1}`, title, mandatory: true,
+    verification: { method: 'check', checkIds: ['check-tests'], criterion: title, paths: ['src/form.mjs'] },
+  })) };
+  const steps = proposed.requirements.map(({ id }, index) => ({ id: `fix-${index}`, paths: ['src/form.mjs'], requirementIds: [id] }));
+  const contract = buildTaskContract(input, { proposal: proposed, analysis: { requirements: details }, steps });
+  assert.deepEqual(contract.requirements.map(({ id, workIds }) => ({ id, workIds })), [
+    { id: 'req-001', workIds: ['step-fix-0'] }, { id: 'req-002', workIds: ['step-fix-1'] },
+  ]);
+  const plan = compileTaskProposal(input, { summary: 'Split email requirements', verdict: 'pass', skillsUsed: [], findings: [],
+    changedFiles: [], edits: [], plan: [], contractProposal: proposed,
+    steps: steps.map((step, index) => ({ ...step, title: details[index], outcome: details[index], needs: [] })) }, {
+    runtimeHash: hashObject('runtime'), workflow: 'autonomous', analysis: { requirements: details },
+    skills: [...new Set(Object.values(SKILL_ROUTES).flat())].map(id => ({ id, path: `skills/${id}/SKILL.md`, hash: hashObject(id) })),
+  }).plan;
+  assert.deepEqual(plan.taskContract.requirements, contract.requirements);
+  const repaired = buildTaskContract(input, { previousContract: contract,
+    steps: steps.map((step) => ({ ...step, id: `repair-${step.id}` })) });
+  assert.deepEqual(repaired.requirements.map(({ workIds, ...item }) => item), contract.requirements.map(({ workIds, ...item }) => item));
+  assert.deepEqual(repaired.requirements[0].workIds, ['step-repair-fix-0']);
+  assert.throws(() => buildTaskContract(input, { proposal: proposed, analysis: { requirements: details }, steps: steps.slice(1) }),
+    { code: 'CONTRACT_ANALYSIS_COVERAGE' });
+  assert.throws(() => buildTaskContract(input, { proposal: proposed, analysis: { requirements: details },
+    steps: [{ ...steps[0], requirementIds: ['req-999'] }, steps[1]] }), { code: 'CONTRACT_REQUIREMENT_UNKNOWN' });
 });
 
 test('omnibus detection and planner instructions agree for natural, explicit and legacy intake', () => {

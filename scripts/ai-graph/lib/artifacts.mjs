@@ -68,7 +68,7 @@ const sensitive = hasSecretContent;
 const incomplete = (reason) => ({ content: `${reason}\n`, complete: false, mediaType: 'text/x-diff' });
 
 /** Exact attempt operations. Structural records are deterministic evidence, never an AI summary. */
-export function buildAttemptDiff(worktree, before, after, beforeContents) {
+export async function buildAttemptDiff(worktree, before, after, beforeContents, options = {}) {
   const root = realpathSync(worktree);
   const old = new Map(before.files.map((entry) => [entry.path, entry]));
   const next = new Map(after.files.map((entry) => [entry.path, entry]));
@@ -113,7 +113,7 @@ export function buildAttemptDiff(worktree, before, after, beforeContents) {
       return incomplete('Binary evidence: changed binary content requires a dedicated verifier');
     try {
       operations.push({ kind: 'text', path: file, before: fileVersion(previous), after: fileVersion(current),
-        patch: unifiedDiff(file, previous, current, oldBytes, newBytes) });
+        patch: await unifiedDiff(file, previous, current, oldBytes, newBytes, options) });
     } catch (error) {
       if (error instanceof GraphError && error.code === 'DIFF_UNAVAILABLE')
         return incomplete('Diff exceeds available time or output budget; exact hunks unavailable');

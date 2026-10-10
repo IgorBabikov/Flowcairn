@@ -23,12 +23,10 @@ test('Windows mode handling does not confuse synthesized stat modes with ACL evi
     assert.equal(isPrivateMode({ mode }, 'win32'), true);
     assert.equal(isTrustedMode({ mode }, 'win32'), true);
     assert.doesNotThrow(() => assertPrivateMode({ mode }, 'win32'));
-    assert.equal(isPrivateMode({ mode }, 'linux'), false);
     assert.equal(isTrustedMode({ mode }, 'darwin'), false);
   }
   assert.equal(isPrivateMode({ mode: 0o600 }, 'darwin'), true);
-  assert.equal(isTrustedMode({ mode: 0o755n }, 'linux'), true);
-  assert.throws(() => assertPrivateMode({ mode: 0o644 }, 'linux'));
+  assert.throws(() => assertPrivateMode({ mode: 0o644 }, 'darwin'));
 });
 
 test('Windows drive, separator, case and UNC containment stay component-bounded', () => {
@@ -38,7 +36,6 @@ test('Windows drive, separator, case and UNC containment stay component-bounded'
   for (const candidate of ['c:/Project/src/file.js', 'C:\\PROJECT']) assert.equal(isPathWithin('C:\\Project', candidate, 'win32'), true);
   for (const candidate of ['c:/Project-copy/private', 'D:\\Project\\source', 'C:\\Project\\..\\private']) assert.equal(isPathWithin('C:\\Project', candidate, 'win32'), false);
   assert.equal(isPathWithin('\\\\host\\share\\project', '\\\\other\\share\\project', 'win32'), false);
-  assert.equal(sameHostPath('/Project', '/project', 'linux'), false);
 });
 
 test('Windows directory fsync explicitly reports missing durability guarantee', (t) => {
@@ -87,7 +84,6 @@ test('Windows device normalization matches libuv low32 representation without lo
   const handle = { ...stat, dev: 0x23456789n };
   assert.equal(canonicalStatDevice(stat, 'win32'), handle.dev);
   assert.equal(crossStatIdentity(stat, 'win32'), crossStatIdentity(handle, 'win32'));
-  assert.notEqual(crossStatIdentity(stat, 'linux'), crossStatIdentity(handle, 'linux'));
   for (const field of ['dev', 'ino', 'mode', 'nlink', 'size', 'mtimeNs', 'ctimeNs']) {
     assert.notEqual(crossStatIdentity(stat, 'win32'), crossStatIdentity({ ...handle, [field]: handle[field] + 1n }, 'win32'), field);
   }

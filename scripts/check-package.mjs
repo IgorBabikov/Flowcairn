@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
+import { RPG_ASSET_FILES } from '../tools/ai-graph-viewer/server.mjs';
 const cache = mkdtempSync(path.join(os.tmpdir(), 'flowcairn-pack-check-'));
 try {
   assert.ok(process.env.npm_execpath, 'Запускайте через npm run check:package.');
@@ -18,16 +19,21 @@ try {
   assert.ok(files.includes(manifestPath), 'Архив не содержит карту игрового мира. Выполните npm run build.');
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
   assert.equal(manifest.schemaVersion, 1, 'Неизвестная версия карты игрового мира.');
-  const assets = { ...manifest.assets, ...manifest.uiAssets };
-  for (const name of ['world.png', 'hero-idle.png', 'mentor-idle.png', 'workshop-room.png', 'archive-room.png', 'ui-codex.png', 'ui-quest-scroll.png']) {
+  const assets = manifest.bundledFiles;
+  assert.ok(assets, 'Карта не содержит закрепленные bundled hashes.');
+  assert.deepEqual(Object.keys(assets).sort(), RPG_ASSET_FILES.filter(file => file !== 'world.json').sort(), 'Неожиданный список RPG ассетов.');
+  for (const name of RPG_ASSET_FILES.filter(file => file !== 'world.json')) {
     const file = `${rpgRoot}/${name}`;
     assert.ok(files.includes(file), `Архив не содержит игровой ассет ${name}.`);
-    const entry = Object.values(assets).find(asset => asset.file === name);
+    const entry = assets[name];
     assert.ok(entry, `Карта не описывает игровой ассет ${name}.`);
     const bytes = readFileSync(file);
     assert.equal(bytes.length, entry.bytes, `Размер ${name} не соответствует карте.`);
     assert.equal(createHash('sha256').update(bytes).digest('hex'), entry.sha256, `Хеш ${name} не соответствует карте.`);
   }
+  const shippedRpg = files.filter(file => file.startsWith(`${rpgRoot}/`)).map(file => file.slice(rpgRoot.length + 1));
+  assert.deepEqual(shippedRpg.sort(), [...RPG_ASSET_FILES].sort(), 'В npm попали лишние RPG файлы.');
+  assert.ok(!files.some(file => /(^|\/)(rpg-assets|output|extracted)(\/|$)|\.(blend|fbx|gltf|glb|zip)$/.test(file)), 'Offline исходники или preview не должны попадать в npm.');
   assert.ok(!files.some(file => /(^|\/)(node_modules|\.git|\.ai-orchestrator|\.env)(\/|$)/.test(file)));
   console.log(`Устанавливаемый архив: ${files.length} файлов; runtime, skills и собранный UI на месте.`);
 } finally { rmSync(cache, { recursive: true, force: true }); }

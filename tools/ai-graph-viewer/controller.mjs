@@ -1,6 +1,23 @@
 import { timingSafeEqual } from 'node:crypto';
-import { GraphError } from '../../scripts/ai-graph/lib/io.mjs';
-import { sanitizeText } from '../../scripts/ai-graph/lib/service.mjs';
+
+// Keep the viewer server self-contained: it is also built/tested from a copied
+// viewer directory and must not resolve the source runtime through cwd paths.
+class GraphError extends Error {
+  constructor(code, message) {
+    super(message);
+    this.code = code;
+  }
+}
+
+function sanitizeText(value) {
+  return String(value)
+    .replace(/-----BEGIN [\s\S]*?PRIVATE KEY-----[\s\S]*?-----END [\s\S]*?PRIVATE KEY-----/g, '[redacted]')
+    .replace(/\b(?:sk-[\w-]{8,}|Bearer\s+[\w./-]+)\b/gi, '[redacted]')
+    .replace(/((?:api[_-]?key|password|secret|access[_-]?token|authorization)\s*[=:]\s*)[^\s,;]+/gi, '$1[redacted]')
+    .replace(/\/(?:Users|home|private|tmp|var)\/[^\s"'<>]+/g, '[host-path]')
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '') // eslint-disable-line no-control-regex -- remove unsafe control characters
+    .slice(0, 12000);
+}
 
 export function authorize(request, token, origin) {
   const actual = request.headers['x-flowcairn-control'];
@@ -54,7 +71,7 @@ export function sendError(response, error) {
     error: {
       code,
       message:
-        error instanceof GraphError
+        typeof error?.code === 'string'
           ? sanitizeText(error.message)
           : 'Некорректный запрос или недоступное действие',
     },
@@ -95,6 +112,45 @@ export async function learningRead(service, response, url) {
     send(response, 200, result);
     return true;
   }
+  const chapterIndex = url.pathname.match(
+    /^\/api\/runs\/([a-z][a-z0-9-]{1,79})\/learning\/materials\/([a-f0-9]{64})\/chapters$/,
+  );
+  if (chapterIndex) {
+    learningQuery(url);
+    const [, runId, materialHash] = chapterIndex;
+    send(response, 200, await service.readLearningChapterBook(runId, materialHash));
+    return true;
+  }
+  const chapter = url.pathname.match(
+    /^\/api\/runs\/([a-z][a-z0-9-]{1,79})\/learning\/materials\/([a-f0-9]{64})\/chapters\/books\/([a-f0-9]{64})(?:\/chapters\/([a-f0-9]{64}))?$/,
+  );
+  if (chapter) {
+    learningQuery(url);
+    const [, runId, materialHash, bookHash, chapterHash] = chapter;
+    const result = chapterHash
+      ? await service.readLearningChapter(runId, materialHash, bookHash, chapterHash)
+      : await service.readLearningChapterBook(runId, materialHash, bookHash);
+    send(response, 200, result);
+    return true;
+  }
+  const observation = url.pathname.match(
+    /^\/api\/runs\/([a-z][a-z0-9-]{1,79})\/learning\/materials\/([a-f0-9]{64})\/observations\/([a-f0-9]{64})$/,
+  );
+  if (observation) {
+    learningQuery(url);
+    const [, runId, materialHash, observationHash] = observation;
+    send(response, 200, await service.readLearningObservation(runId, materialHash, observationHash));
+    return true;
+  }
+  const practice = url.pathname.match(
+    /^\/api\/runs\/([a-z][a-z0-9-]{1,79})\/learning\/materials\/([a-f0-9]{64})\/practice\/([a-f0-9]{64})$/,
+  );
+  if (practice) {
+    learningQuery(url);
+    const [, runId, materialHash, logHash] = practice;
+    send(response, 200, await service.readLearningPractice(runId, materialHash, logHash));
+    return true;
+  }
   const unavailable = url.pathname.match(
     /^\/api\/runs\/([a-z][a-z0-9-]{1,79})\/learning\/(lessons\/([a-f0-9]{64})|answers\/([a-f0-9]{64})|jobs\/([a-z][a-z0-9-]{1,79}))$/,
   );
@@ -132,6 +188,19 @@ export async function control(service, request, response, url) {
         actor: 'local-operator',
       }),
     });
+  }
+  const practiceCommand = url.pathname.match(
+    /^\/api\/runs\/([a-z][a-z0-9-]{1,79})\/learning\/materials\/([a-f0-9]{64})\/practice(?:\/(feedback))?$/,
+  );
+  if (practiceCommand) {
+    learningQuery(url);
+    const [, runId, materialHash, feedback] = practiceCommand;
+    if (!body || typeof body !== 'object' || body.materialHash !== materialHash)
+      throw new GraphError('INVALID_REQUEST', 'Практика должна ссылаться на тот же материал.');
+    const result = feedback
+      ? await service.appendLearningPracticeFeedback(runId, body, 'local-operator')
+      : await service.appendLearningPractice(runId, body, 'local-operator');
+    return send(response, 200, { ok: true, result });
   }
   const learningCommand = url.pathname.match(
     /^\/api\/runs\/([a-z][a-z0-9-]{1,79})\/learning\/commands\/(generate-lesson|ask-lesson|set-progress)$/,

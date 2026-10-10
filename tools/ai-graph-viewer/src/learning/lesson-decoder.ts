@@ -1,3 +1,4 @@
+import { assertCoverageLesson } from './coverage-decoder';
 import type { DataOrigin, LearningLessonResponse, LearningMaterialResponse, LessonMaterial, LessonStep } from '../contracts';
 import { hashContent } from '../plan-identity';
 import { assertLearning, record, text, hash, id, list, nullable, choice, sourceAnchor, anchorInCatalog, uniqueIds } from './validation';
@@ -26,5 +27,6 @@ export async function decodeLearningLesson(value: unknown, lessonHash: string, m
   const anchors = response.lesson.steps.flatMap(item => [...item.anchors, ...(item.origin.anchor ? [item.origin.anchor] : [])])
     .concat(response.lesson.questions.flatMap(item => item.anchors));
   assertLearning(anchors.every(anchor => anchorInCatalog(anchor, material.sources)), 'Ссылка разбора не соответствует каталогу сохраненных исходников.');
+  assertCoverageLesson(material, response.lesson);
   return response;
 }

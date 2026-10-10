@@ -58,13 +58,6 @@ test('inspection failure, identity drift and newly observed descendants do not p
   assert.equal(stopHostGroup(100, { ...options([]), list: () => ++reads <= 2 ? [root] : [child], tool: (name) => name, run: () => ({ status: 0 }) }), false);
 });
 
-test('POSIX retains group signals and absence proof', () => {
-  assert.equal(hostGroupAlive(100, { platform: 'linux', kill: (pid, signal) => { assert.equal(pid, -100); assert.equal(signal, 0); } }), true);
-  assert.equal(hostGroupAlive(100, { platform: 'linux', kill: () => { throw Object.assign(Error(), { code: 'ESRCH' }); } }), false);
-  assert.equal(hostGroupAlive(-1, { platform: 'win32' }), null);
-});
-
-
 test('Windows system environment keeps standard install paths without user module overrides or credentials', () => {
   const env = hostSystemEnvironment({ platform: 'win32', env: { SYSTEMROOT: 'C:\\Windows', PROGRAMFILES: 'C:\\Program Files', PSModulePath: 'C:\\user-module', API_KEY: 'must-not-propagate', NODE_OPTIONS: '--require unsafe', PATH: 'C:\\Windows' } });
   assert.equal(env.SystemRoot, 'C:\\Windows');

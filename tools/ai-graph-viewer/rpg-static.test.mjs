@@ -5,15 +5,12 @@ import { request as httpRequest } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { startViewer } from './server.mjs';
+import { startViewer, RPG_ASSET_FILES } from './server.mjs';
 
 const token = 'rpg-static-fixture-1234567890';
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5X8AAAAASUVORK5CYII=', 'base64');
 const world = Buffer.from(JSON.stringify({ schemaVersion: 1, assets: { untrusted: 'unlisted.png' } }));
-const files = new Map([
-  ['world.json', world], ['world.png', png], ['workshop-room.png', png],
-  ['archive-room.png', png], ['hero-idle.png', png], ['mentor-idle.png', png],
-]);
+const files = new Map(RPG_ASSET_FILES.map(file => [file, file.endsWith('.json') ? world : png]));
 
 async function fixture(t) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'flowcairn-rpg-static-'));
@@ -73,10 +70,10 @@ test('RPG GET and HEAD serve exactly the bundled JSON/PNG bytes and preserve CSP
 
 test('missing or non-file RPG assets are not served', async t => {
   const f = await fixture(t);
-  rmSync(path.join(f.assets, 'mentor-idle.png'));
+  rmSync(path.join(f.assets, 'guild-mentor-portrait.png'));
   rmSync(path.join(f.assets, 'world.json'));
   mkdirSync(path.join(f.assets, 'world.json'));
-  for (const name of ['mentor-idle.png', 'world.json']) {
+  for (const name of ['guild-mentor-portrait.png', 'world.json']) {
     for (const method of ['GET', 'HEAD'])
       assert.equal((await read(f, `/assets/rpg/${name}`, { method })).status, 404);
   }
@@ -89,6 +86,8 @@ test('manifest strings, arbitrary project files and traversal cannot expand the 
     '/assets/rpg/../rpg/unlisted.png', '/assets/rpg/../../package.json',
     '/assets/rpg/../../../package.json', '/assets/rpg/%2e%2e/%2e%2e/package.json',
     '/assets/rpg/%2e%2e%2f%2e%2e%2fpackage.json', '/package.json',
+    '/assets/rpg/guild-enemy-idle-se.png', '/assets/rpg/guild-mentor-idle-sw.png',
+    '/assets/rpg/guild-mentor-walk-we.json', '/assets/rpg/mentor-idle.png',
   ]) {
     for (const method of ['GET', 'HEAD']) {
       const response = await read(f, target, { method });
@@ -100,22 +99,22 @@ test('manifest strings, arbitrary project files and traversal cannot expand the 
 
 test('a symlink at an allowed RPG filename is rejected even when its target is inside dist', async t => {
   const f = await fixture(t);
-  const file = path.join(f.assets, 'hero-idle.png');
+  const file = path.join(f.assets, 'guild-mentor-portrait.png');
   rmSync(file);
-  symlinkSync(path.join(f.assets, 'world.png'), file);
+  symlinkSync(path.join(f.assets, 'guild-room.png'), file);
   for (const method of ['GET', 'HEAD'])
-    assert.equal((await read(f, '/assets/rpg/hero-idle.png', { method })).status, 404);
+    assert.equal((await read(f, '/assets/rpg/guild-mentor-portrait.png', { method })).status, 404);
 });
 
 test('a parent symlink cannot expose a sibling directory sharing the dist prefix', async t => {
   const f = await fixture(t);
   const outside = path.join(f.root, 'dist-outside');
   mkdirSync(outside);
-  writeFileSync(path.join(outside, 'world.png'), 'outside fixture bytes');
+  writeFileSync(path.join(outside, 'guild-room.png'), 'outside fixture bytes');
   rmSync(f.assets, { recursive: true });
   symlinkSync(outside, f.assets, 'dir');
   for (const method of ['GET', 'HEAD']) {
-    const response = await read(f, '/assets/rpg/world.png', { method });
+    const response = await read(f, '/assets/rpg/guild-room.png', { method });
     assert.equal(response.status, 404);
     assert.ok(!response.bytes.toString().includes('outside fixture bytes'));
   }

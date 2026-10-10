@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { RPG_ASSET_FILES } from '../server.mjs';
 
 const root = fileURLToPath(new URL('../dist', import.meta.url));
 const files = new Map([
@@ -12,14 +13,7 @@ const files = new Map([
   ['/fonts/Manrope-Cyrillic-Variable.woff2', ['fonts/Manrope-Cyrillic-Variable.woff2', 'font/woff2']],
   ['/fonts/Manrope-Latin-Variable.woff2', ['fonts/Manrope-Latin-Variable.woff2', 'font/woff2']],
   ['/fonts/OFL-Manrope.txt', ['fonts/OFL-Manrope.txt', 'text/plain; charset=utf-8']],
-  ['/assets/rpg/world.json', ['assets/rpg/world.json', 'application/json; charset=utf-8']],
-  ['/assets/rpg/world.png', ['assets/rpg/world.png', 'image/png']],
-  ['/assets/rpg/workshop-room.png', ['assets/rpg/workshop-room.png', 'image/png']],
-  ['/assets/rpg/archive-room.png', ['assets/rpg/archive-room.png', 'image/png']],
-  ['/assets/rpg/hero-idle.png', ['assets/rpg/hero-idle.png', 'image/png']],
-  ['/assets/rpg/mentor-idle.png', ['assets/rpg/mentor-idle.png', 'image/png']],
-  ['/assets/rpg/ui-codex.png', ['assets/rpg/ui-codex.png', 'image/png']],
-  ['/assets/rpg/ui-quest-scroll.png', ['assets/rpg/ui-quest-scroll.png', 'image/png']],
+  ...RPG_ASSET_FILES.map(file => [`/assets/rpg/${file}`, [`assets/rpg/${file}`, file.endsWith('.json') ? 'application/json; charset=utf-8' : 'image/png']]),
 ]);
 
 const server = createServer((request, response) => {

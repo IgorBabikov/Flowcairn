@@ -1,6 +1,7 @@
+import { decodeCoverage } from './coverage-decoder';
 import type { LearningMaterialResponse, LearningSourceResponse, MaterialGap, SavedSource, StageMaterial } from '../contracts';
 import { hashContent } from '../plan-identity';
-import { assertLearning, record, text, hash, id, integer, list, nullable, choice, savedSource, uniqueIds, capability, relativePath } from './validation';
+import { assertLearning, record, text, hash, id, integer, nullable, choice, savedSource, uniqueIds, capability, relativePath } from './validation';
 
 function materialCapabilities(value: unknown) {
   return record(value) && ['generateLesson', 'askLesson', 'setLearningProgress'].every(key => capability(value[key]));
@@ -10,7 +11,7 @@ function gap(value: unknown): value is MaterialGap {
     && nullable(value.path, relativePath) && text(value.reason);
 }
 function material(value: unknown): value is StageMaterial {
-  return record(value) && value.version === 1 && choice(value.kind, ['stage', 'task']) && id(value.runId)
+  return record(value) && (value.version === 1 ? value.coverageHash === undefined : value.version === 2 && hash(value.coverageHash)) && choice(value.kind, ['stage', 'task']) && id(value.runId)
     && ['planHash', 'taskHash', 'contractHash', 'beforeHash', 'resultHash', 'sourceCatalogHash'].every(key => hash(value[key]))
     && nullable(value.stageId, id) && (value.kind === 'task' ? value.stageId === null : id(value.stageId))
     && text(value.goal) && text(value.outcome) && text(value.createdAt, 64) && Number.isFinite(Date.parse(value.createdAt))
@@ -34,6 +35,7 @@ export async function decodeLearningMaterial(value: unknown, runId: string, mate
     catalogHash = await hashContent(response.sourceCatalog);
   } else catalogHash = await hashContent({ version: 1, sources: response.sources });
   assertLearning(catalogHash === response.material.sourceCatalogHash, 'Каталог исходников не соответствует сохраненному материалу.');
+  await decodeCoverage(response);
   return response;
 }
 

@@ -13,12 +13,11 @@ import { TaskSpecSchema, NodeDefinitionSchema, GraphPlanSchema } from '../script
 import { WorkflowService } from '../scripts/ai-graph/lib/service.mjs';
 import { hashObject } from '../scripts/ai-graph/lib/io.mjs';
 
-// CI sets this flag so a shell accidentally routed through WSL cannot pass.
+// CI sets this flag so the native Windows job cannot silently run on another host.
 test('Windows CI is a native Windows Node process', () => {
   if (process.env.FLOWCAIRN_REQUIRE_NATIVE_WINDOWS === '1') {
     assert.equal(process.platform, 'win32');
     assert.equal(process.versions.node, '22.13.1');
-    assert.equal(process.env.WSL_DISTRO_NAME, undefined);
   }
 });
 
@@ -29,7 +28,7 @@ function fixture(t, delay = 0) {
   mkdirSync(root);
   const platformName = `${process.platform}-${process.arch}`;
   const cpu = process.arch === 'arm64' ? 'aarch64' : 'x86_64';
-  const triple = `${cpu}-${process.platform === 'win32' ? 'pc-windows-msvc' : process.platform === 'darwin' ? 'apple-darwin' : 'unknown-linux-musl'}`;
+  const triple = `${cpu}-${process.platform === 'win32' ? 'pc-windows-msvc' : 'apple-darwin'}`;
   const entry = path.join(cliRoot, 'bin', 'codex.js');
   const nativeRoot = path.join(cliRoot, 'node_modules', '@openai', `codex-${platformName}`);
   const native = path.join(nativeRoot, 'vendor', triple, 'bin', process.platform === 'win32' ? 'codex.exe' : 'codex');

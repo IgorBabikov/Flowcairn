@@ -6,7 +6,11 @@ import { LearningJobSchema, LessonMaterialSchema, LessonAnswerSchema, SourceAnch
 export const LearningJobRecordSchema = LearningJobSchema.extend({
   version: z.literal(1), runId: Id, planHash: Hash, taskHash: Hash, operationId: Id, digest: Hash,
   materialBinding: z.strictObject({ runId: Id, planHash: Hash, taskHash: Hash }),
-  providerBinding: z.strictObject({ provider: z.string().min(1).max(80), model: z.string().min(1).max(160), toolchainHash: Hash, preflightHash: Hash, policyHash: Hash }),
+  providerBinding: z.strictObject({ provider: z.string().min(1).max(80), model: z.string().min(1).max(160),
+    reasoningEffort: z.string().regex(/^[a-z][a-z0-9-]{0,31}$/).optional(),
+    configurationHash: Hash.optional(), effectiveModel: z.string().min(1).max(160).optional(),
+    effectiveReasoningEffort: z.string().regex(/^[a-z][a-z0-9-]{0,31}$/).optional(),
+    toolchainHash: Hash, preflightHash: Hash, policyHash: Hash }),
   methodHash: Hash, inputHash: Hash, schemaHash: Hash, sourcePolicyHash: Hash, preparationHash: Hash, inputObjectHash: Hash, commandHash: Hash, consentHash: Hash,
   ownerPid: z.number().int().min(1), ownerStart: Hash.nullable(), process: z.json().nullable(),
   sequence: z.number().int().min(0),

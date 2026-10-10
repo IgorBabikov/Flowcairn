@@ -80,6 +80,24 @@ test('product intake требует локальное согласие и не 
  await assert.rejects(f.service.intake({title:'Форма',description:'Добавить email',taskNumber:'1',operationId:'intake-bad',contextHash:hash,scope:['private']}));
 });
 
+test('queued driver keeps service open and persists a sanitized scheduler failure without executing', async (t) => {
+ const f = await fixture(t);
+ const initial = await f.intake();
+ assert.equal(f.service.close(), false, 'a scheduled wakeup owns the service lifetime');
+ const identity = f.service.adapters.identity;
+ f.service.adapters.identity = () => { throw new TypeError('private scheduler diagnostic'); };
+ try { await Promise.all([...f.service.drives.values()]); }
+ finally { f.service.adapters.identity = identity; }
+ const state = f.service.store.readRun(initial.runId);
+ assert.match(state.failureReason, /^INTERNAL_ERROR_TYPE/);
+ assert.equal(state.failureReason.includes('private scheduler diagnostic'), false);
+ assert.equal(state.activeOperation, null);
+ assert.equal(f.calls.length, 0);
+ assert.equal(f.service.snapshot(initial.runId).integrity.valid, true);
+ assert.equal(f.service.drives.size, 0);
+ assert.equal(f.service.close(), true);
+});
+
 test('Russian analysis near 32 KiB reaches planning and is scoped before implementation', async (t) => {
  const analysisOutput = { ...analysis, acceptance: Array.from({ length: 8 }, (_, index) => `${index}: ${'Ф'.repeat(1950)}`) };
  assert.ok(Buffer.byteLength(JSON.stringify(analysisOutput)) > 30 * 1024);

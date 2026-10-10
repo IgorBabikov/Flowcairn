@@ -89,7 +89,7 @@ export function inspectOnboarding(root) {
       ...(profile?.version === 2 && !profile.checks.length ? [MISSING_CHECK_GUIDANCE] : []),
       'Codex: модель и усиление считываются из конфигурации CLI. Настройки активного чата VS Code не считываются. Можно выбрать модель вручную в Flowcairn.',
       'Проверки запускают зарегистрированные команды прямо в проекте с правами пользователя. Используйте доверенный код и зависимости.',
-      'Нужен Node.js 22 и официальный AI-клиент с собственной авторизацией. macOS, Linux и нативный Windows; Docker и WSL не требуются. На Windows используется системный .NET Framework compiler.',
+      'Нужен Node.js 22 и официальный AI-клиент с собственной авторизацией. Поддерживаются macOS и нативный Windows. На Windows используется системный .NET Framework compiler.',
       'Изменение настроек: закройте UI и выполните npx flowcairn setup. Старые планы сохранят прежний профиль и потребуют перепланирования.',
     ],
   };
@@ -128,8 +128,8 @@ export async function collectOnboarding(root, options = {}, terminal = {}) {
       fail(external?.reason === 'PROVIDER_AUTH_REQUIRED' ? 'PROVIDER_AUTH_REQUIRED' : 'PROVIDER_TOOLCHAIN_INVALID', external?.reason === 'PROVIDER_AUTH_REQUIRED'
         ? `${provider === 'claude' ? 'Claude Code' : 'Cursor'} не авторизован. Войдите в CLI и повторите.`
         : `${provider === 'claude' ? 'Claude Code' : 'Cursor Agent'} не найден или не прошел проверку версии. Установите официальный CLI и повторите.`);
-    if (provider === 'codex' && !['darwin', 'linux', 'win32'].includes(process.platform))
-      fail('PROVIDER_PLATFORM', 'Для Codex нужны macOS, Linux или нативный Windows.');
+    if (provider === 'codex' && !['darwin', 'win32'].includes(process.platform))
+      fail('PROVIDER_PLATFORM', 'Для Codex нужны macOS или нативный Windows.');
     if (provider === 'codex') {
       const cli = await prepareCodex({ codexPath: options['codex-path'] }, { ask, output });
       if (!cli.managed && cli.executable) options = { ...options, 'codex-path': cli.executable };
@@ -328,7 +328,7 @@ function sameProfileStructure(previous, next) {
 export async function saveOnboarding(root, input, { dryRun = false } = {}) {
   const value = SetupSchema.parse(input);
   const externalProvider = value.provider === 'claude' || value.provider === 'cursor' ? value.provider : null;
-  if (value.provider === 'codex' && !['darwin', 'linux', 'win32'].includes(process.platform)) fail('PROVIDER_PLATFORM', 'Для Codex нужны macOS, Linux или нативный Windows.');
+  if (value.provider === 'codex' && !['darwin', 'win32'].includes(process.platform)) fail('PROVIDER_PLATFORM', 'Для Codex нужны macOS или нативный Windows.');
   if (externalProvider && (!value.providerPath || !value.providerVersion || value.modelMode !== 'provider' || value.model !== 'provider-default'))
     fail('PROVIDER_PIN_REQUIRED', 'Claude Code/Cursor используют только проверенный CLI с наследуемой моделью. Повторите setup.');
   if (externalProvider) {

@@ -14,7 +14,7 @@ const PROVIDER_API = Object.freeze({ capability: learningProviderCapability, pre
 /** @returns {never} */
 const fail = (code, message) => { throw new GraphError(code, message); };
 const concreteModel = value => typeof value === 'string' && !['provider-default', 'default', 'auto'].includes(value) &&
-  /^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,159}$/.test(value);
+  /^[a-zA-Z0-9][a-zA-Z0-9._/[\]-]{0,159}$/.test(value);
 const sync = (value, name) => {
   if (value && typeof value.then === 'function') fail('LEARNING_CALLBACK_ASYNC', `${name} должен завершаться синхронно.`);
 };
@@ -37,18 +37,29 @@ export function createLearningJobAdapter({ root, settings, toolchain = () => lea
   };
   const configured = () => {
     const ai = settings();
-    if (ai?.provider !== 'codex') {
+    if (!['codex', 'claude'].includes(ai?.provider) || ai.provider === 'claude' && !ai.providerVersion) {
       const capability = providerApi.capability({ provider: ai?.provider, cliVersion: ai?.providerVersion ?? null });
       fail(capability.code ?? 'LEARNING_PROVIDER_UNSUPPORTED', capability.reason ?? 'Учебный запуск для этого provider недоступен.');
     }
-    const model = ai.modelMode === 'provider' || ai.model === 'provider-default' ? modelSettings().model : ai.model;
-    if (!concreteModel(model)) fail('LEARNING_MODEL_INVALID', 'Для учебного запуска нужна конкретная настроенная модель.');
-    return { provider: ai.provider, model, cliVersion: ai.providerVersion ?? null };
+    const inherit = ai.modelMode === 'provider' || ai.model === 'provider-default';
+    const defaults = inherit && ai.provider === 'codex' ? modelSettings() : null;
+    const model = inherit ? defaults?.model ?? 'provider-default' : ai.model;
+    const reasoningEffort = (inherit ? defaults?.reasoningEffort : ai.reasoningEffort) ?? undefined;
+    if (!concreteModel(model) && !(ai.provider === 'claude' && inherit)) fail('LEARNING_MODEL_INVALID', 'Для учебного запуска нужна конкретная настроенная модель.');
+    if (reasoningEffort !== undefined && (typeof reasoningEffort !== 'string' || !/^[a-z][a-z0-9-]{0,31}$/.test(reasoningEffort)))
+      fail('LEARNING_REASONING_INVALID', 'Настройка усиления учебного вызова некорректна.');
+    // Bind the configured selection separately from the resolved CLI bytes.
+    // Rechecking a pinned old toolchain cannot detect a new selected client.
+    const clientSelectionHash = ai.provider === 'claude' ? hashObject({ providerPath: ai.providerPath ?? null,
+      providerVersion: ai.providerVersion ?? null, providerManaged: ai.providerManaged === true }) : null;
+    return { provider: ai.provider, model, cliVersion: ai.providerVersion ?? null, clientSelectionHash,
+      ...(reasoningEffort === undefined ? {} : { reasoningEffort }) };
   };
   const beforeGo = handle => {
     const state = stateOf(handle), current = configured();
-    if (current.provider !== handle.providerBinding.provider || current.model !== handle.providerBinding.model)
-      fail('LEARNING_PROVIDER_DRIFT', 'Provider или модель изменились после подготовки учебного запуска.');
+    if (current.provider !== handle.providerBinding.provider || current.model !== handle.providerBinding.model ||
+        current.reasoningEffort !== handle.providerBinding.reasoningEffort || current.clientSelectionHash !== state.clientSelectionHash)
+      fail('LEARNING_PROVIDER_DRIFT', 'Provider, выбранный CLI, модель или усиление изменились после подготовки учебного запуска.');
     const input = providerApi.readInput(state.prepared);
     boundedInput(input);
     if (input !== handle.input || sha256(input) !== handle.inputHash ||
@@ -61,7 +72,7 @@ export function createLearningJobAdapter({ root, settings, toolchain = () => lea
       catch (error) { return { allowed: false, reason: error instanceof GraphError ? error.message : 'Настройки учебного запуска недоступны.' }; }
     },
     async prepare(input) {
-      const ai = configured();
+      const { clientSelectionHash, ...ai } = configured();
       let prepared;
       try {
         prepared = await providerApi.prepare({ ...input, ...ai });
@@ -86,10 +97,13 @@ export function createLearningJobAdapter({ root, settings, toolchain = () => lea
             !Number.isSafeInteger(prepared.maxOutputBytes) || prepared.maxOutputBytes < 1 || prepared.maxOutputBytes > LEARNING_PROVIDER_LIMITS.processOutputBytes)
           fail('LEARNING_TRANSPORT_LIMIT', 'Лимиты учебного запуска не подтверждены.');
         const handle = Object.freeze({ input: prompt, command: freezeCommand(command),
-          providerBinding: Object.freeze({ provider: ai.provider, model: ai.model, toolchainHash: selectedToolchain.digest, preflightHash: hashObject(receipt), policyHash: receipt.policyHash }),
+          providerBinding: Object.freeze({ provider: ai.provider, model: ai.model,
+            ...(ai.reasoningEffort === undefined ? {} : { reasoningEffort: ai.reasoningEffort }),
+            ...Object.fromEntries(['configurationHash', 'effectiveModel', 'effectiveReasoningEffort'].filter(key => receipt[key] !== undefined).map(key => [key, receipt[key]])),
+            toolchainHash: selectedToolchain.digest, preflightHash: hashObject(receipt), policyHash: receipt.policyHash }),
           inputHash: prepared.inputHash, schemaHash: prepared.schemaHash, methodHash: prepared.methodHash, materialHash: prepared.materialHash,
           preparationHash: prepared.preparationHash, kind: prepared.kind, timeoutMs: prepared.timeoutMs, maxOutputBytes: prepared.maxOutputBytes });
-        handles.set(handle, { prepared, commandHash: hashObject(handle.command), disposed: false, executed: false });
+        handles.set(handle, { prepared, clientSelectionHash, commandHash: hashObject(handle.command), disposed: false, executed: false });
         beforeGo(handle);
         return handle;
       } catch (error) {

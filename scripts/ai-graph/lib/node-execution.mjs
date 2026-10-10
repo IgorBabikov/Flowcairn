@@ -345,7 +345,13 @@ export async function executeNode(host, state, task, plan, definition, signal) {
             verdict = 'uncertain';
             reason = 'Заявленные AI changedFiles не совпадают с fingerprint';
           }
-          const diff = host.adapters.diff(state.binding.worktree, before, after, beforeContents);
+          const diff = await host.adapters.diff(state.binding.worktree, before, after, beforeContents, { signal });
+          // Diff is host work, but its await allows Stop, owner loss or external
+          // writes. Fence again before committing any artifact or pass receipt.
+          host.assertExecutionOwner(host.read(state.runId).state, state, definition);
+          if (signal?.aborted) fail('DIFF_ABORTED', 'Проверка изменений остановлена');
+          if (host.adapters.fingerprint(state.binding.worktree, state.toolchain).hash !== after.hash)
+            fail('DIFF_WORKSPACE_CHANGED', 'Исходники изменились во время проверки diff');
           artifacts.push(
             host.putArtifact('diff', 'Изменения workspace', diff.content, diff.mediaType ?? 'text/x-diff'),
             host.putArtifact('changed-files', 'Измененные файлы', {

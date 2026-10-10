@@ -1,3 +1,5 @@
+import { linkLearningCoverage } from './learning-coverage.mjs';
+import { validateLessonMaterial } from './lesson-validation.mjs';
 import { GraphError, hashObject } from './io.mjs';
 import { Hash, Id } from './schema-primitives.mjs';
 import { ReceiptSchema } from './schemas.mjs';
@@ -107,6 +109,16 @@ export function learningMaterial(host, runId, materialHash) {
   assertMaterialOwner(context.owner, materialHash, result.material);
   const state = context.requested.state;
   const projection = host.learningProjection?.(state, materialHash) ?? { lessonHash: null, lessonStatus: 'absent' };
+  if (result.coverage && projection.lessonHash) {
+    try {
+      const raw = host.store.readObject('lessons', projection.lessonHash);
+      const lesson = validateLessonMaterial({ ...context.options, methodHash: raw.methodHash, lesson: raw });
+      result.coverage = linkLearningCoverage(result.coverage, lesson, projection.lessonHash);
+    } catch {
+      // An unavailable/foreign/corrupt lesson cannot make any span linked.
+      result.coverage = { ...result.coverage, lessonHash: projection.lessonHash, linking: 'unavailable' };
+    }
+  }
   const generate = result.sources.length ? host.learningCapability?.(state, materialHash, 'lesson') : null;
   const ask = projection.lessonHash ? host.learningCapability?.(state, materialHash, 'question') : null;
   const quiescent = state.schemaVersion === 3 && !state.activeOperation && !state.setupPending && !host.store.inspectLock(state.runId) &&

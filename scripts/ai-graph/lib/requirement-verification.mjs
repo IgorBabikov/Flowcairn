@@ -1,39 +1,79 @@
-import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, realpathSync } from 'node:fs';
+import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import { TextDecoder } from 'node:util';
-import { GraphError, hashObject, sha256 } from './io.mjs';
+import { GraphError, hashObject } from './io.mjs';
 import { RequirementAcceptanceReceiptSchema, RelativePath } from './schemas.mjs';
+import { lstatHostSync, crossStatIdentity, sameHostPath } from './host-filesystem.mjs';
+import { scanSourceFile } from './source-file-scan.mjs';
 
 const fail = (message) => { throw new GraphError('REQUIREMENT_EVIDENCE_INVALID', message); };
 const includesPath = (paths, file) => paths.some((scope) => file === scope.replace(/\/$/, '') || file.startsWith(`${scope.replace(/\/$/, '')}/`));
 
-// Quotes are evidence only after the host checks the actual bytes in the reviewed snapshot.
+// Compare only the selected lines while decoding every byte. Memory stays bounded
+// by the quote and one scan chunk, even when an unquoted line spans gigabytes.
+function citationMatcher(citation) {
+  const quote = citation.quote.replace(/\r\n/g, '\n');
+  if (!quote.trim()) fail('Пустая цитата не является evidence');
+  const endLine = citation.startLine + quote.split('\n').length - 1;
+  const decoder = new TextDecoder('utf-8', { fatal: true });
+  let line = 1, offset = 0, pendingCR = '';
+  const compare = (text) => {
+    if (!quote.startsWith(text, offset)) fail('Цитата или номер строки не совпадают с проверенным исходником');
+    offset += text.length;
+  };
+  const consume = (chunk, final = false) => {
+    let text;
+    try { text = pendingCR + decoder.decode(chunk, { stream: !final }); }
+    catch { fail('Цитируемый исходник не является UTF-8 текстом'); }
+    pendingCR = '';
+    if (text.includes('\0')) fail('Бинарное содержимое не является текстовым evidence');
+    if (!final && text.endsWith('\r')) { pendingCR = '\r'; text = text.slice(0, -1); }
+    const segments = text.replace(/\r\n/g, '\n').split('\n');
+    for (const [index, segment] of segments.entries()) {
+      if (line >= citation.startLine && line <= endLine) compare(segment);
+      if (index < segments.length - 1) {
+        if (line >= citation.startLine && line < endLine) compare('\n');
+        line++;
+      }
+    }
+    if (final && (line < endLine || offset !== quote.length))
+      fail('Цитата или номер строки не совпадают с проверенным исходником');
+  };
+  return { update: (chunk) => consume(chunk), finish: () => consume(undefined, true) };
+}
+
+// Quotes are evidence only after a complete hash, EOF and path/descriptor check.
 function readCitation(worktree, citation, fingerprint) {
   RelativePath.parse(citation.path);
   const expected = fingerprint.files.find((entry) => entry.path === citation.path);
-  if (!expected || expected.size > 2 * 1024 * 1024) fail('Цитата не относится к доступному проверенному исходнику');
+  if (!expected) fail('Цитата не относится к доступному проверенному исходнику');
   const root = realpathSync(worktree);
+  const directories = [];
   let absolute = root;
   for (const part of citation.path.split('/')) {
+    const stat = lstatHostSync(absolute, { bigint: true });
+    if (!stat.isDirectory() || stat.isSymbolicLink() || !sameHostPath(realpathSync(absolute), absolute))
+      fail('Цитата не может проходить через symlink');
+    directories.push({ path: absolute, identity: crossStatIdentity(stat) });
     absolute = path.join(absolute, part);
-    if (lstatSync(absolute).isSymbolicLink()) fail('Цитата не может проходить через symlink');
   }
-  if (realpathSync(absolute) !== absolute) fail('Путь цитаты изменился');
-  let fd;
   try {
-    fd = openSync(absolute, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
-    const stat = fstatSync(fd);
-    if (!stat.isFile() || stat.nlink !== 1 || stat.size !== expected.size) fail('Исходник цитаты изменился');
-    const bytes = readFileSync(fd);
-    if (bytes.length !== expected.size || sha256(bytes) !== expected.hash) fail('Хеш цитируемого исходника не совпадает с проверенным состоянием');
-    let source;
-    try { source = new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch { fail('Цитируемый исходник не является UTF-8 текстом'); }
-    if (source.includes('\0')) fail('Бинарное содержимое не является текстовым evidence');
-    const lines = source.replace(/\r\n/g, '\n').split('\n');
-    const quote = citation.quote.replace(/\r\n/g, '\n');
-    const actual = lines.slice(citation.startLine - 1, citation.startLine - 1 + quote.split('\n').length).join('\n').replace(/\r\n/g, '\n');
-    if (!quote.trim() || actual !== quote) fail('Цитата или номер строки не совпадают с проверенным исходником');
-  } finally { if (fd !== undefined) closeSync(fd); }
+    const stat = lstatHostSync(absolute, { bigint: true });
+    if (Number(stat.size) !== expected.size) fail('Исходник цитаты изменился');
+    const matcher = citationMatcher(citation);
+    const scanned = scanSourceFile(absolute, { expected: stat, classify: false, onChunk: matcher.update });
+    matcher.finish();
+    if (scanned.size !== expected.size || scanned.hash !== expected.hash)
+      fail('Хеш цитируемого исходника не совпадает с проверенным состоянием');
+    for (const directory of directories) {
+      const current = lstatHostSync(directory.path, { bigint: true });
+      if (!current.isDirectory() || current.isSymbolicLink() || crossStatIdentity(current) !== directory.identity ||
+          !sameHostPath(realpathSync(directory.path), directory.path)) fail('Путь цитаты изменился во время чтения');
+    }
+  } catch (error) {
+    if (error.code === 'REQUIREMENT_EVIDENCE_INVALID') throw error;
+    fail('Не удалось полностью прочитать неизменный исходник цитаты');
+  }
 }
 
 export function validateRequirementAssessments({ output, plan, node, worktree, fingerprint }) {

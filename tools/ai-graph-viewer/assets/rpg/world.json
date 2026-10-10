@@ -1,511 +1,53 @@
 {
   "schemaVersion": 1,
-  "assetRevision": "d1-static-1",
-  "status": "static-assets-ready-animation-pending",
-  "assets": {
-    "world": {
-      "file": "world.png",
-      "sizePx": [
-        1536,
-        1024
-      ],
-      "sha256": "4c7792d89e3fd1c80ddc3ec1cd183ddbaee467e91601ede3122052ffa440cb4e",
-      "bytes": 4040761,
-      "alpha": false,
-      "anchorPx": [
-        0,
-        0
-      ]
-    },
-    "workshop-room": {
-      "file": "workshop-room.png",
-      "sizePx": [
-        1536,
-        1024
-      ],
-      "sha256": "07d104771b4d3db38e24441f0b7a9c5de2195df1babb0bfac0efdc6617d5edf6",
-      "bytes": 3481090,
-      "alpha": false,
-      "anchorPx": [
-        0,
-        0
-      ]
-    },
-    "archive-room": {
-      "file": "archive-room.png",
-      "sizePx": [
-        1536,
-        1024
-      ],
-      "sha256": "ae1035fa4992b9d87f79ed1e5cb3cc85ec7c915e224f62b3ef05e440a5cdffcc",
-      "bytes": 3370472,
-      "alpha": false,
-      "anchorPx": [
-        0,
-        0
-      ]
-    },
-    "hero-idle": {
-      "file": "hero-idle.png",
-      "sizePx": [
-        1254,
-        1254
-      ],
-      "sha256": "3ea12713d6ee84afd2425c847ccc02252d6f4b68a68bec0d3b937f54baf03f16",
-      "bytes": 652448,
-      "alpha": true,
-      "visibleBoundsPx": [
-        425,
-        101,
-        859,
-        1115
-      ],
-      "visibleBoundsAlphaThreshold": 16,
-      "frameCount": 1,
-      "animation": "static-idle",
-      "anchorPx": [
-        642,
-        1115
-      ],
-      "visibleHeightWorldPx": 90,
-      "direction": "NW",
-      "mirror": false
-    },
-    "mentor-idle": {
-      "file": "mentor-idle.png",
-      "sizePx": [
-        1254,
-        1254
-      ],
-      "sha256": "7b3bd6bf5482788ea032020e1a5b7b1e2f05f7ea5b417665a2b9bc5eca30972d",
-      "bytes": 711229,
-      "alpha": true,
-      "visibleBoundsPx": [
-        417,
-        117,
-        912,
-        1148
-      ],
-      "visibleBoundsAlphaThreshold": 16,
-      "frameCount": 1,
-      "animation": "static-idle",
-      "anchorPx": [
-        665,
-        1148
-      ],
-      "visibleHeightWorldPx": 96,
-      "direction": "SE",
-      "mirror": false
-    }
-  },
-  "rooms": {
-    "guild": {
-      "background": "world",
-      "returnNode": "guild-door",
-      "heroPositionPx": [
-        310,
-        447
-      ],
-      "overlay": "task-scroll",
-      "walkEnabled": false,
-      "heroVisibleHeightPx": 90
-    },
-    "workshop": {
-      "background": "workshop-room",
-      "returnNode": "workshop-door",
-      "heroPositionPx": [
-        455,
-        755
-      ],
-      "mentorPositionPx": [
-        365,
-        660
-      ],
-      "overlay": "lesson-book",
-      "walkEnabled": false,
-      "heroVisibleHeightPx": 160,
-      "mentorVisibleHeightPx": 168
-    },
-    "archive": {
-      "background": "archive-room",
-      "returnNode": "archive-door",
-      "heroPositionPx": [
-        460,
-        730
-      ],
-      "overlay": "archive-book",
-      "walkEnabled": false,
-      "heroVisibleHeightPx": 160
-    }
-  },
-  "rendering": {
-    "backgroundLayer": 0,
-    "shadowLayer": 10,
-    "characterLayer": 20,
-    "domHotspotLayer": 100,
-    "domOverlayLayer": 300,
-    "charactersSortBy": "foot-y",
-    "ambientAnimation": false,
-    "reducedMotion": "instant-navigation",
-    "initialAssets": [
-      "world",
-      "hero-idle"
-    ],
-    "lazyAssets": [
-      "workshop-room",
-      "archive-room",
-      "mentor-idle"
-    ]
-  },
-  "restrictions": [
-    "D1 contains one static direction per character; no walk animation or direction switching is provided.",
-    "Navigation and room transitions never execute runtime commands.",
-    "No path may pass behind baked buildings or through foliage, water, walls or bridge rails.",
-    "All text, state, forms, code, books and buttons are separate DOM elements."
-  ],
+  "visualRevision": "fantasy-v2",
+  "guildManifest": "guild-cast.json",
   "projection": {
-    "kind": "isometric",
+    "kind": "orthographic-prerender",
     "coordinates": "image-pixels",
     "transform": "identity"
   },
   "bounds": {
     "x": 0,
     "y": 0,
-    "width": 1536,
-    "height": 1024
+    "width": 1440,
+    "height": 1080
   },
   "viewport": {
     "fit": "contain",
     "preserveAspect": true,
-    "matte": "#14241E"
+    "matte": "#1b252c"
   },
   "background": "world",
-  "spawn": {
-    "pointId": "spawn",
-    "direction": "NW"
-  },
-  "navigation": {
-    "edges": [
-      {
-        "from": "spawn",
-        "to": "south",
-        "radiusPx": 20
-      },
-      {
-        "from": "south",
-        "to": "plaza",
-        "radiusPx": 20
-      },
-      {
-        "from": "plaza",
-        "to": "junction",
-        "radiusPx": 20
-      },
-      {
-        "from": "junction",
-        "to": "guild-bend",
-        "radiusPx": 20
-      },
-      {
-        "from": "guild-bend",
-        "to": "guild-lane",
-        "radiusPx": 20
-      },
-      {
-        "from": "guild-lane",
-        "to": "guild-approach",
-        "radiusPx": 20
-      },
-      {
-        "from": "guild-approach",
-        "to": "guild-door",
-        "radiusPx": 20
-      },
-      {
-        "from": "junction",
-        "to": "workshop-lane",
-        "radiusPx": 20
-      },
-      {
-        "from": "workshop-lane",
-        "to": "workshop-approach",
-        "radiusPx": 20
-      },
-      {
-        "from": "workshop-approach",
-        "to": "workshop-door",
-        "radiusPx": 20
-      },
-      {
-        "from": "junction",
-        "to": "east-lane",
-        "radiusPx": 20
-      },
-      {
-        "from": "east-lane",
-        "to": "bridge-west",
-        "radiusPx": 14
-      },
-      {
-        "from": "bridge-west",
-        "to": "bridge-mid",
-        "radiusPx": 14
-      },
-      {
-        "from": "bridge-mid",
-        "to": "bridge-east",
-        "radiusPx": 14
-      },
-      {
-        "from": "bridge-east",
-        "to": "archive-approach",
-        "radiusPx": 14
-      },
-      {
-        "from": "archive-approach",
-        "to": "archive-door",
-        "radiusPx": 20
-      }
-    ],
-    "bidirectional": true,
-    "routeAlgorithm": "shortest-polyline",
-    "clickSnapTolerancePx": 28,
-    "speedPxPerSecond": 220,
-    "renderedWalkAnimationAvailable": false,
-    "outsideCorridor": "reject",
-    "interactionRadiusPx": 30,
-    "points": {
-      "spawn": [
-        768,
-        906
+  "assets": {
+    "world": {
+      "file": "guild-room.png",
+      "sizePx": [
+        1440,
+        1080
       ],
-      "south": [
-        759,
-        782
+      "anchorPx": [
+        0,
+        0
       ],
-      "plaza": [
-        727,
-        642
+      "bytes": 1151200,
+      "sha256": "39cdb9230d2d34792f7bd0909bcfb62a3cb000601048ac66bd30f49d57ebb340",
+      "alpha": true
+    },
+    "hero-idle": {
+      "file": "guild-mentor-portrait.png",
+      "sizePx": [
+        256,
+        320
       ],
-      "junction": [
-        731,
-        568
+      "anchorPx": [
+        128.00009155,
+        241.91650391
       ],
-      "guild-bend": [
-        601,
-        517
-      ],
-      "guild-lane": [
-        504,
-        464
-      ],
-      "guild-approach": [
-        388,
-        437
-      ],
-      "guild-door": [
-        276,
-        399
-      ],
-      "workshop-lane": [
-        760,
-        503
-      ],
-      "workshop-approach": [
-        778,
-        448
-      ],
-      "workshop-door": [
-        784,
-        420
-      ],
-      "east-lane": [
-        865,
-        572
-      ],
-      "bridge-west": [
-        1000,
-        561
-      ],
-      "bridge-mid": [
-        1090,
-        537
-      ],
-      "bridge-east": [
-        1182,
-        528
-      ],
-      "archive-approach": [
-        1232,
-        499
-      ],
-      "archive-door": [
-        1290,
-        472
-      ]
+      "bytes": 55030,
+      "sha256": "b761364a82f43351de138b676da0c203836b7a946b9b2031a83278fb2b5450c2",
+      "alpha": true
     }
-  },
-  "hotspots": [
-    {
-      "id": "guild",
-      "label": "Гильдия",
-      "destination": "guild",
-      "arrivalNode": "guild-door",
-      "polygonPx": [
-        [
-          40,
-          100
-        ],
-        [
-          184,
-          20
-        ],
-        [
-          356,
-          116
-        ],
-        [
-          389,
-          265
-        ],
-        [
-          374,
-          382
-        ],
-        [
-          274,
-          418
-        ],
-        [
-          92,
-          355
-        ]
-      ],
-      "labelAnchorPx": [
-        257,
-        253
-      ],
-      "scene": "world",
-      "action": "navigate"
-    },
-    {
-      "id": "workshop",
-      "label": "Мастерская",
-      "destination": "workshop",
-      "arrivalNode": "workshop-door",
-      "polygonPx": [
-        [
-          627,
-          128
-        ],
-        [
-          792,
-          45
-        ],
-        [
-          946,
-          173
-        ],
-        [
-          1030,
-          291
-        ],
-        [
-          979,
-          443
-        ],
-        [
-          822,
-          468
-        ],
-        [
-          637,
-          429
-        ]
-      ],
-      "labelAnchorPx": [
-        786,
-        280
-      ],
-      "scene": "world",
-      "action": "navigate"
-    },
-    {
-      "id": "archive",
-      "label": "Архив",
-      "destination": "archive",
-      "arrivalNode": "archive-door",
-      "polygonPx": [
-        [
-          1200,
-          73
-        ],
-        [
-          1369,
-          18
-        ],
-        [
-          1514,
-          127
-        ],
-        [
-          1491,
-          412
-        ],
-        [
-          1372,
-          485
-        ],
-        [
-          1263,
-          475
-        ],
-        [
-          1188,
-          308
-        ]
-      ],
-      "labelAnchorPx": [
-        1310,
-        326
-      ],
-      "scene": "world",
-      "action": "navigate"
-    },
-    {
-      "id": "mentor",
-      "label": "Наставник",
-      "scene": "workshop",
-      "action": "open-lesson",
-      "polygonPx": [
-        [
-          306,
-          485
-        ],
-        [
-          414,
-          485
-        ],
-        [
-          414,
-          673
-        ],
-        [
-          306,
-          673
-        ]
-      ],
-      "labelAnchorPx": [
-        365,
-        474
-      ],
-      "requiresWalk": false
-    }
-  ],
-  "bakedGeometry": {
-    "buildings": true,
-    "foregroundOcclusion": false,
-    "walkBehindBuildings": false
   },
   "uiAssets": {
     "ui-codex": {
@@ -513,6 +55,10 @@
       "sizePx": [
         1536,
         1024
+      ],
+      "anchorPx": [
+        0,
+        0
       ],
       "bytes": 2666432,
       "sha256": "8716d1ac447a1bf15da7e868a4cde7bd63b129b96de8c9ab2c906cd38ef115cb",
@@ -524,9 +70,770 @@
         1024,
         1536
       ],
+      "anchorPx": [
+        0,
+        0
+      ],
       "bytes": 2666210,
       "sha256": "be854c0d1a3f660f82f091af22d9fc5fa7369f663c557db865f774491d2803a4",
       "alpha": true
     }
-  }
+  },
+  "bundledFiles": {
+    "guild-cast.json": {
+      "bytes": 27348,
+      "sha256": "720b04922cbdb1b2a7b572deb118fa14de986a75900c0dbc4348882839c5954b"
+    },
+    "guild-provenance.json": {
+      "bytes": 36981,
+      "sha256": "7cfa664ba4ca3ab3e30cdc97f4e8588445161580e95e64f2a22d20573f895ee1"
+    },
+    "guild-room.png": {
+      "bytes": 1151200,
+      "sha256": "39cdb9230d2d34792f7bd0909bcfb62a3cb000601048ac66bd30f49d57ebb340"
+    },
+    "guild-mentor-portrait.png": {
+      "bytes": 55030,
+      "sha256": "b761364a82f43351de138b676da0c203836b7a946b9b2031a83278fb2b5450c2"
+    },
+    "ui-codex.png": {
+      "bytes": 2666432,
+      "sha256": "8716d1ac447a1bf15da7e868a4cde7bd63b129b96de8c9ab2c906cd38ef115cb"
+    },
+    "ui-quest-scroll.png": {
+      "bytes": 2666210,
+      "sha256": "be854c0d1a3f660f82f091af22d9fc5fa7369f663c557db865f774491d2803a4"
+    },
+    "guild-foreground-analyst.png": {
+      "bytes": 190884,
+      "sha256": "9fce78d45c35673ebc89db1b655496e3214df6df9b4635ae5db92fa64c1204d5"
+    },
+    "guild-foreground-mage.png": {
+      "bytes": 196242,
+      "sha256": "d765cef9e4d5b1e138b1e37615d58eec95e3517b77a606b5fc0ef6aa2fa775c5"
+    },
+    "guild-foreground-checker.png": {
+      "bytes": 160492,
+      "sha256": "e0d5328541558642d461c763d2fbb9d3f2354d025136e1f3ccb0ff8c63c0a715"
+    },
+    "guild-foreground-reviewer.png": {
+      "bytes": 180102,
+      "sha256": "f3ae3410d5a621c1ed8eba83292851af5b4a524366f3a8fbdb9b6d451d872674"
+    },
+    "guild-foreground-mentor.png": {
+      "bytes": 173417,
+      "sha256": "f48e047220c50e4a386ac7c144d7bfd5ed6b1d58fb4001dd3a61ead7b76243e7"
+    },
+    "guild-analyst-idle-se.png": {
+      "bytes": 736599,
+      "sha256": "2c75665a413208aaf8632549ec50b2a275fd2ab7ac8f38473ca000000ea8f4a9"
+    },
+    "guild-analyst-idle-se.json": {
+      "bytes": 7405,
+      "sha256": "8578803bf9886a1a2b2ae38b85437c52e51c0e0ddb2e2e00347154484999d699"
+    },
+    "guild-analyst-idle-nw.png": {
+      "bytes": 681162,
+      "sha256": "28e7b5f4c917169f39311b83b8ce8ec66e15466b5b233ef7ef7ef60e534da39e"
+    },
+    "guild-analyst-idle-nw.json": {
+      "bytes": 7405,
+      "sha256": "d34e28f8daacd4b5aa7de16ade54018ba588c7da294257fbfd9013d156a39a3b"
+    },
+    "guild-analyst-walk-se.png": {
+      "bytes": 426649,
+      "sha256": "be1389bddf4654f6f9fbd9b1cc0524aae3cfe6437662e2784c970fe1b5aae214"
+    },
+    "guild-analyst-walk-se.json": {
+      "bytes": 3994,
+      "sha256": "351ae4fec92f1d3ba2cd5a1449bc14d43b11f3aa84336fd863a88986899fc0b9"
+    },
+    "guild-analyst-walk-nw.png": {
+      "bytes": 394546,
+      "sha256": "41970f0a4dbedd3ba40c9e58ba3902defd775917bdd385e032e3f669503e61e1"
+    },
+    "guild-analyst-walk-nw.json": {
+      "bytes": 3994,
+      "sha256": "b13e2624c869c713de07004f4a8c1a9655428e8b0d62b280463f6d01c515c882"
+    },
+    "guild-analyst-walk-ne.png": {
+      "bytes": 432661,
+      "sha256": "a5db33dfc42872b1ffafb701b55e13a65799aa1fe6608909ddea172fd80cffb8"
+    },
+    "guild-analyst-walk-ne.json": {
+      "bytes": 3994,
+      "sha256": "9589f1a3ce6210eee9cd3112f9474c229b5a01cdade232f9a47adabda31bebaf"
+    },
+    "guild-analyst-walk-sw.png": {
+      "bytes": 395133,
+      "sha256": "14679a2d384c8e2ae9944c642438aff86493f64dfa30060c19ae07638140f4de"
+    },
+    "guild-analyst-walk-sw.json": {
+      "bytes": 3994,
+      "sha256": "a35b37dd6ce54b047b952e8fe5fb03af152c082d85cbb1e2b6e86f6c23952469"
+    },
+    "guild-analyst-work-se.png": {
+      "bytes": 167951,
+      "sha256": "d9f95cd53e765db11244ddf5cf9c98df8e91e9caa8bcbffb055f099552968eab"
+    },
+    "guild-analyst-work-se.json": {
+      "bytes": 3024,
+      "sha256": "12b270354a85680c7dca714196d3143562c27c5b7ef16b60a31c5a351e1ef42c"
+    },
+    "guild-analyst-work-nw.png": {
+      "bytes": 127819,
+      "sha256": "0cd966848d42e30c0e6c141ba3a793b83fc784ed47d48ef522c1c0085a6be29e"
+    },
+    "guild-analyst-work-nw.json": {
+      "bytes": 3024,
+      "sha256": "854eed476320e0bd5f206629dc63028d169b8e406d94d3e9d51f9beb94fbc0a3"
+    },
+    "guild-analyst-handoff-se.png": {
+      "bytes": 162591,
+      "sha256": "0cbb62925f23b306a41445013e1c0a7a581120013519cf137d26fe35188937b8"
+    },
+    "guild-analyst-handoff-se.json": {
+      "bytes": 3102,
+      "sha256": "2822c83e0ed0dda93739a36a6b5f0c1105150386de272bd0f68b1c725142f7c5"
+    },
+    "guild-analyst-handoff-nw.png": {
+      "bytes": 130018,
+      "sha256": "9afa56c9789fd9e012161a3fcc27155efa47b894d5c70e23b8dbc44e1e6b036b"
+    },
+    "guild-analyst-handoff-nw.json": {
+      "bytes": 3102,
+      "sha256": "ade5a401b52df0fd4c40bad6948bcdb1eddc45ad510bf281aefb961f3703b7c1"
+    },
+    "guild-mage-idle-se.png": {
+      "bytes": 646585,
+      "sha256": "c4a732be54c75bcdce7a12be46dd99c69f4ad2fa062416cafcacd7f89aebdfdc"
+    },
+    "guild-mage-idle-se.json": {
+      "bytes": 7402,
+      "sha256": "9bc57f855eaf802de845a88378720b89792101a616c422cdd9157b6280965ed7"
+    },
+    "guild-mage-idle-nw.png": {
+      "bytes": 644581,
+      "sha256": "0e8d7a8e4e1e29e40c82dc074a73e8297078fbbc944a76ec9cf95eb913bc77e1"
+    },
+    "guild-mage-idle-nw.json": {
+      "bytes": 7402,
+      "sha256": "0295dd6a4869a4422949ba273e76c1b793c0489ae4bbe79b31f369e05f08b84d"
+    },
+    "guild-mage-walk-se.png": {
+      "bytes": 391006,
+      "sha256": "d22b4d93a05e6a63348ae94e093c35ac75e710520ac1e76d2a279df3cfb17023"
+    },
+    "guild-mage-walk-se.json": {
+      "bytes": 3991,
+      "sha256": "9d49497cf6869b87c48ac65ecfa43c8fce1e87203abe1487d0b002da620337d0"
+    },
+    "guild-mage-walk-nw.png": {
+      "bytes": 389717,
+      "sha256": "bf0113d4dc0e871cdb62166db0211daea7245b74efb424bcd498f9c15a302714"
+    },
+    "guild-mage-walk-nw.json": {
+      "bytes": 3991,
+      "sha256": "82d1161bd7e94dbf45c75979be9ee2e06eee102125181572fcf1fbeb53032d48"
+    },
+    "guild-mage-walk-ne.png": {
+      "bytes": 394457,
+      "sha256": "de9668a96df28f67a2965f284545721afc4b1559b7f54380224b3d0707cec573"
+    },
+    "guild-mage-walk-ne.json": {
+      "bytes": 3991,
+      "sha256": "3d52b85867ab69389dd0492ec25ce5515a9e4e891cf2455b63033215138791f1"
+    },
+    "guild-mage-walk-sw.png": {
+      "bytes": 389379,
+      "sha256": "b26e4b0ff5ea58cc06d8cd40250d41a1b87287da747d747ec74bc85f430f01c5"
+    },
+    "guild-mage-walk-sw.json": {
+      "bytes": 3991,
+      "sha256": "c4336a8cffbc4a7fed38729435c4261516c45086237a179be869bd48096d2029"
+    },
+    "guild-mage-work-se.png": {
+      "bytes": 157725,
+      "sha256": "e480b9d15f68598f9ebb926f327b44ecd19deea5bca9471e193bc9742f701f15"
+    },
+    "guild-mage-work-se.json": {
+      "bytes": 3021,
+      "sha256": "2e9d17bd1915b8281d575f0457aeab74a650b4b89dd8d8f188368d20a68b1df5"
+    },
+    "guild-mage-work-nw.png": {
+      "bytes": 139396,
+      "sha256": "20f453f5cbf98ce26e07ea13a26fbf9b6a70e9c60904b2b95b68c49293c0fae9"
+    },
+    "guild-mage-work-nw.json": {
+      "bytes": 3021,
+      "sha256": "8636260b01bd817fa62a5b7a8188169edb71af8580b33fa5769faac547d2e106"
+    },
+    "guild-mage-handoff-se.png": {
+      "bytes": 144023,
+      "sha256": "0158861efd63628be3135bf432294215b8421e11262909f0caa36a24f8cf7575"
+    },
+    "guild-mage-handoff-se.json": {
+      "bytes": 3099,
+      "sha256": "06fb9ce60ed5cf21077194d5252042684c0c7da91e8dab3f3aef02e4c8c2e845"
+    },
+    "guild-mage-handoff-nw.png": {
+      "bytes": 135675,
+      "sha256": "71de8045beea06fcb1045313da05741e593060a3ff366ae45752e78f1ebf2601"
+    },
+    "guild-mage-handoff-nw.json": {
+      "bytes": 3099,
+      "sha256": "866a0ca269446867ae411ab0254f2b42b3f870f05d6db54603b675fe8c67f966"
+    },
+    "guild-checker-idle-se.png": {
+      "bytes": 795699,
+      "sha256": "da6f307db3bc911ac8357ab39778dc01d29578dc0240984e1969937e9e30834c"
+    },
+    "guild-checker-idle-se.json": {
+      "bytes": 7405,
+      "sha256": "69fe27af7f9999b4bf82aa8bd20c76fdb89ba6e79f5daa50f30fd77988d26bdc"
+    },
+    "guild-checker-idle-nw.png": {
+      "bytes": 728314,
+      "sha256": "864e06ca585dbff3a5edfdee5f75228fd8b23abb7cb356a58e81dc7c702e56ca"
+    },
+    "guild-checker-idle-nw.json": {
+      "bytes": 7405,
+      "sha256": "5f803bf5635f878d6379dd214dd5031cd8dd11e6a4ba57af38eebe0a6e3ecbd7"
+    },
+    "guild-checker-walk-se.png": {
+      "bytes": 462377,
+      "sha256": "dd13d1330eb99cc0000d7d3cac2c8cedd1f49186a6e9649d0c7e81153bdfa855"
+    },
+    "guild-checker-walk-se.json": {
+      "bytes": 3994,
+      "sha256": "6cbb336745a129b31d39911c25da4b2703c1bc19858b554cf6bec2be35ed20ad"
+    },
+    "guild-checker-walk-nw.png": {
+      "bytes": 434991,
+      "sha256": "64e2ec7eb518488de10bf8806ee63840fd8a8084324e767f02d7d1cf1f7f937a"
+    },
+    "guild-checker-walk-nw.json": {
+      "bytes": 3994,
+      "sha256": "a9614289692fa9c42372b6d4dc681ab02b869a007ef9ec259a9fc172edc83b1d"
+    },
+    "guild-checker-walk-ne.png": {
+      "bytes": 421697,
+      "sha256": "ae9a41c2d8b7a2d45ed4d14d7088f58b971362508ffde5dfdc13812db5e0e06a"
+    },
+    "guild-checker-walk-ne.json": {
+      "bytes": 3994,
+      "sha256": "d41fdad6605e1dd643b1bfe9579773228fd279c0e60e6af3c0c13a574e8c76c1"
+    },
+    "guild-checker-walk-sw.png": {
+      "bytes": 425356,
+      "sha256": "6cae7b7347e02979578f9d03c85cf325b4f53a2c5aeb280b28cf108cbdb044fb"
+    },
+    "guild-checker-walk-sw.json": {
+      "bytes": 3994,
+      "sha256": "5e5f32bef9ed587e36385d9ce4c6db26a4ab2d6238be40302fb6cab22e3285a9"
+    },
+    "guild-checker-work-se.png": {
+      "bytes": 166150,
+      "sha256": "1749009b2240e2fb42151a34cab042fa777ec2c3fd13af70d55ba88930f78879"
+    },
+    "guild-checker-work-se.json": {
+      "bytes": 3024,
+      "sha256": "4be7f6f2f9777ee276036240447ae379c64738e2392aa5bd599a75a84932cf2f"
+    },
+    "guild-checker-work-nw.png": {
+      "bytes": 127287,
+      "sha256": "c91086a856a9b703569590877efaad2c7e22506818e59526cf3bf6379b8b5490"
+    },
+    "guild-checker-work-nw.json": {
+      "bytes": 3024,
+      "sha256": "c63dfb8454ec16426fb6d2d17b44ff960d1881295bd774a63dc63663ae871154"
+    },
+    "guild-checker-handoff-se.png": {
+      "bytes": 155194,
+      "sha256": "8db03edaf819bb7e9a07233e0b58670dde47223612a17b4aff4afb14b32bd9e0"
+    },
+    "guild-checker-handoff-se.json": {
+      "bytes": 3102,
+      "sha256": "f1dcfa1198562b8b51959ada17646035eeeab02d15c48aa73c7564c29ad21c5b"
+    },
+    "guild-checker-handoff-nw.png": {
+      "bytes": 133506,
+      "sha256": "1d95b32638ae02bcf65c4215211138d2efb31ae5628c4c8667d809f26557b660"
+    },
+    "guild-checker-handoff-nw.json": {
+      "bytes": 3102,
+      "sha256": "afee6ed1457de0ed1c1835d1bab1766b7b44785ac4198774ae0793ece067d9bb"
+    },
+    "guild-reviewer-idle-se.png": {
+      "bytes": 811997,
+      "sha256": "5a4e6fd35380e0c552a94b6ac2a95c5e8b63463a0521e7f8cf3cf8b56c504bc6"
+    },
+    "guild-reviewer-idle-se.json": {
+      "bytes": 7406,
+      "sha256": "5cd36eb4a56e9c5530194492c1134e6f608b3b335300555c0acc9b81fa52332e"
+    },
+    "guild-reviewer-idle-nw.png": {
+      "bytes": 756873,
+      "sha256": "00f2e45efe18510590f2df9beeec4d62df458756d0a4fe14f2d278a5fe848ff9"
+    },
+    "guild-reviewer-idle-nw.json": {
+      "bytes": 7406,
+      "sha256": "9898dc6a7e35dc5118245535c56c1af0343406435e20cc04b08b8aee5bc26991"
+    },
+    "guild-reviewer-walk-se.png": {
+      "bytes": 469847,
+      "sha256": "c4c161852c6d5abcc8b00a7b3e33b2a952cd1be84f751b868efd32af2d3f3370"
+    },
+    "guild-reviewer-walk-se.json": {
+      "bytes": 3995,
+      "sha256": "0b27ea6049be5949bb38a7e52ae3f3e35d13e99398829caccbab199365ca21e1"
+    },
+    "guild-reviewer-walk-nw.png": {
+      "bytes": 453129,
+      "sha256": "150a5b01e3e1f392c15047dc73bb28382e2b96a7019a1f4dc2e005919fcb3df0"
+    },
+    "guild-reviewer-walk-nw.json": {
+      "bytes": 3995,
+      "sha256": "bbd9b5fc3817c86f11639c65c98fba096e5fbaae963cffa01e334d288434e3de"
+    },
+    "guild-reviewer-walk-ne.png": {
+      "bytes": 468307,
+      "sha256": "cec955d8e704309e837a689e49d76254d2fd8b764f585f4a26bde5e41c815470"
+    },
+    "guild-reviewer-walk-ne.json": {
+      "bytes": 3995,
+      "sha256": "28f83c8d86eb40e7cca5822403b9332f4ff0f86b9fe8b43dd4e23180d7478eac"
+    },
+    "guild-reviewer-walk-sw.png": {
+      "bytes": 456001,
+      "sha256": "d91eaacb3bc68ca06cb366e52816c52a810deddc8fbf5acfe2cddb988fb34cd2"
+    },
+    "guild-reviewer-walk-sw.json": {
+      "bytes": 3995,
+      "sha256": "ae35d3764ac5e0e59a94b715617e4c228783ed98344525dc7b931743bb34dac7"
+    },
+    "guild-reviewer-work-se.png": {
+      "bytes": 173810,
+      "sha256": "9bb3ecfd27059e8488c0f80e7ae88ca7a10a3785bede18114d0a59bb6bfa4174"
+    },
+    "guild-reviewer-work-se.json": {
+      "bytes": 3025,
+      "sha256": "8cf73a72a5e65719626b92631c3477bdf08e075e038a2496eaa4a935227b2ac1"
+    },
+    "guild-reviewer-work-nw.png": {
+      "bytes": 135434,
+      "sha256": "00267d234719604ec75ae5b187ea1d0f786c0b46d3c5ee8ec67ee24352eb1285"
+    },
+    "guild-reviewer-work-nw.json": {
+      "bytes": 3025,
+      "sha256": "8656daee0c5c4f647810baf69332fc42008bd1eadaddc5e104ea5ee4584837b6"
+    },
+    "guild-reviewer-handoff-se.png": {
+      "bytes": 168467,
+      "sha256": "02551ede4447ba3074725466acb8f7f0aa83a61678cfe7a5fee1129fffbadfda"
+    },
+    "guild-reviewer-handoff-se.json": {
+      "bytes": 3103,
+      "sha256": "371dae08d5b9458c769bf57445e97accb7e018144d741a86c08d9fd4317befd4"
+    },
+    "guild-reviewer-handoff-nw.png": {
+      "bytes": 139631,
+      "sha256": "43248d62dd6d8b0c358097b81364a436328ae8eafccb8759d04ce7412b2cdb59"
+    },
+    "guild-reviewer-handoff-nw.json": {
+      "bytes": 3103,
+      "sha256": "2f0bbca363ad1d93639b93c16153b24fc3afee7fecd0b1062842910371901dfb"
+    },
+    "guild-mentor-idle-se.png": {
+      "bytes": 841591,
+      "sha256": "f073497d4eaf0b3c760e9bc9ff24b11b457d701149a830ebb1367d98e71e6220"
+    },
+    "guild-mentor-idle-se.json": {
+      "bytes": 7404,
+      "sha256": "925b5180cc33fa13e354e6579b388bcaa6f03d44d42bd135befbd8ab115eb43a"
+    },
+    "guild-mentor-idle-nw.png": {
+      "bytes": 725554,
+      "sha256": "a590b86283711cee9d6aa6230ee1259bd76d06088ee3ba4b321e5a524286c47a"
+    },
+    "guild-mentor-idle-nw.json": {
+      "bytes": 7404,
+      "sha256": "6715ae8215c486a7c525e5b2a514582e143b156dae13561e48bed6139463d61e"
+    },
+    "guild-mentor-walk-se.png": {
+      "bytes": 489625,
+      "sha256": "98f2f47f2823cf2ddc2cf4685fd1c106c30959551da9200196f7cb76f0ef0f2a"
+    },
+    "guild-mentor-walk-se.json": {
+      "bytes": 3993,
+      "sha256": "20990b0307cd31563142e39c24a2a63790704968e70cd4d4fccb16f61cb1d380"
+    },
+    "guild-mentor-walk-nw.png": {
+      "bytes": 417381,
+      "sha256": "b3ad63b6da1944f691d999a4bc36bff339ab062af3dfc7acd9256c38dee0f247"
+    },
+    "guild-mentor-walk-nw.json": {
+      "bytes": 3993,
+      "sha256": "8052e88658b986e7c55e632563136352dae44f386fd736a397ccf18256e32e5a"
+    },
+    "guild-mentor-walk-ne.png": {
+      "bytes": 505881,
+      "sha256": "3c977c18adb718f95f345f4c20929dff4c3a3278f7994f7161b99d85e8f6c33f"
+    },
+    "guild-mentor-walk-ne.json": {
+      "bytes": 3993,
+      "sha256": "1cf556cfe26fd5b3cf3a94b371f839cab7e5045bcbb3909fbfa5c16b01e14511"
+    },
+    "guild-mentor-walk-sw.png": {
+      "bytes": 441897,
+      "sha256": "f2609f65c82a6a348b7c20e9c2a714e285df3bbbca4111d8c9e4210da7016ef0"
+    },
+    "guild-mentor-walk-sw.json": {
+      "bytes": 3993,
+      "sha256": "8bdd3bc2dab7d7b13e7b74b19b8101b02c8d7307af5595355508e7d863829edc"
+    },
+    "guild-mentor-work-se.png": {
+      "bytes": 181184,
+      "sha256": "fea4a82080d97e41cb7c19a2a005f9e9364725a732bd234e131531502ab843ac"
+    },
+    "guild-mentor-work-se.json": {
+      "bytes": 3023,
+      "sha256": "0fd9e25202abf0c0faee53476fdcbc61e451d601c72c5df7ad3260c350e096e3"
+    },
+    "guild-mentor-work-nw.png": {
+      "bytes": 131059,
+      "sha256": "6a912b4527f99f1ee3d9d828bc6920890e49e702876a16073762cfa43cc933ca"
+    },
+    "guild-mentor-work-nw.json": {
+      "bytes": 3023,
+      "sha256": "c02c505f5bdb5864cc0beddb3bba769c1a752d56934b665c9f5eca52bf7384c3"
+    },
+    "guild-mentor-handoff-se.png": {
+      "bytes": 172138,
+      "sha256": "98ad36b0f1fca9feb4ba8438bb3dff4e21643ad88725c5362c6d4d5cc431fe63"
+    },
+    "guild-mentor-handoff-se.json": {
+      "bytes": 3101,
+      "sha256": "ece185414fc3a5682bc2cf2f5a1d5141d3f7a132bd1c91cdb7d9f3546cfbc98c"
+    },
+    "guild-mentor-handoff-nw.png": {
+      "bytes": 131664,
+      "sha256": "f7022920b8c74573de1b433c0e9f6c8e2e6c2e8654f6b9fcce21df46ff1f3130"
+    },
+    "guild-mentor-handoff-nw.json": {
+      "bytes": 3101,
+      "sha256": "c200e294081b788e93fe0edf213fef0b97febe4ef5fcaa2222d997826a26f69c"
+    }
+  },
+  "rooms": {},
+  "spawn": {
+    "pointId": "spawn"
+  },
+  "navigation": {
+    "points": {
+      "spawn": [
+        519.885,
+        716.265
+      ],
+      "south": [
+        561.085,
+        692.6
+      ],
+      "plaza": [
+        602.285,
+        668.936
+      ],
+      "junction": [
+        661.143,
+        635.13
+      ],
+      "guild-bend": [
+        587.571,
+        592.871
+      ],
+      "guild-lane": [
+        664.085,
+        548.923
+      ],
+      "guild-approach": [
+        699.4,
+        528.639
+      ],
+      "guild-door": [
+        596.399,
+        469.478
+      ],
+      "workshop-lane": [
+        675.857,
+        643.581
+      ],
+      "workshop-approach": [
+        717.057,
+        619.917
+      ],
+      "workshop-door": [
+        752.372,
+        599.633
+      ],
+      "east-lane": [
+        734.714,
+        677.388
+      ],
+      "bridge-west": [
+        669.971,
+        714.575
+      ],
+      "bridge-mid": [
+        725.886,
+        746.691
+      ],
+      "bridge-east": [
+        772.972,
+        773.736
+      ],
+      "archive-approach": [
+        787.686,
+        765.285
+      ],
+      "archive-door": [
+        808.286,
+        753.452
+      ],
+      "mentor-lane": [
+        487.513,
+        650.342
+      ],
+      "mentor-door": [
+        413.941,
+        587.8
+      ]
+    },
+    "edges": [
+      {
+        "from": "spawn",
+        "to": "south",
+        "radiusPx": 24
+      },
+      {
+        "from": "south",
+        "to": "plaza",
+        "radiusPx": 24
+      },
+      {
+        "from": "plaza",
+        "to": "junction",
+        "radiusPx": 24
+      },
+      {
+        "from": "junction",
+        "to": "guild-bend",
+        "radiusPx": 24
+      },
+      {
+        "from": "guild-bend",
+        "to": "guild-lane",
+        "radiusPx": 24
+      },
+      {
+        "from": "guild-lane",
+        "to": "guild-approach",
+        "radiusPx": 24
+      },
+      {
+        "from": "guild-approach",
+        "to": "guild-door",
+        "radiusPx": 24
+      },
+      {
+        "from": "junction",
+        "to": "workshop-lane",
+        "radiusPx": 24
+      },
+      {
+        "from": "workshop-lane",
+        "to": "workshop-approach",
+        "radiusPx": 24
+      },
+      {
+        "from": "workshop-approach",
+        "to": "workshop-door",
+        "radiusPx": 24
+      },
+      {
+        "from": "junction",
+        "to": "east-lane",
+        "radiusPx": 24
+      },
+      {
+        "from": "east-lane",
+        "to": "bridge-west",
+        "radiusPx": 24
+      },
+      {
+        "from": "bridge-west",
+        "to": "bridge-mid",
+        "radiusPx": 24
+      },
+      {
+        "from": "bridge-mid",
+        "to": "bridge-east",
+        "radiusPx": 24
+      },
+      {
+        "from": "bridge-east",
+        "to": "archive-approach",
+        "radiusPx": 24
+      },
+      {
+        "from": "archive-approach",
+        "to": "archive-door",
+        "radiusPx": 24
+      },
+      {
+        "from": "south",
+        "to": "mentor-lane",
+        "radiusPx": 24
+      },
+      {
+        "from": "mentor-lane",
+        "to": "mentor-door",
+        "radiusPx": 24
+      }
+    ],
+    "bidirectional": true,
+    "clickSnapTolerancePx": 28,
+    "speedPxPerSecond": 180,
+    "interactionRadiusPx": 45
+  },
+  "hotspots": [
+    {
+      "id": "guild",
+      "label": "Гильдия",
+      "scene": "world",
+      "arrivalNode": "guild-door",
+      "labelAnchorPx": [
+        596.3993,
+        284.4781
+      ],
+      "polygonPx": [
+        [
+          528.3993,
+          304.4781
+        ],
+        [
+          664.3993,
+          304.4781
+        ],
+        [
+          664.3993,
+          489.4781
+        ],
+        [
+          528.3993,
+          489.4781
+        ]
+      ],
+      "action": "open-book"
+    },
+    {
+      "id": "workshop",
+      "label": "Мастерская",
+      "scene": "world",
+      "arrivalNode": "workshop-door",
+      "labelAnchorPx": [
+        752.3716,
+        414.63289999999995
+      ],
+      "polygonPx": [
+        [
+          684.3716,
+          434.63289999999995
+        ],
+        [
+          820.3716,
+          434.63289999999995
+        ],
+        [
+          820.3716,
+          619.6329
+        ],
+        [
+          684.3716,
+          619.6329
+        ]
+      ],
+      "action": "open-book"
+    },
+    {
+      "id": "archive",
+      "label": "Архив",
+      "scene": "world",
+      "arrivalNode": "archive-door",
+      "labelAnchorPx": [
+        808.2861,
+        568.4522
+      ],
+      "polygonPx": [
+        [
+          740.2861,
+          588.4522
+        ],
+        [
+          876.2861,
+          588.4522
+        ],
+        [
+          876.2861,
+          773.4522
+        ],
+        [
+          740.2861,
+          773.4522
+        ]
+      ],
+      "action": "open-book"
+    },
+    {
+      "id": "mentor",
+      "label": "Наставник",
+      "scene": "world",
+      "arrivalNode": "mentor-door",
+      "labelAnchorPx": [
+        413.9413,
+        402.80060000000003
+      ],
+      "polygonPx": [
+        [
+          345.9413,
+          422.80060000000003
+        ],
+        [
+          481.9413,
+          422.80060000000003
+        ],
+        [
+          481.9413,
+          607.8006
+        ],
+        [
+          345.9413,
+          607.8006
+        ]
+      ],
+      "action": "open-book"
+    }
+  ],
+  "rendering": {
+    "charactersSortBy": "foot-y",
+    "foregroundLayers": true,
+    "animationFps": 12,
+    "hiddenTab": "stop",
+    "reducedMotion": "static-and-instant-navigation"
+  },
+  "restrictions": [
+    "Executor owns execution and proof; the scene only projects snapshots.",
+    "Idle faculty does not imply an assigned executor.",
+    "Only fresh dependency-start receipts animate once; history/reload establishes a silent baseline.",
+    "All text, forms, books, errors and commands remain in the DOM."
+  ]
 }

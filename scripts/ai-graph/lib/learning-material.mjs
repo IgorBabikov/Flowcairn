@@ -1,3 +1,4 @@
+import { createLearningCoverage, readLearningCoverage } from './learning-coverage.mjs';
 import { savedLearningSourcePage } from './learning-source-page.mjs';
 import { putLearningSourceCatalog } from './learning-source-storage.mjs';
 import { GraphError, hashObject } from './io.mjs';
@@ -126,12 +127,14 @@ export function createLearningMaterial({ store, binding, kind = 'stage', stageId
     store.readObject('artifacts', id);
   }
   const merged = mergeCaptures(store, before, after, policy, gaps);
-  const material = StageMaterialSchema.parse({ version: 1, kind, ...binding,
+  const base = StageMaterialSchema.parse({ version: 1, kind, ...binding,
     contractHash: hashObject(plan.taskContract), stageId, goal: plan.taskContract.goal,
     outcome: stage?.outcome ?? task.goal, requirementIds: stage?.requirementIds ?? plan.taskContract.requirements.map((requirement) => requirement.id),
     beforeHash: before.sourceHash, resultHash: after.sourceHash, createdAt,
     sourceCatalogHash: putLearningSourceCatalog(store, merged.catalog), implementationReceiptIds, checkReceiptIds, reviewReceiptIds,
     diffArtifactIds, findingsArtifactIds, status: !merged.catalog.sources.length ? 'unavailable' : merged.gaps.length ? 'partial' : 'complete', gaps: merged.gaps });
+  const coverageHash = createLearningCoverage({ store, material: base, sources: merged.catalog.sources, before, after, policy });
+  const material = StageMaterialSchema.parse({ ...base, version: 2, coverageHash });
   return { id: store.putObject('learning-materials', material), material };
 }
 
@@ -155,7 +158,8 @@ export function readLearningMaterial({ store, materialHash, binding, policy = {}
   if (hashObject(safeLearningGaps(material.gaps, policy)) !== hashObject(material.gaps))
     fail('LEARNING_SOURCE_DENIED', 'Контекст материала закрыт действующей политикой.');
   const sourceCatalog = store.readObject('learning-sources', material.sourceCatalogHash);
-  return { id: materialHash, material, sources: catalog.sources, ...(sourceCatalog.version === 2 ? { sourceCatalog } : {}) };
+  const coverage = readLearningCoverage({ store, material, sources: catalog.sources, policy });
+  return { id: materialHash, material, sources: catalog.sources, ...(coverage ? { coverage } : {}), ...(sourceCatalog.version === 2 ? { sourceCatalog } : {}) };
 }
 
 /** @param {{store: import('./store.mjs').GraphStore, materialHash: string, binding: ReadBinding, sourceId: string,

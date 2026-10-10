@@ -427,6 +427,7 @@ export const RunStateV2Schema = z.strictObject({
       status: z.enum(['running', 'finished', 'failed', 'creating']),
       resultRunId: Id.optional(),
       preparationHash: Hash.optional(),
+      learningResultHash: Hash.optional(),
     }),
   ),
   planningArtifacts: z.array(Hash).max(50),

@@ -15,8 +15,10 @@ import { SavedSourcePanel, type SourceSelection } from './SavedSourcePanel';
 import { sourceSelectionForAnchor } from './source-page';
 import { freshnessLabels, learningCapability, learningRun, materialFreshness } from './learning-projection';
 import { learningReadMessage, useBoundRead } from './use-bound-read';
+import { ChapterNavigation } from './ChapterNavigation';
+import { LearningPracticePanel } from './LearningPracticePanel';
 
-export type LearningBinding = { runId: string; materialHash: string };
+export type LearningBinding = { runId: string; materialHash: string; chapterBookHash?: string | null };
 export function LearningReader({ controller: c, binding, onMap, onClose }: {
   controller: WorkflowController; binding: LearningBinding; onMap: () => void; onClose: () => void;
 }) {
@@ -34,6 +36,10 @@ export function LearningReader({ controller: c, binding, onMap, onClose }: {
     return api.learningLesson(binding.runId, material.data.lessonHash, material.data, signal);
   }, [binding.runId, material.data]);
   const lesson = useBoundRead(material.data?.lessonHash ? `${binding.runId}:${binding.materialHash}:${material.data.lessonHash}` : null, readLesson, canRead);
+  const readChapterBook = useCallback((signal: AbortSignal) => {
+    return api.learningChapterBook(binding.runId, binding.materialHash, binding.chapterBookHash ?? undefined, signal);
+  }, [binding.chapterBookHash, binding.materialHash, binding.runId]);
+  const chapterBook = useBoundRead(`${binding.runId}:${binding.materialHash}:chapters:${binding.chapterBookHash ?? 'latest'}`, readChapterBook, canRead);
   const accepted = c.learningActivities[binding.runId];
   const active = current?.learning.activeJob;
   const activity = active?.materialHash === binding.materialHash && active.id !== accepted?.jobId
@@ -58,6 +64,7 @@ export function LearningReader({ controller: c, binding, onMap, onClose }: {
   const [stepIndex, setStepIndex] = useState(0);
   const [navigation, setNavigation] = useState<CodexNavigation>({ id: 0, page: 'explanation' });
   const [selection, setSelection] = useState<SourceSelection | null>(null);
+  const [chapterId, setChapterId] = useState<string | null>(null);
   const selectedStep = lesson.data?.lesson.steps[Math.min(stepIndex, lesson.data.lesson.steps.length - 1)];
   const firstAnchor = selectedStep?.anchors[0];
   const selectedSource = selection ?? (firstAnchor ? sourceSelectionForAnchor(firstAnchor) : null);
@@ -72,6 +79,7 @@ export function LearningReader({ controller: c, binding, onMap, onClose }: {
     explanation={<>
       <button className="game-text-action" type="button" onClick={onMap}>К карте этапов</button>
       {!canRead && <p role="status">{deniedReason || 'Чтение сейчас недоступно.'}</p>}
+      {chapterBook.data && <ChapterNavigation book={chapterBook.data} selectedId={chapterId} onSelect={setChapterId} />}
       {material.state === 'loading' && <p role="status">Читаем сохраненный материал…</p>}
       {material.error && <div role="alert"><p>{learningReadMessage(material.error)}</p><code>{material.error.code}</code>
         <button className="game-text-action" type="button" disabled={!canRead} onClick={material.reload}>Повторить чтение материала</button></div>}
@@ -86,6 +94,7 @@ export function LearningReader({ controller: c, binding, onMap, onClose }: {
           setSelection(anchor ? sourceSelectionForAnchor(anchor) : null);
           setNavigation(previous => ({ id: previous.id + 1, page: 'explanation' }));
         }} />}
+      {lesson.data && <LearningPracticePanel controller={c} runId={binding.runId} material={material.data!} lesson={lesson.data.lesson} canRead={canRead} />}
       {material.data && <>
         <LearningActions controller={c} runId={binding.runId} material={material.data} job={job} {...(activity ? { kind: activity.kind } : {})} />
         <details className="learning-material-details"><summary>Цель, версия и полнота контекста</summary>
@@ -93,7 +102,10 @@ export function LearningReader({ controller: c, binding, onMap, onClose }: {
           {material.data.material.runId !== binding.runId && <p>Исторический материал. Владелец: <code>{material.data.material.runId}</code>. Контекст доступа: <code>{binding.runId}</code>.</p>}
           {material.data.freshness.reason && <p>{material.data.freshness.reason}</p>}
           <button className="game-text-action" type="button" disabled={!sameRun} onClick={() => void c.refreshSnapshot(binding.runId)}>Обновить состояние проекта</button>
-          <MaterialOverview material={material.data} freshness={freshness} />
+          <MaterialOverview material={material.data} freshness={freshness} lesson={lesson.data} canRead={canRead} onSource={value => {
+            setSelection(value);
+            setNavigation(previous => ({ id: previous.id + 1, page: 'source' }));
+          }} />
         </details>
       </>}
 

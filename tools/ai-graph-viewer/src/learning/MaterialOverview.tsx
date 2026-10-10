@@ -1,7 +1,9 @@
-import type { LearningMaterialResponse, SourceFreshness } from '../contracts';
+import { CoverageOverview } from './CoverageOverview';
+import type { SourceSelection } from './SavedSourcePanel';
+import type { LearningLessonResponse, LearningMaterialResponse, SourceFreshness } from '../contracts';
 import { freshnessLabels } from './learning-projection';
 
-export function MaterialOverview({ material, freshness = 'unknown' }: { material: LearningMaterialResponse; freshness?: SourceFreshness }) {
+export function MaterialOverview({ material, freshness = 'unknown', lesson = null, canRead = true, onSource }: { material: LearningMaterialResponse; freshness?: SourceFreshness; lesson?: LearningLessonResponse | null; canRead?: boolean; onSource?: (selection: SourceSelection) => void }) {
   const data = material.material;
   return <section className="material-overview">
     <h3>{data.goal}</h3><p>{data.outcome}</p>
@@ -11,6 +13,7 @@ export function MaterialOverview({ material, freshness = 'unknown' }: { material
     {data.gaps.length > 0 && <><h4>Пробелы сохраненного контекста</h4><ul>{data.gaps.map((gap, index) => <li key={index}>
       {gap.path && <code>{gap.path}: </code>}{gap.reason} <small>({gap.code})</small>
     </li>)}</ul></>}
+    <CoverageOverview key={material.id} material={material} lesson={lesson} canRead={canRead} {...(onSource ? { onSource } : {})} />
     <details><summary>Точная версия и отчеты</summary><p>Запуск: <code>{data.runId}</code></p><p>План: <code>{data.planHash}</code></p>
       <p>Результат: <code>{data.resultHash}</code></p><p>Материал: <code>{material.id}</code></p>
       <p>Сохранено: {data.createdAt}</p>

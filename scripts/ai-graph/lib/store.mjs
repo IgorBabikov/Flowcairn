@@ -42,6 +42,16 @@ const OBJECT_KINDS = new Set([
   'artifacts',
   'operations',
   'learning-materials',
+  'learning-coverage',
+  'learning-coverage-pages',
+  'learning-chapters',
+  'learning-chapter-pages',
+  'learning-chapter-books',
+  'learning-observation-extractors',
+  'learning-observations',
+  'learning-practice-attempts',
+  'learning-practice-pages',
+  'learning-practice-logs',
   'learning-sources',
   'learning-source-chunks',
   'learning-source-indexes',
@@ -555,6 +565,16 @@ export class GraphStore {
     const kindDirectory = path.join(graphDirectory, kind);
     assertPrivateDirectory(kindDirectory);
     return structuredClone(this.#readStoredObject(kind, hash, kindDirectory));
+  }
+
+  /** Read-only inventory for durable indexes owned by a higher-level service. */
+  listObjectHashes(kind) {
+    assertKind(kind);
+    const graphDirectory = this.#graphDirectoryForRead();
+    const directory = path.join(graphDirectory, kind);
+    assertPrivateDirectory(directory);
+    return readdirSync(directory).filter(name => HASH_PATTERN.test(name.replace(/\.json$/u, '')) && name.endsWith('.json'))
+      .map(name => name.slice(0, -5)).sort();
   }
 
   /** Store large workspace descriptors once, outside the revision chain. */
