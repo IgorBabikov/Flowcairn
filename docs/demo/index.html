@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Посмотрите, как Flowcairn согласует план, меняет код, находит ошибку проверкой и сохраняет доказательства результата.">
+  <title>Flowcairn — от поручения до проверенного кода</title>
+  <link rel="icon" href="media/mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<a class="skip" href="#replay">Перейти к демонстрации</a>
+<header class="site-header"><a class="brand" href="https://github.com/IgorBabikov/Flowcairn"><img src="media/mark.svg" alt="" width="40" height="40">Flowcairn</a><nav aria-label="Ссылки"><a href="#recording">Видео</a><a href="https://github.com/IgorBabikov/Flowcairn#быстрый-старт">Установка</a><a href="https://github.com/IgorBabikov/Flowcairn">GitHub</a></nav></header>
+<main>
+<section class="intro"><h1>AI меняет код.<br>Вы видите, чем подтвержден результат.</h1><p>Поручение, согласованный план, выполнение и проверка — в одном локальном инструменте. Разберите запись настоящего интерфейса по шагам.</p></section>
+<section id="replay" aria-label="Интерактивная запись задачи" class="replay">
+  <div class="replay-toolbar"><span>Задача: записать <code>2</code> в <code>counter.json</code></span><button id="play" type="button" disabled>Смотреть по шагам</button></div>
+  <nav id="chapters" class="chapters" aria-label="Моменты записи"></nav>
+  <div class="replay-layout">
+    <figure class="screen"><a id="full-frame" href="media/plan.jpg" target="_blank" rel="noopener" aria-label="Открыть кадр в полном размере"><img id="frame" src="media/plan.jpg" width="1440" height="900" alt="План поручения в текущем интерфейсе Flowcairn"></a><figcaption>Кадр работающего UI. Нажмите на изображение, чтобы рассмотреть детали.</figcaption></figure>
+    <div class="commentary"><div id="position" class="position">Загрузка записи</div><h2 id="chapter-title">План перед изменением кода</h2><p id="explanation">Согласуйте область записи и проверку результата.</p><dl class="state"><div><dt>counter.json</dt><dd><code id="value">—</code></dd></div><div><dt>Статус proof</dt><dd id="proof">—</dd></div><div><dt>Требования</dt><dd id="coverage">—</dd></div></dl><p id="load-error" role="alert" hidden></p><div class="chapter-controls"><button id="prev" type="button" disabled>Назад</button><button id="next" type="button" disabled>Далее</button></div><p id="announcement" class="sr-only" role="status" aria-live="polite"></p></div>
+  </div>
+  <p class="provenance">Запись с подставными ответами AI. Executor, изменение файла, процесс проверки, отчеты и интерфейс настоящие. Внешний AI не вызывался. Переключение кадров ничего не исполняет.</p>
+</section>
+<section class="evidence" aria-labelledby="graph-heading">
+  <div class="section-heading"><div><h2 id="graph-heading">Что стоит за этим кадром</h2><p>Выберите узел: посмотрите его зависимости, статус и идентификаторы отчетов.</p></div><a href="media/recording.json">Данные записи (JSON)</a></div>
+  <div class="graph-layout"><div><p id="graph-context"></p><div id="graph" class="graph" aria-label="Узлы записанного плана"></div></div><aside id="node-detail" class="node-detail" aria-label="Выбранный узел"><h3>Узлы появятся после анализа</h3></aside></div>
+  <p class="graph-note">Это схема сохраненного плана, а не экран редактора Flowcairn. В продукте подробности доступны в книге диагностики. Порядок здесь следует записи; подписи «Зависит от» взяты из <code>needs</code>.</p>
+</section>
+<section class="checks" aria-labelledby="checks-heading"><h2 id="checks-heading">Ошибка не стала успехом</h2><p>В первой попытке исполнитель записал <code>1</code>. Проверка ожидала <code>2</code> и остановила успешное завершение. После исправления она прошла. Изменение файла на <code>3</code> затем сделало доказательство устаревшим.</p><div class="table-wrap"><table><caption>Результаты настоящих процессов verify.mjs</caption><thead><tr><th>Попытка</th><th>Значение</th><th>Exit code</th><th>Итог</th></tr></thead><tbody id="checks"></tbody></table></div></section>
+<section id="recording" class="recording"><h2>Посмотреть запись целиком</h2><p>Запись взаимодействия с текущим интерфейсом. Без звука; описание каждого момента доступно выше.</p><video controls playsinline preload="none" poster="media/work.jpg" width="1440" height="900"><source src="media/session.mp4" type="video/mp4"><a href="media/session.mp4">Скачать видео</a></video></section>
+<section class="start"><h2>Попробуйте на своем проекте</h2><pre><code>npx flowcairn</code></pre><p>Node.js 22. Условия запуска на macOS и native Windows и фактический объем проверок — в <a href="https://github.com/IgorBabikov/Flowcairn/blob/main/docs/INSTALLATION.md">инструкции установки</a>.</p></section>
+</main>
+<footer><span>Flowcairn · открытый исходный код · MIT</span><a href="https://github.com/IgorBabikov/Flowcairn/blob/main/docs/LIMITATIONS.md">Возможности и ограничения</a></footer>
+<noscript><p class="provenance">Для переключения кадров нужен JavaScript. Видео доступно через стандартные controls; <a href="media/recording.json">данные записи</a> можно открыть отдельно.</p></noscript>
+<script src="script.js" defer></script>
+</body></html>
