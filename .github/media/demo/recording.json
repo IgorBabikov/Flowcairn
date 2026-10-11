@@ -1,0 +1,641 @@
+{
+  "schemaVersion": 1,
+  "sourceCommit": "c713c26047088e40fd0f3b37a8ddadb1d73f940c",
+  "capturedAt": "2026-10-11T18:01:33.274Z",
+  "provenance": "Synthetic AI responses; real WorkflowService, file edits, Node verifier, receipts and current UI. No external inference.",
+  "observations": [
+    {
+      "kind": "real-node-check",
+      "exitCode": 1,
+      "value": "1\n"
+    },
+    {
+      "kind": "real-node-check",
+      "exitCode": 0,
+      "value": "2\n"
+    }
+  ],
+  "frames": [
+    {
+      "id": "request",
+      "title": "Поручение",
+      "explanation": "Сохранить число 2 в counter.json. Проверить результат существующим verify.mjs.",
+      "image": "request.jpg",
+      "value": "0",
+      "runId": null,
+      "planHash": null,
+      "proof": null,
+      "coverage": null,
+      "nodes": []
+    },
+    {
+      "id": "analysis",
+      "title": "Исследование",
+      "explanation": "Настоящий интерфейс показывает активный анализ. Ответ анализатора в этой записи подготовлен заранее.",
+      "image": "analysis.jpg",
+      "value": "0",
+      "runId": "intake-4f2ceeb774a8405c2d0a82d80a38b0ea",
+      "planHash": "88781074870ded930b867d4d20d99dd99e3e1a0ab20502c90a18a9e665dbd914",
+      "proof": "RUNNING",
+      "coverage": {
+        "required": 1,
+        "proven": 0
+      },
+      "nodes": [
+        {
+          "id": "analyze",
+          "title": "Анализ задачи и проекта",
+          "status": "running",
+          "action": "ai-analyze",
+          "needs": [],
+          "receiptIds": [
+            "01f3f3aa49717664cd0b9fd1e161e9575d9d5c40f271fd77058d424ee0c9dc60"
+          ],
+          "checks": []
+        },
+        {
+          "id": "plan-task",
+          "title": "План реализации",
+          "status": "pending",
+          "action": "ai-plan",
+          "needs": [
+            "analyze"
+          ],
+          "receiptIds": [],
+          "checks": []
+        },
+        {
+          "id": "plan-ready",
+          "title": "План подготовлен",
+          "status": "pending",
+          "action": "artifact-handoff",
+          "needs": [
+            "plan-task"
+          ],
+          "receiptIds": [],
+          "checks": []
+        }
+      ]
+    },
+    {
+      "id": "plan",
+      "title": "План и разрешение",
+      "explanation": "Согласование обязательно: область записи — counter.json, проверка — verify.mjs. До нажатия кнопки файл равен 0.",
+      "image": "plan.jpg",
+      "value": "0",
+      "runId": "run-1f3746ca-8fe0-47a6-b9f5-24b109bb1160",
+      "planHash": "36eacfbc3214b201aa2b86fbeba3cb6da9499077015422576e1cf7f9be8efda3",
+      "proof": "UNPROVEN",
+      "coverage": {
+        "required": 1,
+        "proven": 0
+      },
+      "nodes": [
+        {
+          "id": "approve-plan",
+          "title": "Подтвердить план",
+          "status": "waiting-for-human",
+          "action": "human-approve",
+          "needs": [],
+          "receiptIds": [],
+          "checks": []
+        },
+        {
+          "id": "step-counter-two",
+          "title": "Изменить счетчик",
+          "status": "pending",
+          "action": "ai-implement",
+          "needs": [
+            "approve-plan"
+          ],
+          "receiptIds": [],
+          "checks": []
+        },
+        {
+          "id": "workspace-check",
+          "title": "Проверить изменения",
+          "status": "pending",
+          "action": "workspace-check",
+          "needs": [
+            "step-counter-two"
+          ],
+          "receiptIds": [],
+          "checks": []
+        },
+        {
+          "id": "check-counter",
+          "title": "Проверить счетчик",
+          "status": "pending",
+          "action": "check-counter",
+          "needs": [
+            "workspace-check"
+          ],
+          "receiptIds": [],
+          "checks": []
+        },
+        {
+          "id": "review",
+          "title": "Провести независимое ревью",
+          "status": "pending",
+          "action": "ai-review",
+          "needs": [
+            "check-counter"
+          ],
+          "receiptIds": [],
+          "checks": []
+        },
+        {
+          "id": "handoff",
+          "title": "Готово к личному ревью",
+          "status": "pending",
+          "action": "artifact-handoff",
+          "needs": [
+            "review"
+          ],
+          "receiptIds": [],
+          "checks": []
+        }
+      ]
+    },
+    {
+      "id": "work",
+      "title": "Выполнение",
+      "explanation": "Executor ожидает ответ исполнителя. Герой связан с настоящим активным узлом, а не с таймером витрины.",
+      "image": "work.jpg",
+      "value": "0",
+      "runId": "run-1f3746ca-8fe0-47a6-b9f5-24b109bb1160",
+      "planHash": "36eacfbc3214b201aa2b86fbeba3cb6da9499077015422576e1cf7f9be8efda3",
+      "proof": "RUNNING",
+      "coverage": {
+        "required": 1,
+        "proven": 0
+      },
+      "nodes": [
+        {
+          "id": "approve-plan",
+          "title": "Подтвердить план",
+          "status": "passed",
+          "action": "human-approve",
+          "needs": [],
+          "receiptIds": [
+            "970a3ac98e834502343ce2fa89f95fd9d3c9b36d7fc5e5b30ddef05a3b78943d"
+          ],
+          "checks": []
+        },
+        {
+          "id": "step-counter-two",
+          "title": "Изменить счетчик",
+          "status": "running",
+          "action": "ai-implement",
+          "needs": [
+            "approve-plan"
+          ],
+          "receiptIds": [
+            "45e74ac62c87021f3656b1848f792a2a8b41e7c7cbb6911f103c7d4d3d22a5c2"
+          ],
+          "checks": []
+        },
+        {
+          "id": "workspace-check",
+          "title": "Проверить изменения",
+          "status": "pending",
+          "action": "workspace-check",
+          "needs": [
+            "step-counter-two"
+          ],
+          "receiptIds": [],
+          "checks": []
+        },
+        {
+          "id": "check-counter",
+          "title": "Проверить счетчик",
+          "status": "pending",
+          "action": "check-counter",
+          "needs": [
+            "workspace-check"
+          ],
+          "receiptIds": [],
+          "checks": []
+        },
+        {
+          "id": "review",
+          "title": "Провести независимое ревью",
+          "status": "pending",
+          "action": "ai-review",
+          "needs": [
+            "check-counter"
+          ],
+          "receiptIds": [],
+          "checks": []
+        },
+        {
+          "id": "handoff",
+          "title": "Готово к личному ревью",
+          "status": "pending",
+          "action": "artifact-handoff",
+          "needs": [
+            "review"
+          ],
+          "receiptIds": [],
+          "checks": []
+        }
+      ]
+    },
+    {
+      "id": "repair",
+      "title": "Проверка нашла ошибку",
+      "explanation": "Первая правка записала 1 вместо 2. Настоящий процесс verify.mjs завершился с ошибкой; Executor начал ограниченное исправление.",
+      "image": "repair.jpg",
+      "value": "1",
+      "runId": "run-95a30105-91c0-4351-aac8-5b73ea9d5375",
+      "planHash": "6c004ebfb4ecdce4ab744ab3b8fa50210174126edebc015e6e5a2ff05dd42282",
+      "proof": "RUNNING",
+      "coverage": {
+        "required": 1,
+        "proven": 0
+      },
+      "nodes": [
+        {
+          "id": "approve-plan",
+          "title": "Подтвердить план",
+          "status": "passed",
+          "action": "human-approve",
+          "needs": [],
+          "receiptIds": [
+            "e25ac3496442395c87769eff27c96aab212d5166a25d5664d68ea77c90aeff4c"
+          ],
+          "checks": []
+        },
+        {
+          "id": "step-fix-1",
+          "title": "Изменить счетчик",
+          "status": "running",
+          "action": "ai-implement",
+          "needs": [
+            "approve-plan"
+          ],
+          "receiptIds": [
+            "c58d6f737b17fd203511f2bf7beefe6a1fb9b2203fadcbd57d4edebf23f5d334"
+          ],
+          "checks": []
+        },
+        {
+          "id": "workspace-check",
+          "title": "Проверить изменения",
+          "status": "pending",
+          "action": "workspace-check",
+          "needs": [
+            "step-fix-1"
+          ],
+          "receiptIds": [],
+          "checks": []
+        },
+        {
+          "id": "check-counter",
+          "title": "Проверить счетчик",
+          "status": "pending",
+          "action": "check-counter",
+          "needs": [
+            "workspace-check"
+          ],
+          "receiptIds": [],
+          "checks": []
+        },
+        {
+          "id": "review",
+          "title": "Провести независимое ревью",
+          "status": "pending",
+          "action": "ai-review",
+          "needs": [
+            "check-counter"
+          ],
+          "receiptIds": [],
+          "checks": []
+        },
+        {
+          "id": "handoff",
+          "title": "Готово к личному ревью",
+          "status": "pending",
+          "action": "artifact-handoff",
+          "needs": [
+            "review"
+          ],
+          "receiptIds": [],
+          "checks": []
+        }
+      ]
+    },
+    {
+      "id": "result",
+      "title": "Требование подтверждено",
+      "explanation": "Файл содержит 2. Проверка завершилась с exit 0; оценка связи проверки с требованием предоставлена подставным reviewer. Executor рассчитал PROVEN.",
+      "image": "result.jpg",
+      "value": "2",
+      "runId": "run-95a30105-91c0-4351-aac8-5b73ea9d5375",
+      "planHash": "6c004ebfb4ecdce4ab744ab3b8fa50210174126edebc015e6e5a2ff05dd42282",
+      "proof": "PROVEN",
+      "coverage": {
+        "required": 1,
+        "proven": 1
+      },
+      "nodes": [
+        {
+          "id": "approve-plan",
+          "title": "Подтвердить план",
+          "status": "passed",
+          "action": "human-approve",
+          "needs": [],
+          "receiptIds": [
+            "e25ac3496442395c87769eff27c96aab212d5166a25d5664d68ea77c90aeff4c"
+          ],
+          "checks": []
+        },
+        {
+          "id": "step-fix-1",
+          "title": "Изменить счетчик",
+          "status": "passed",
+          "action": "ai-implement",
+          "needs": [
+            "approve-plan"
+          ],
+          "receiptIds": [
+            "c58d6f737b17fd203511f2bf7beefe6a1fb9b2203fadcbd57d4edebf23f5d334",
+            "91afc7fa8b354161ec3bbc3bf797deb0307da0ebbca4b53d9dc06d6db70d1667"
+          ],
+          "checks": []
+        },
+        {
+          "id": "workspace-check",
+          "title": "Проверить изменения",
+          "status": "passed",
+          "action": "workspace-check",
+          "needs": [
+            "step-fix-1"
+          ],
+          "receiptIds": [
+            "6da6b381b93e444dc0f9e6238b2741557144f05a2af0d831479cbfca1501b75b",
+            "51fc2d4941a044dd4732a553a0e526c3cc2ace0ed1bd5ca5f20445b813876127"
+          ],
+          "checks": []
+        },
+        {
+          "id": "check-counter",
+          "title": "Проверить счетчик",
+          "status": "passed",
+          "action": "check-counter",
+          "needs": [
+            "workspace-check"
+          ],
+          "receiptIds": [
+            "dd928e5d635d4e753e766918188a1300f3ef5c2f331adb108d49868d82979a59",
+            "c7b2cb5b7fac471c7d797dee6b95d48a99731ff9e2225a82c58faa556dc66fc0"
+          ],
+          "checks": [
+            {
+              "id": "check-counter",
+              "exitCode": 0,
+              "passed": true,
+              "inputHash": "88a44df1e46c7f8161dbea464b5ba338d113250364d7143899e7da282781652e"
+            }
+          ]
+        },
+        {
+          "id": "review",
+          "title": "Провести независимое ревью",
+          "status": "passed",
+          "action": "ai-review",
+          "needs": [
+            "check-counter"
+          ],
+          "receiptIds": [
+            "7455cbe7f61bc6ea2b49d4054bb830ddcd79f0738fef8901d74f95150faaddf7",
+            "f0dd9fd2e5584386e5bf2434612df87a4d3261a30f69ad50be42e804d631cdb3"
+          ],
+          "checks": []
+        },
+        {
+          "id": "handoff",
+          "title": "Готово к личному ревью",
+          "status": "passed",
+          "action": "artifact-handoff",
+          "needs": [
+            "review"
+          ],
+          "receiptIds": [
+            "01e350f9db9f9ca7406f242e8351d0cac3f1195bb6cba271f31d851f0847b6e8",
+            "acd3db940eff6b4964afe0118dcc5a06472ebb34393d9a48e22b817692e1975a"
+          ],
+          "checks": []
+        }
+      ]
+    },
+    {
+      "id": "code",
+      "title": "Сохраненный код",
+      "explanation": "Открыт настоящий reader с сохраненными исходниками этого запуска. AI-объяснение здесь не генерировалось.",
+      "image": "code.jpg",
+      "value": "2",
+      "runId": "run-95a30105-91c0-4351-aac8-5b73ea9d5375",
+      "planHash": "6c004ebfb4ecdce4ab744ab3b8fa50210174126edebc015e6e5a2ff05dd42282",
+      "proof": "PROVEN",
+      "coverage": {
+        "required": 1,
+        "proven": 1
+      },
+      "nodes": [
+        {
+          "id": "approve-plan",
+          "title": "Подтвердить план",
+          "status": "passed",
+          "action": "human-approve",
+          "needs": [],
+          "receiptIds": [
+            "e25ac3496442395c87769eff27c96aab212d5166a25d5664d68ea77c90aeff4c"
+          ],
+          "checks": []
+        },
+        {
+          "id": "step-fix-1",
+          "title": "Изменить счетчик",
+          "status": "passed",
+          "action": "ai-implement",
+          "needs": [
+            "approve-plan"
+          ],
+          "receiptIds": [
+            "c58d6f737b17fd203511f2bf7beefe6a1fb9b2203fadcbd57d4edebf23f5d334",
+            "91afc7fa8b354161ec3bbc3bf797deb0307da0ebbca4b53d9dc06d6db70d1667"
+          ],
+          "checks": []
+        },
+        {
+          "id": "workspace-check",
+          "title": "Проверить изменения",
+          "status": "passed",
+          "action": "workspace-check",
+          "needs": [
+            "step-fix-1"
+          ],
+          "receiptIds": [
+            "6da6b381b93e444dc0f9e6238b2741557144f05a2af0d831479cbfca1501b75b",
+            "51fc2d4941a044dd4732a553a0e526c3cc2ace0ed1bd5ca5f20445b813876127"
+          ],
+          "checks": []
+        },
+        {
+          "id": "check-counter",
+          "title": "Проверить счетчик",
+          "status": "passed",
+          "action": "check-counter",
+          "needs": [
+            "workspace-check"
+          ],
+          "receiptIds": [
+            "dd928e5d635d4e753e766918188a1300f3ef5c2f331adb108d49868d82979a59",
+            "c7b2cb5b7fac471c7d797dee6b95d48a99731ff9e2225a82c58faa556dc66fc0"
+          ],
+          "checks": [
+            {
+              "id": "check-counter",
+              "exitCode": 0,
+              "passed": true,
+              "inputHash": "88a44df1e46c7f8161dbea464b5ba338d113250364d7143899e7da282781652e"
+            }
+          ]
+        },
+        {
+          "id": "review",
+          "title": "Провести независимое ревью",
+          "status": "passed",
+          "action": "ai-review",
+          "needs": [
+            "check-counter"
+          ],
+          "receiptIds": [
+            "7455cbe7f61bc6ea2b49d4054bb830ddcd79f0738fef8901d74f95150faaddf7",
+            "f0dd9fd2e5584386e5bf2434612df87a4d3261a30f69ad50be42e804d631cdb3"
+          ],
+          "checks": []
+        },
+        {
+          "id": "handoff",
+          "title": "Готово к личному ревью",
+          "status": "passed",
+          "action": "artifact-handoff",
+          "needs": [
+            "review"
+          ],
+          "receiptIds": [
+            "01e350f9db9f9ca7406f242e8351d0cac3f1195bb6cba271f31d851f0847b6e8",
+            "acd3db940eff6b4964afe0118dcc5a06472ebb34393d9a48e22b817692e1975a"
+          ],
+          "checks": []
+        }
+      ]
+    },
+    {
+      "id": "stale",
+      "title": "Код изменился — доказательство устарело",
+      "explanation": "После внешней записи числа 3 прежний успех больше не подтверждает текущий файл. Старый отчет сохраняется в истории.",
+      "image": "stale.jpg",
+      "value": "3",
+      "runId": "run-95a30105-91c0-4351-aac8-5b73ea9d5375",
+      "planHash": "6c004ebfb4ecdce4ab744ab3b8fa50210174126edebc015e6e5a2ff05dd42282",
+      "proof": "FAILED",
+      "coverage": {
+        "required": 1,
+        "proven": 0
+      },
+      "nodes": [
+        {
+          "id": "approve-plan",
+          "title": "Подтвердить план",
+          "status": "passed",
+          "action": "human-approve",
+          "needs": [],
+          "receiptIds": [
+            "e25ac3496442395c87769eff27c96aab212d5166a25d5664d68ea77c90aeff4c"
+          ],
+          "checks": []
+        },
+        {
+          "id": "step-fix-1",
+          "title": "Изменить счетчик",
+          "status": "passed",
+          "action": "ai-implement",
+          "needs": [
+            "approve-plan"
+          ],
+          "receiptIds": [
+            "c58d6f737b17fd203511f2bf7beefe6a1fb9b2203fadcbd57d4edebf23f5d334",
+            "91afc7fa8b354161ec3bbc3bf797deb0307da0ebbca4b53d9dc06d6db70d1667"
+          ],
+          "checks": []
+        },
+        {
+          "id": "workspace-check",
+          "title": "Проверить изменения",
+          "status": "passed",
+          "action": "workspace-check",
+          "needs": [
+            "step-fix-1"
+          ],
+          "receiptIds": [
+            "6da6b381b93e444dc0f9e6238b2741557144f05a2af0d831479cbfca1501b75b",
+            "51fc2d4941a044dd4732a553a0e526c3cc2ace0ed1bd5ca5f20445b813876127"
+          ],
+          "checks": []
+        },
+        {
+          "id": "check-counter",
+          "title": "Проверить счетчик",
+          "status": "passed",
+          "action": "check-counter",
+          "needs": [
+            "workspace-check"
+          ],
+          "receiptIds": [
+            "dd928e5d635d4e753e766918188a1300f3ef5c2f331adb108d49868d82979a59",
+            "c7b2cb5b7fac471c7d797dee6b95d48a99731ff9e2225a82c58faa556dc66fc0"
+          ],
+          "checks": [
+            {
+              "id": "check-counter",
+              "exitCode": 0,
+              "passed": true,
+              "inputHash": "88a44df1e46c7f8161dbea464b5ba338d113250364d7143899e7da282781652e"
+            }
+          ]
+        },
+        {
+          "id": "review",
+          "title": "Провести независимое ревью",
+          "status": "passed",
+          "action": "ai-review",
+          "needs": [
+            "check-counter"
+          ],
+          "receiptIds": [
+            "7455cbe7f61bc6ea2b49d4054bb830ddcd79f0738fef8901d74f95150faaddf7",
+            "f0dd9fd2e5584386e5bf2434612df87a4d3261a30f69ad50be42e804d631cdb3"
+          ],
+          "checks": []
+        },
+        {
+          "id": "handoff",
+          "title": "Готово к личному ревью",
+          "status": "passed",
+          "action": "artifact-handoff",
+          "needs": [
+            "review"
+          ],
+          "receiptIds": [
+            "01e350f9db9f9ca7406f242e8351d0cac3f1195bb6cba271f31d851f0847b6e8",
+            "acd3db940eff6b4964afe0118dcc5a06472ebb34393d9a48e22b817692e1975a"
+          ],
+          "checks": []
+        }
+      ]
+    }
+  ]
+}
