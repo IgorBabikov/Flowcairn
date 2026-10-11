@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { createGuildFixture, guildGoal, guildInstruction } from '../ai-graph-viewer/tests/guild-workflow-fixture.mjs';
 import { newQuest, closeSurface, openQuest, openDiagnostics } from '../ai-graph-viewer/tests/ui-paths.mjs';
-const media = path.resolve('docs/demo/media');
+const media = path.resolve('.github/media/demo');
 mkdirSync(media, {recursive:true});
 const f = await createGuildFixture({repair:true, hold:true, dist:path.resolve('tools/ai-graph-viewer/dist')});
 const browser = await chromium.launch();
@@ -21,7 +21,7 @@ async function capture(id, title, explanation) {
   await page.screenshot({path:path.join(media,`${id}.jpg`),type:'jpeg',quality:85});
   const s=f.current();
   // Allowlist public fields; no session token, local root or private store is exported.
-  frames.push({id,title,explanation,image:`media/${id}.jpg`,value:readFileSync(path.join(f.root,'counter.json'),'utf8').trim(),
+  frames.push({id,title,explanation,image:`${id}.jpg`,value:readFileSync(path.join(f.root,'counter.json'),'utf8').trim(),
     runId:s?.runId??null,planHash:s?.planHash??null,proof:s?.proof?.status??null,
     coverage:s?.proof?.coverage??null,
     nodes:(s?.nodes??[]).map(n=>({id:n.id,title:n.title,status:n.status,action:n.action.id,needs:n.needs,receiptIds:n.receiptIds,checks:n.checks.map(c=>({id:c.id,exitCode:c.exitCode,passed:c.passed,inputHash:c.inputHash}))}))});

@@ -13,18 +13,18 @@
 [![Проверки](https://github.com/IgorBabikov/Flowcairn/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/IgorBabikov/Flowcairn/actions/workflows/ci.yml)
 [![MIT](https://img.shields.io/badge/license-MIT-b69557)](LICENSE)
 
-**[Открыть интерактивную демо](https://igorbabikov.github.io/Flowcairn/)** · [Видео](https://igorbabikov.github.io/Flowcairn/#recording) · [Быстрый старт](#быстрый-старт) · [Документация](docs/README.md)
+**[Смотреть запись работы](https://github.com/IgorBabikov/Flowcairn/blob/main/.github/media/demo/session.mp4)** · [Быстрый старт](#быстрый-старт) · [Документация](docs/README.md)
 
-<a href="https://igorbabikov.github.io/Flowcairn/">
+<a href="https://github.com/IgorBabikov/Flowcairn/blob/main/.github/media/demo/session.mp4">
 <picture>
-  <source media="(prefers-reduced-motion: reduce)" srcset="https://raw.githubusercontent.com/IgorBabikov/Flowcairn/main/docs/demo/media/work.jpg" />
-  <img src="https://raw.githubusercontent.com/IgorBabikov/Flowcairn/main/.github/media/flowcairn-walkthrough.gif" width="960" alt="Текущий интерфейс Flowcairn: поручение, план, работа героев, исправление ошибки, подтвержденный результат и сохраненный код. Открыть интерактивный разбор." />
+  <source media="(prefers-reduced-motion: reduce)" srcset="https://raw.githubusercontent.com/IgorBabikov/Flowcairn/main/.github/media/demo/work.jpg" />
+  <img src="https://raw.githubusercontent.com/IgorBabikov/Flowcairn/main/.github/media/flowcairn-walkthrough.gif" width="960" alt="Текущий интерфейс Flowcairn: поручение, план, работа героев, исправление ошибки, подтвержденный результат и сохраненный код. Посмотреть запись работы." />
 </picture>
 </a>
 
 </div>
 
-**Это запись работающего интерфейса.** Ответы AI подставные; Executor, изменение файла, процессы проверок и отчеты настоящие. GIF показывает шесть кадров, [полное видео и данные запуска](https://igorbabikov.github.io/Flowcairn/) доступны в демо. Это не демонстрация live inference.
+**Это запись работающего интерфейса.** Ответы AI подставные; Executor, изменение файла, процессы проверок и отчеты настоящие. GIF показывает шесть кадров, [полное видео](.github/media/demo/session.mp4) и [данные запуска](.github/media/demo/recording.json) хранятся в репозитории. Это не демонстрация live inference.
 
 ## От поручения до проверенного результата
 
@@ -36,16 +36,16 @@ AI написал код — но что он изменил, почему сч�
 4. **Посмотрите доказательства.** Для каждого обязательного требования нужны допустимая проверка и актуальные данные. Зеленый узел или общий ответ AI сами по себе недостаточны.
 5. **Разберите свой код.** В книге сохранены исходники, версии и контекст. Объяснение доступно по возможностям выбранного AI-клиента.
 
-## Попробуйте разобраться сами
+## Один сценарий целиком
 
-В [интерактивной записи](https://igorbabikov.github.io/Flowcairn/) можно выбирать моменты, открывать узлы плана и исследовать зависимости, статусы, хеши и идентификаторы отчетов. Установка и AI-аккаунт не нужны.
+В записи система получает задачу: сохранить число `2` в `counter.json` и проверить его существующим `verify.mjs`.
 
-| В записи | Что действительно произошло |
+| Момент | Что действительно произошло |
 | --- | --- |
-| [План](https://igorbabikov.github.io/Flowcairn/#plan) | До согласования `counter.json` содержит `0` |
-| [Ошибка](https://igorbabikov.github.io/Flowcairn/#repair) | Первая правка записала `1`; проверка ожидала `2` и завершилась с exit 1 |
-| [Результат](https://igorbabikov.github.io/Flowcairn/#result) | Исправление записало `2`; проверка прошла, Executor рассчитал `PROVEN` после подставного review |
-| [Устаревание](https://igorbabikov.github.io/Flowcairn/#stale) | Внешнее изменение на `3` сняло подтверждение текущего результата |
+| [План](.github/media/demo/plan.jpg) | До согласования файл содержит `0` |
+| [Ошибка](.github/media/demo/repair.jpg) | Первая правка записала `1`; проверка ожидала `2` и завершилась с exit 1 |
+| [Результат](.github/media/demo/result.jpg) | Исправление записало `2`; проверка прошла, Executor рассчитал `PROVEN` после подставного review |
+| [Изменение исходника](.github/media/demo/stale.jpg) | Внешнее изменение на `3` сняло подтверждение текущего результата |
 
 ### Где здесь граф
 
@@ -71,7 +71,7 @@ flowchart TD
 
 ## Код остается понятным и доступным
 
-<a href="https://igorbabikov.github.io/Flowcairn/#code"><img src="https://raw.githubusercontent.com/IgorBabikov/Flowcairn/main/docs/demo/media/code.jpg" width="960" alt="Настоящая книга кода со сохраненными исходниками демонстрационной задачи" /></a>
+<a href=".github/media/demo/code.jpg"><img src="https://raw.githubusercontent.com/IgorBabikov/Flowcairn/main/.github/media/demo/code.jpg" width="960" alt="Настоящая книга кода со сохраненными исходниками демонстрационной задачи" /></a>
 
 Сохраненные версии показывают, что было до и после работы. Разбор можно выбрать после этапа или после всей задачи. Чтение, ответы и отметки прогресса не доказывают понимание и не меняют `PROVEN`. Продолжение после учебной паузы — отдельная команда.
 
@@ -114,5 +114,5 @@ npm run build
 npm run test:ui
 ```
 
-[Происхождение медиа](.github/media/README.md) · [Исследование оформления](docs/README-VISUAL-RESEARCH.md) · [Перезапись демо](docs/demo/README.md).
+[Происхождение медиа](.github/media/README.md) · [Исследование оформления](docs/README-VISUAL-RESEARCH.md) · [Воспроизведение записи](.github/media/README.md).
 Лицензия [MIT](LICENSE). [Сторонние материалы и лицензии](THIRD_PARTY_NOTICES.md).
