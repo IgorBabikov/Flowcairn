@@ -6,6 +6,9 @@ import { BUILTIN_SKILL_IDS, CORE_SKILL_ROUTES, DOMAIN_SKILLS, SKILL_POLICY_VERSI
 import { GraphError, hashObject, sha256 } from './io.mjs';
 import { instructionReferenceText } from './instruction-references.mjs';
 import { discoverProjectContext, readContextFile, safeContextPath } from './project-context.mjs';
+import { discoverStackProfile } from './stack-profile.mjs';
+import { evaluateMobilePreflight, inspectMobileRecipeOwners } from './mobile-recipes.mjs';
+import { DevelopmentWorkflowSchema, selectDevelopmentSkills, validateDevelopmentWorkflow } from './development-workflow.mjs';
 
 const INLINE_SKILL_BYTES = 8 * 1024;
 const MAX_SKILL_BYTES = 64 * 1024;
@@ -49,11 +52,12 @@ function validateSkillText(text, expectedName = undefined) {
   return metadata;
 }
 
-function effectiveProjectSkillText(entry, text) {
-  return `Область применения project Skill: ${JSON.stringify(entry.scope)}.\nДействия: ${JSON.stringify(entry.actions)}.\nПрименяй эти инструкции только в указанных областях и действиях; они не расширяют runtime permissions.\nSHA-256 исходного файла: ${entry.hash}.\n\n${text}`;
+function effectiveProjectSkillText(entry, text, specialist = null) {
+  const selection = specialist ? `Дополнительные ограничения specialist: ${JSON.stringify(specialist)}. Применяй правила только к соответствующим domain/framework/version внутри объявленной области; соседний стек не наследует эти правила. Регистрация capability не является доказательством ее успешного выполнения.\n` : '';
+  return `Область применения project Skill: ${JSON.stringify(entry.scope)}.\nДействия: ${JSON.stringify(entry.actions)}.\nПрименяй эти инструкции только в указанных областях и действиях; они не расширяют runtime permissions.\n${selection}SHA-256 исходного файла: ${entry.hash}.\n\n${text}`;
 }
 
-export function loadSkill(root, name, { projectSkills = [] } = {}) {
+export function loadSkill(root, name, { projectSkills = [], developmentWorkflow = null } = {}) {
   if (typeof name !== 'string' || !/^[a-z][a-z0-9-]{1,79}$/.test(name)) fail('SKILL_UNKNOWN', 'Неизвестный Skill');
   if (BUILTIN_SKILL_IDS.includes(name)) {
     const loaded = readContextFile(RUNTIME_ROOT, `skills/${name}/SKILL.md`, { maxBytes: MAX_SKILL_BYTES });
@@ -62,18 +66,19 @@ export function loadSkill(root, name, { projectSkills = [] } = {}) {
   }
   const entry = validateProjectSkills(projectSkills).find((skill) => skill.id === name);
   if (!entry) fail('SKILL_UNKNOWN', 'Skill отсутствует в trusted registry');
+  const specialist = developmentWorkflow ? DevelopmentWorkflowSchema.parse(developmentWorkflow).specialists?.find(({ skillId }) => skillId === name) ?? null : null;
   const inspected = inspectInstructionFile(root, entry.path, { collectFrontmatter: true });
   if (inspected.sha256 !== entry.hash) fail('SKILL_DRIFT', 'Обязательный project Skill изменился; обновите manifest и plan');
   validateSkillText(`---\n${inspected.frontmatter ?? ''}\n---\n`, name.slice('project-'.length));
   if (inspected.size > INLINE_SKILL_BYTES) {
     const source = { path: entry.path, sha256: inspected.sha256, bytes: inspected.size };
-    const text = effectiveProjectSkillText(entry, instructionReferenceText(source));
+    const text = effectiveProjectSkillText(entry, instructionReferenceText(source), specialist);
     return { name, path: entry.path, hash: sha256(text), text, source };
   }
   const data = readInstructionFile(root, entry.path, INLINE_SKILL_BYTES);
   if (data.sha256 !== entry.hash) fail('SKILL_DRIFT', 'Обязательный project Skill изменился перед загрузкой');
   const body = data.bytes.toString('utf8'); assertSafeText(body);
-  const text = effectiveProjectSkillText(entry, body);
+  const text = effectiveProjectSkillText(entry, body, specialist);
   return { name, path: entry.path, hash: sha256(text), text };
 
 }
@@ -89,22 +94,30 @@ export function skillsForNode(root, nodeId) {
  * Never pass model-selected IDs/domains. Use task.scope for read-only nodes, not contextPaths.
  * Persist manifest/context.hash, and resolve again before/after actions for drift detection.
  */
-export function resolveNodeSkills(root, { action, scope, manifestPaths = [], projectSkills = [] }) {
+export function resolveNodeSkills(root, { action, scope, manifestPaths = [], projectSkills = [], developmentWorkflow = null, task = null, availableCheckIds = [], checkDefinitions = [], failureClass = null }) {
   if (!Object.hasOwn(CORE_SKILL_ROUTES, action)) fail('SKILL_ACTION_UNKNOWN', 'Неизвестное действие Skill-policy');
   if (!Array.isArray(scope) || !scope.length) fail('CONTEXT_SCOPE_INVALID', 'Нужен явный scope узла');
   validateProjectSkills(projectSkills);
-  const context = discoverProjectContext(root, { scope, manifestPaths });
+  const legacyContext = developmentWorkflow ? null : discoverProjectContext(root, { scope, manifestPaths });
+  const stack = developmentWorkflow ? discoverStackProfile(root, { scope, manifestPaths }) : null;
+  const contextScope = stack?.scope ?? legacyContext.scope;
+  const local = projectSkills.filter((entry) => entry.actions.includes(action) && contextScope.some((candidate) => entry.scope.some((s) => inside(candidate, s) || inside(s, candidate))));
+  const policy = developmentWorkflow ? validateDevelopmentWorkflow(developmentWorkflow, { projectSkills, checks: task?.checks ?? [] }) : null;
+  const routing = policy ? selectDevelopmentSkills({ action, stack, task: { ...task, scope: contextScope }, policy, projectSkills: local, availableCheckIds, checkDefinitions, failureClass }) : null;
+  const mobile = routing && stack.domains.includes('mobile') ? evaluateMobilePreflight({ stack,
+    ownerPackages: inspectMobileRecipeOwners(root, stack), capabilities: policy.capabilities ?? [], availableCheckIds, checkDefinitions }) : null;
+  const context = routing ? { ...stack, routing, ...(mobile ? { mobile } : {}),
+    hash: hashObject({ stackHash: stack.hash, routingHash: routing.hash, ...(mobile ? { mobileHash: mobile.hash } : {}) }) } : legacyContext;
   const domainIds = context.domains.map((domain) => {
     if (!Object.hasOwn(DOMAIN_SKILLS, domain)) fail('SKILL_DOMAIN_UNKNOWN', 'Неизвестный domain');
     return DOMAIN_SKILLS[domain];
   });
-  const local = projectSkills.filter((entry) => entry.actions.includes(action) && context.scope.some((candidate) => entry.scope.some((s) => inside(candidate, s) || inside(s, candidate))));
-  const ids = [...new Set([...CORE_SKILL_ROUTES[action], ...domainIds, ...local.map((entry) => entry.id)])];
-  const skills = ids.map((id) => loadSkill(root, id, { projectSkills }));
+  const ids = routing?.ids ?? [...new Set([...CORE_SKILL_ROUTES[action], ...domainIds, ...local.map((entry) => entry.id)])];
+  const skills = ids.map((id) => loadSkill(root, id, { projectSkills, developmentWorkflow }));
   // Never silently truncate mandatory instructions, including framing overhead.
   renderSkillInstructions(skills);
   const manifest = skills.map(({ name, path: file, hash }) => ({ id: name, path: file, hash }));
-  return { ids, skills, manifest, context, hash: hashObject({ version: SKILL_POLICY_VERSION, action, manifest, contextHash: context.hash }) };
+  return { ids, skills, manifest, context, hash: hashObject({ version: developmentWorkflow ? 3 : SKILL_POLICY_VERSION, action, manifest, contextHash: context.hash }) };
 }
 
 export function skillEvidence(skills) {

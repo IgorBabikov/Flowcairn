@@ -1,3 +1,5 @@
+import { AIPlanReviewResultSchema, buildSemanticPlanReviewInput, validateSemanticPlanReviewInput } from './semantic-plan-review.mjs';
+import { validateSemanticCorrectionInput } from './semantic-correction-feedback.mjs';
 import { verifyInstructionReference } from './instruction-references.mjs';
 import { inspectHostProcess, stopHostGroup } from './host-process.mjs';
 import { isPrivateMode, isTrustedMode, isPathWithin } from './host-filesystem.mjs';
@@ -25,6 +27,8 @@ import {
 } from './registry.mjs';
 import {
   AIReviewResultSchema,
+  AIPlanningResultSchema,
+  AIAnalysisResultSchema,
   GraphPlanSchema,
   NodeDefinitionSchema,
   RelativePath,
@@ -136,7 +140,15 @@ function parseInputs({ node, task, plan, skills, priorEvidence, reviewEvidence }
     plan: parsedPlan.data,
     skills: normalizedSkills,
     reviewBundle:
-      parsedNode.data.action.id === 'ai-review'
+      parsedNode.data.planReview
+        ? (() => {
+            validateSemanticPlanReviewInput(reviewEvidence);
+            if (reviewEvidence.planHash !== sha256(canonicalJson(parsedPlan.data)) || reviewEvidence.taskHash !== sha256(canonicalJson(parsedTask.data))) fail('PLAN_REVIEW_INVALID', 'Runner получил другое plan review evidence');
+            return buildSemanticPlanReviewInput({ task: parsedTask.data, plan: parsedPlan.data, planningArtifactHash: reviewEvidence.planningArtifactHash, proposal: reviewEvidence.proposal });
+          })()
+        : priorEvidence?.semanticCorrectionReference
+        ? validateSemanticCorrectionInput(reviewEvidence, { task: parsedTask.data, plan: parsedPlan.data, node: parsedNode.data, priorEvidence })
+        : parsedNode.data.action.id === 'ai-review'
         ? validateReviewEvidence(reviewEvidence, {
             node: parsedNode.data,
             task: parsedTask.data,
@@ -1077,7 +1089,10 @@ export async function runRegisteredAction({
         for (const reference of prepared.instructionReferences ?? []) verifyInstructionReference(reference);
         if (prepared.reviewFile) verifyReviewEvidenceFile(prepared.reviewFile);
         output = parseAiOutput(prepared.resultFile);
-        if (prepared.reviewFile && AIReviewResultSchema.parse(output).reviewEvidenceHash !== prepared.reviewFile.hash)
+        const privateEvidenceHash = prepared.reviewFile ? (input.node.planReview ? AIPlanReviewResultSchema.parse(output).inputHash :
+          input.priorEvidence?.semanticCorrectionReference ? (input.node.action.id === 'ai-plan' ? AIPlanningResultSchema : AIAnalysisResultSchema).parse(output).reviewEvidenceHash :
+          AIReviewResultSchema.parse(output).reviewEvidenceHash) : null;
+        if (prepared.reviewFile && privateEvidenceHash !== prepared.reviewFile.hash)
           fail('REVIEW_EVIDENCE_MISMATCH', 'Review output не совпадает с evidence');
       } catch (error) {
         failureReason = errorReason(error, 'AI_OUTPUT_INVALID'); exitCode = 1; output = null;

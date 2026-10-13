@@ -16,7 +16,9 @@ if (Number(process.versions.node.split('.')[0]) !== 22) {
 
 const { explainError, GraphError } = await import('../scripts/ai-graph/lib/io.mjs');
 const { loadProjectProfile, RUNTIME_ROOT, packageManagerLock, validatePackageManagerProject } = await import('../scripts/ai-graph/lib/project.mjs');
-const { inspectCheckProfile, MISSING_CHECK_GUIDANCE } = await import('../scripts/ai-graph/lib/check-profile.mjs');
+const { inspectCheckProfile, projectCheckProfile, MISSING_CHECK_GUIDANCE } = await import('../scripts/ai-graph/lib/check-profile.mjs');
+const { discoverStackProfile } = await import('../scripts/ai-graph/lib/stack-profile.mjs');
+const { inspectMobilePreflight } = await import('../scripts/ai-graph/lib/mobile-recipes.mjs');
 const { TaskInputSchema, TaskInputV3Schema } = await import('../scripts/ai-graph/lib/schemas.mjs');
 const { WorkflowService, sanitizeText } = await import('../scripts/ai-graph/lib/service.mjs');
 const { runCli } = await import('../scripts/ai-graph/cli.mjs');
@@ -198,8 +200,17 @@ export async function doctorProject(input) {
   } catch (error) {
     manager = { valid: false, code: error.code ?? 'PACKAGE_MANAGER', message: sanitizeText(error.message) };
   }
+  let mobile = null;
+  try {
+    const stack = discoverStackProfile(root, { scope: ['.'], manifestPaths: profile.manifests });
+    if (stack.domains.includes('mobile')) mobile = inspectMobilePreflight(root, { stack,
+      capabilities: profile.developmentWorkflow?.capabilities ?? [], checkProfile: projectCheckProfile(root, profile) });
+  } catch (error) {
+    mobile = { guidanceOnly: true, acceptance: 'unverified', status: 'blocked',
+      findings: [{ code: error.code ?? 'MOBILE_PREFLIGHT_UNAVAILABLE' }] };
+  }
   return {
-    ok: ai.ai.available && checks.available && manager.valid,
+    ok: ai.ai.available && checks.available && manager.valid && mobile?.status !== 'blocked',
     root,
     node: process.versions.node,
     branch: existsNoFollow(path.join(root, '.git')) ? git(root, ['branch', '--show-current']) : null,
@@ -207,6 +218,7 @@ export async function doctorProject(input) {
     ...(profile.version === 1 ? { packageManager: profile.packageManager } : {}),
     manager,
     configuredChecks: profile.checks,
+    ...(mobile ? { mobile } : {}),
     assistants: inspectHarnesses(),
     ai: ai.ai,
     checks,
@@ -247,6 +259,7 @@ export function printInitialization(result, { launching = false, output = proces
   if (launching && !result.dryRun) {
     output.write('Проект настроен. Запускаем интерфейс…\n');
     if (result.profile?.version === 2 && !result.profile.checks.length) output.write(`${MISSING_CHECK_GUIDANCE}\n`);
+    if (result.checkRecipe?.status === 'unavailable') output.write(`${sanitizeText(result.checkRecipe.guidance)}\n`);
     return;
   }
   const summary = [
@@ -258,6 +271,7 @@ export function printInitialization(result, { launching = false, output = proces
   ];
   if (result.dryRun) summary.push(`Будут созданы: ${result.changes.join(', ')}.`);
   if (result.profile?.version === 2 && !result.profile.checks.length) summary.push(MISSING_CHECK_GUIDANCE);
+  if (result.checkRecipe?.status === 'unavailable') summary.push(result.checkRecipe.guidance);
   if (!result.dryRun) summary.push('Открыть интерфейс: npx flowcairn');
   printCard('Flowcairn', summary.map((line) => sanitizeText(line)), {
     output, author: result.created === true && !result.dryRun && !launching,

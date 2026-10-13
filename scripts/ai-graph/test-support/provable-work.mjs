@@ -46,8 +46,9 @@ export async function fixture(t, { repair = false, method = 'check', missingAsse
   const root = mkdtempSync(path.join(os.tmpdir(), 'flowcairn-proof-e2e-'));
   const worktree = path.join(root, '.ai-orchestrator', 'worktrees', 'proof-1');
   mkdirSync(path.join(worktree, 'src'), { recursive: true, mode: 0o700 });
+  mkdirSync(path.join(worktree, 'reports'), { mode: 0o700 });
   writeFileSync(path.join(worktree, sourcePath), sample.initial);
-  writeFileSync(path.join(worktree, testPath), `import assert from 'node:assert/strict';\nimport { ${sample.exportedName} } from './${path.basename(sourcePath)}';\n${assertion}\n`);
+  writeFileSync(path.join(worktree, testPath), `import assert from 'node:assert/strict';\nimport { ${sample.exportedName} } from './${path.basename(sourcePath)}';\nimport test from 'node:test';\ntest('observable behavior', () => {\n${assertion}\n});\n`);
   const fingerprint = () => {
     const files = [sourcePath, testPath].map((file) => {
       const bytes = readFileSync(path.join(worktree, file));
@@ -60,7 +61,14 @@ export async function fixture(t, { repair = false, method = 'check', missingAsse
   let implementationCalls = 0, actualChecks = 0;
   const actualCheckExitCodes = [];
   const baseOutput = { summary: 'Обработано', verdict: 'pass', skillsUsed: [], findings: [], changedFiles: [], edits: [], plan: [] };
+  const reporter = path.resolve(import.meta.dirname, '../lib/node-test-reporter.mjs');
+  const checkDefinition = { id: 'tests', title: 'Проверить поведение', purpose: 'Настоящие Node assertions по неизменным критериям',
+    command: { executable: process.execPath, argv: ['--test', `--test-reporter=${reporter}`, '--test-reporter-destination=reports/tests.json', testPath], cwd: '.' },
+    inputPaths: [testPath], outputPaths: ['reports'], timeoutMs: 10000, maxOutputBytes: 65536,
+    report: { version: 1, format: 'flowcairn-node-test/v1', path: 'reports/tests.json', requiredScenarios: ['observable behavior'] } };
   const adapters = {
+    checkRegistry: () => ({ version: 1, profileHash: identity, definitions: [checkDefinition], bindings: [{ id: 'tests',
+      definitionHash: hashObject(checkDefinition), executableHash: identity, invocationHash: identity, inputManifestHash: identity, toolchainHash: identity }] }),
     identity: () => identity, skills: () => skills, hasReadConsent: () => true,
     projectSummary: () => ({ schemaVersion: 2, name: 'Проверка настоящего runtime', contextHash: identity, contextPaths: [], scopeCandidates: ['src'], checks: ['tests'],
       ai: { provider: 'deterministic-test', model: 'injected fixture' }, capabilities: { intake: { allowed: false, reason: 'Изолированная проверка runtime' } } }),
@@ -79,7 +87,7 @@ export async function fixture(t, { repair = false, method = 'check', missingAsse
         // Node's outer test runner marker makes a nested --test silently skip files with exit 0.
         const env = { ...process.env };
         delete env.NODE_TEST_CONTEXT;
-        const result = spawnSync(process.execPath, ['--test', testPath], { cwd: worktree, env, encoding: 'utf8', timeout: 10000 });
+        const result = spawnSync(process.execPath, checkDefinition.command.argv, { cwd: worktree, env, encoding: 'utf8', timeout: 10000 });
         assert.equal(result.error, undefined);
         actualCheckExitCodes.push(result.status);
         return { exitCode: result.status, stopped: true, uncertain: false };
@@ -104,7 +112,7 @@ export async function fixture(t, { repair = false, method = 'check', missingAsse
         if (method !== 'human' && !missingAssessment) output.requirementAssessments = plan.taskContract.requirements.map((item, index) => ({
           requirementId: item.id, criterion: item.verification.criterion, checkIds: item.verification.checkIds,
           verdict: reviewFailures-- > 0 ? 'fail' : 'pass', reason: 'Зарегистрированная проверка исполнила тестовый сценарий',
-          citations: [{ path: testPath, startLine: 3 + index, quote: badCitation ? 'assert.equal(answer(), 999);' : assertion.split('\n')[index] }],
+          citations: [{ path: testPath, startLine: 5 + index, quote: badCitation ? 'assert.equal(answer(), 999);' : assertion.split('\n')[index] }],
         }));
       }
       return { exitCode: 0, stopped: true, uncertain: false, output };

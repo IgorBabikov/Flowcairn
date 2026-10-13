@@ -12,6 +12,7 @@ import { GraphError, canonicalJson, sha256 } from './io.mjs';
 import { buildPrompt, externalProviderPrompt } from './codex.mjs';
 import { isAuxiliaryContextPath, isInstructionPath } from './registry.mjs';
 import { AIResultSchema, AIPlanningResultSchema, AIAnalysisResultSchema, AIReviewResultSchema } from './schemas.mjs';
+import { AIPlanReviewResultSchema } from './semantic-plan-review.mjs';
 import { renderSkillInstructions } from './skills.mjs';
 import { createReviewEvidenceFile, verifyReviewEvidenceFile, disposeReviewEvidenceFile } from './review-evidence.mjs';
 import { fingerprintWorkspace } from './workspace.mjs';
@@ -139,9 +140,33 @@ function strictProviderSchema(value) {
 
 // Формат подтверждения Skills задается доверенным узлом, а не свободным текстом модели.
 export function aiResponseSchema(node, plan, task = null) {
-  const schema = z.toJSONSchema(node.action.id === 'ai-review' ? AIReviewResultSchema : node.action.id === 'ai-plan' ? AIPlanningResultSchema : node.action.id === 'ai-analyze' && plan?.workflow === 'autonomous' ? AIAnalysisResultSchema : AIResultSchema);
+  const schema = z.toJSONSchema(node.planReview ? AIPlanReviewResultSchema : node.action.id === 'ai-review' ? AIReviewResultSchema : node.action.id === 'ai-plan' ? AIPlanningResultSchema : node.action.id === 'ai-analyze' && plan?.workflow === 'autonomous' ? AIAnalysisResultSchema : AIResultSchema);
   if (schema.properties?.skillsUsed && node.skills?.length) {
     schema.properties.skillsUsed = { type: 'array', items: { type: 'string', enum: [...node.skills] }, minItems: node.skills.length, maxItems: node.skills.length };
+  }
+  if (node.planReview) {
+    // This branch has the dedicated object/array schema above, never a boolean schema.
+    const reviewProperties = /** @type {any} */ (schema.properties);
+    const workIds = plan.nodes.filter((candidate) => candidate.action.id === 'ai-implement').map((candidate) => candidate.id);
+    const requirements = plan.taskContract.requirements;
+    const checkIds = [...new Set(requirements.flatMap((requirement) => requirement.verification.checkIds))];
+    const restrictIds = (array, ids) => {
+      if (ids.length) array.items = { ...array.items, enum: ids };
+      else array.maxItems = 0;
+    };
+    const assessment = reviewProperties.requirementAssessments.items.properties;
+    assessment.requirementId.enum = requirements.map((requirement) => requirement.id);
+    assessment.criterion.enum = [...new Set(requirements.map((requirement) => requirement.verification.criterion))];
+    restrictIds(assessment.workIds, workIds);
+    restrictIds(assessment.checkIds, checkIds);
+    for (const refs of [assessment.planReferences, reviewProperties.unknownAssessments.items.properties.planReferences]) {
+      refs.items.properties.workId.enum = workIds;
+      restrictIds(refs.items.properties.checkIds, checkIds);
+      refs.items.properties.creationPaths.minItems = checkIds.length ? 0 : 1;
+    }
+    const unknowns = plan.taskContract.unknowns;
+    if (unknowns.length) reviewProperties.unknownAssessments.items.properties.unknown.enum = unknowns;
+    else reviewProperties.unknownAssessments.maxItems = 0;
   }
   if (node.action.id !== 'ai-implement') {
     for (const key of ['edits', 'moves', 'jsonTransfers', 'changedFiles']) {
@@ -204,7 +229,7 @@ export function makeAiCommand({
       denied: [...sourceIndex.excludedPaths, ...(profile.aiDenyGlobs ?? []), ...(task.forbiddenPaths ?? [])],
       extraReads: [...instructionReferences.map((item) => item.path), ...(reviewFile ? [reviewFile.path] : [])],
     });
-    const selectedModel = node.action.id === 'ai-review' && Reflect.get(profile.ai, 'modelMode') !== 'manual'
+    const selectedModel = (node.planReview || node.action.id === 'ai-review') && Reflect.get(profile.ai, 'modelMode') !== 'manual'
       ? (profile.ai.reviewModel ?? profile.ai.model)
       : profile.ai.model;
     const providerManaged = Reflect.get(profile.ai, 'modelMode') === 'provider' || selectedModel === 'provider-default';

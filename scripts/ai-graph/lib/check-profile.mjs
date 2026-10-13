@@ -53,6 +53,9 @@ export function validateCheckProfile(input) {
     fail('CHECK_ENV_UNSAFE', 'Environment проверки содержит управляющую или неоднозначную переменную.');
   for (const check of profile.definitions) {
     if (check.id.startsWith('check-')) fail('CHECK_PROFILE_INVALID', 'ID проверки не включает префикс check-.');
+    if (check.report && (!check.outputPaths.some((output) => inside(check.report.path, output)) ||
+        isSensitivePath(check.report.path)))
+      fail('CHECK_REPORT_UNSAFE', 'Отчет должен находиться в разрешенном output path этой проверки.');
     for (const output of check.outputPaths) {
       if (isSensitivePath(output) || ['src','app','lib','scripts','test','tests','AGENTS.md','README.md','package.json'].some((p) => inside(p, output)) ||
           profile.definitions.some((other) => other.inputPaths.some((input) => inside(input, output) || inside(output, input))))
@@ -75,7 +78,16 @@ export function inspectCheckProfile(root, input) {
     const invocationHash = hashObject({ executable: executable.executable, argv: check.command.argv, cwd,
       environment: profile.environment });
     const inputManifestHash = checkInputManifest(canonical, check.inputPaths);
-    const toolchainHash = hashObject({ executable, invocationHash, inputManifestHash });
+    const identityFiles = (check.identityFiles ?? []).map((file) => {
+      if (isSensitivePath(file) || /[\0\r\n]/.test(file)) fail('CHECK_INPUT_UNSAFE', 'Закрытые файлы не являются toolchain identity.');
+      const location = path.isAbsolute(file) ? file : containedCheckPath(canonical, file);
+      const physical = realpathSync(location);
+      if (isSensitivePath(physical)) fail('CHECK_INPUT_UNSAFE', 'Alias toolchain identity ведет в закрытый каталог.');
+      return { path: file, physical, ...checkFileIdentity(physical, { opaque: true }) };
+    });
+    // Preserve historical toolchain hashes when this explicit field is absent.
+    const toolchainHash = hashObject({ executable, invocationHash, inputManifestHash,
+      ...(check.identityFiles !== undefined ? { identityFiles } : {}) });
     return { id: check.id, definitionHash, executableHash: executable.hash, invocationHash, inputManifestHash, toolchainHash };
   });
   return PlanChecksSchema.parse({ version: 1, profileHash: hashObject(profile), definitions, bindings });

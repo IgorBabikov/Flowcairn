@@ -5,6 +5,9 @@ import { resolveAction, pathAllowed, contextPathAllowed } from './registry.mjs';
 import { buildTaskContract } from './task-contract.mjs';
 import { autonomyForNodes } from './autonomy-policy.mjs';
 import { buildExecutionStages, planningStepLimit, stageScopeId, stageCheckId } from './stage-plan.mjs';
+import { attachSemanticPlanReview } from './semantic-plan-review.mjs';
+import { validatePlanConsistency } from './plan-consistency.mjs';
+import { validateExecutionPlanConsistency } from './execution-plan-consistency.mjs';
 
 const fail = (code, message) => { throw new GraphError(code, message); };
 const selected = (nodes, skills) => skills.filter((skill) => nodes.some((node) => node.skills.includes(skill.id)));
@@ -12,9 +15,10 @@ const externalProvider = (context) => ['claude', 'cursor'].includes(context.prov
 
 /** The staging graph has no write permission and is never an accepted implementation. */
 export function compilePlanningPlan(task, context) {
-  const baseline = { ...compilePlan(task, context).plan,
+  const baseline = { ...compilePlan(task, { ...context, omitPlanReview: true }).plan,
     ...(task.schemaVersion === 3 ? { executionStages: null } : {}),
-    taskContract: buildTaskContract(task, { analysis: context.analysis, previousContract: context.taskContract }) };
+    taskContract: buildTaskContract(task, { analysis: context.analysis, previousContract: context.taskContract }),
+    ...(context.taskContract && context.workflowPolicy === 'developer-v2' ? { planningContractLocked: true } : {}) };
   const consent = externalProvider(context) ? structuredClone(baseline.nodes.find((node) => node.action.id === 'human-provider-consent')) : null;
   if (context.workflow === 'autonomous') {
     const reuseAnalysis = Boolean(context.analysisArtifact) || baseline.taskContract.rigor.level === 'light';
@@ -114,6 +118,10 @@ export function compileTaskProposal(task, proposalInput, context) {
       // Serial compiler fence supplements declared dependencies because AI nodes read shared context.
       needs: [...new Set([previous, ...step.needs.map((id) => `step-${id}`)])],
       resources: { ...node.resources, writes: [...step.paths], reads: [...new Set([...readPathsFor(step), ...task.contextPaths])] } });
+    if (['developer-v1', 'developer-v2'].includes(baseline.workflowPolicy)) node.declaredNeeds = step.needs.map((id) => `step-${id}`);
+    if (['developer-v1', 'developer-v2'].includes(baseline.workflowPolicy) && context.repairReadPaths) node.diagnoseFailure = true;
+    if (step.produces) node.produces = step.produces.map((item) => ({ ...item }));
+    if (step.consumes) node.consumes = step.consumes.map((item) => ({ ...item, producerId: `step-${item.producerId}` }));
     if (context.resolveSkills) node.skills = context.resolveSkills(node, task);
     if (context.resolveReadPaths) node.resources.reads = context.resolveReadPaths(node, task);
     nodes.push(node); previous = node.id;
@@ -140,5 +148,14 @@ export function compileTaskProposal(task, proposalInput, context) {
   }
   const taskContract = buildTaskContract(task, { proposal: proposal.contractProposal, analysis: context.analysis,
     previousContract: context.taskContract, steps: ordered });
-  return validatePlan({ ...baseline, taskContract, stage: 'execution', ...(baseline.schemaVersion === 3 ? { executionStages: buildExecutionStages(executable, taskContract) } : {}), ...(context.workflow === 'autonomous' ? { workflow: 'autonomous', autonomy: autonomyForNodes(executable) } : {}), nodes: executable, skills: selected(executable, context.skills) }, task, context);
+  // Natural intake removes its omnibus placeholder in buildTaskContract. Review
+  // the resulting authoritative links, rather than that discarded placeholder.
+  validatePlanConsistency({ taskContract, steps: ordered.map((step) => ({ ...step,
+    requirementIds: taskContract.requirements.filter((item) => item.workIds.includes(`step-${step.id}`)).map((item) => item.id),
+  })) });
+  const candidate = attachSemanticPlanReview({ ...baseline, taskContract, stage: 'execution', ...(baseline.schemaVersion === 3 ? { executionStages: buildExecutionStages(executable, taskContract) } : {}), ...(context.workflow === 'autonomous' ? { workflow: 'autonomous', autonomy: autonomyForNodes(executable) } : {}), nodes: executable, skills: selected(executable, context.skills) }, task, context);
+  candidate.skills = selected(candidate.nodes, context.skills);
+  const compiled = validatePlan(candidate, task, context);
+  validateExecutionPlanConsistency(compiled.plan);
+  return compiled;
 }

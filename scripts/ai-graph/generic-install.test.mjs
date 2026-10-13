@@ -10,6 +10,7 @@ import { inspectOnboarding } from '../../bin/onboarding.mjs';
 import { uninstallCommand } from '../../bin/uninstall.mjs';
 import { authorLink } from '../../bin/terminal.mjs';
 import { hasTrustedLocalChecksBinding, loadProjectProfile, trustedLocalChecksHash } from './lib/project.mjs';
+import { discoverStackProfile } from './lib/stack-profile.mjs';
 
 const provider = { provider: 'claude', 'provider-path': path.resolve(import.meta.dirname, '../../tests/fixtures/verified-claude/node_modules/@anthropic-ai/claude-code/bin/claude.exe'), 'read-consent': true };
 const read = (root, file) => readFileSync(path.join(root, file), 'utf8');
@@ -70,7 +71,9 @@ test('npm transport manifests and placeholder scripts do not select the Node ada
     assert.equal(installed.profile.version, 2);
     assert.equal(installed.profile.packageManager, undefined);
     assert.deepEqual(installed.profile.checks, []);
-    assert.deepEqual(installed.profile.manifests, []);
+    assert.deepEqual(installed.profile.manifests, ['package.json']);
+    assert.deepEqual(discoverStackProfile(root, { manifestPaths: installed.profile.manifests }).domains, ['engineering']);
+    assert.deepEqual(installed.profile.developmentWorkflow.capabilities ?? [], []);
     assert.equal(read(root, 'package.json'), manifest);
     assert.equal(read(root, source), text);
   }

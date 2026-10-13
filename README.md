@@ -90,6 +90,8 @@ npx flowcairn
 
 Пройдите короткую настройку, авторизуйте выбранный AI-клиент и откройте Гильдию. Опишите задачу, проверьте план и разрешения, затем начните выполнение. Git и `package.json` не обязательны для direct-запуска.
 
+Новые проекты используют [developer workflow](docs/DEVELOPER-WORKFLOW.md): задачи с поведением или риском проходят отдельное read-only review плана до разрешения правок. Для обязательной проверки поведения нужен свежий scenario report; настройка existing runners описана в [профилях проверок](docs/CHECK-PROFILES.md).
+
 Если браузер нужно открыть вручную:
 
 ```sh
@@ -108,7 +110,7 @@ npx flowcairn --no-open
 
 ## Документация и участие
 
-[Как работает](docs/HOW-FLOWCAIRN-WORKS.md) · [Архитектура](docs/ARCHITECTURE.md) · [AI-клиенты](docs/AI-HARNESS-INTEGRATION.md) · [Skills](docs/SKILLS.md) · [Участие](CONTRIBUTING.md) · [Безопасность](SECURITY.md)
+[Как работает](docs/HOW-FLOWCAIRN-WORKS.md) · [Developer workflow](docs/DEVELOPER-WORKFLOW.md) · [Архитектура](docs/ARCHITECTURE.md) · [AI-клиенты](docs/AI-HARNESS-INTEGRATION.md) · [Skills](docs/SKILLS.md) · [Участие](CONTRIBUTING.md) · [Безопасность](SECURITY.md)
 
 Для разработки:
 

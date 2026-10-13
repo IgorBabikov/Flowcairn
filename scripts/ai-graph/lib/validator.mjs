@@ -1,5 +1,6 @@
 import { GraphError, hashObject } from './io.mjs';
 import { GraphPlanSchema, TaskSpecSchema, assertJsonBounds } from './schemas.mjs';
+import { attachSemanticPlanReview, semanticPlanReviewRequired } from './semantic-plan-review.mjs';
 import { validateTaskContract } from './task-contract.mjs';
 import { validAutonomyForNodes } from './autonomy-policy.mjs';
 import { validatePlanChecks } from './plan-checks.mjs';
@@ -19,12 +20,14 @@ function reject(code, message) {
   throw new GraphError(code, message);
 }
 const same = (a, b) => JSON.stringify([...a].sort()) === JSON.stringify([...b].sort());
+const safeAttempts = (actionId, action, task, workflowPolicy) => Math.min(action.maxAttempts, task.limits.maxAttempts,
+  workflowPolicy === 'developer-v2' && actionId.startsWith('check-') ? 1 : Infinity);
 
 /** Validate current proposals or inert persisted evidence without performing effects. */
 export function validatePlan(
   input,
   taskInput,
-  { runtimeHash = undefined, skills = undefined, resolveSkills = undefined, resolveReadPaths = undefined, contextHash = undefined, provider = undefined, checks = undefined, mode = 'current' } = {},
+  { runtimeHash = undefined, skills = undefined, resolveSkills = undefined, resolveReadPaths = undefined, contextHash = undefined, workflowPolicy = undefined, provider = undefined, checks = undefined, mode = 'current', omitPlanReview = false } = {},
 ) {
   if (!['current', 'historical'].includes(mode))
     reject('INVALID_VALIDATION_MODE', 'Неизвестный режим проверки плана');
@@ -35,6 +38,8 @@ export function validatePlan(
   if (!parsed.success) reject('INVALID_PLAN', 'GraphPlan не соответствует schema');
   const task = TaskSpecSchema.parse(taskInput),
     plan = parsed.data;
+  if (!historical && plan.workflowPolicy !== workflowPolicy)
+    reject('WORKFLOW_POLICY_DRIFT', 'Версия developer workflow не соответствует trusted профилю.');
   validatePlanChecks(plan, task, historical ? null : checks);
   if (plan.schemaVersion !== task.schemaVersion) reject('PLAN_TASK_MISMATCH', 'Версии формата плана и задачи не совпадают');
   const taskHashes = historical
@@ -104,7 +109,7 @@ export function validatePlan(
     accept.length !== 1 ||
     (!historical && !productPlanning && (externalProvider
       ? !approve[0].needs.includes('provider-consent')
-      : approve[0].needs.length)) ||
+      : approve[0].needs.some((id) => !plan.nodes.some((node) => node.id === id && node.planReview)))) ||
     (autonomous && plan.nodes.some((n) => n.action.id === 'human-accept'))
   )
     reject('INVALID_GATES', 'Нужны один начальный approve-plan и один конечный accept-result');
@@ -138,10 +143,10 @@ export function validatePlan(
       reject('INVALID_SUCCESS_CONTRACT', 'Success contract не соответствует действию');
     const maxAttempts = historical
       ? task.limits.maxAttempts
-      : Math.min(action.maxAttempts, task.limits.maxAttempts);
+      : safeAttempts(node.action.id, action, task, plan.workflowPolicy);
     if (node.retry.maxAttempts > maxAttempts)
       reject('UNSAFE_RETRY_POLICY', 'Retry policy превышает безопасный предел');
-    if (!productPlanning && node.id !== approve[0].id && node.id !== providerConsent[0]?.id && !ancestors.get(node.id).has(approve[0].id))
+    if (!productPlanning && !node.planReview && node.id !== approve[0].id && node.id !== providerConsent[0]?.id && !ancestors.get(node.id).has(approve[0].id))
       reject('APPROVAL_BYPASS', 'Node не зависит от approval');
     if (node.id !== accept[0].id && !ancestors.get(accept[0].id).has(node.id))
       reject('ACCEPTANCE_BYPASS', 'Final gate должен ждать все nodes');
@@ -182,6 +187,20 @@ export function validatePlan(
         a.resources.exclusive.some((r) => b.resources.exclusive.includes(r));
       if (conflict) reject('RESOURCE_CONFLICT', 'Конфликтующие nodes требуют dependency');
     }
+  if (!historical) {
+    const reviewers = plan.nodes.filter((node) => node.planReview);
+    const required = plan.workflowPolicy === 'developer-v2' && plan.stage !== 'planning' && !omitPlanReview && semanticPlanReviewRequired(task, plan.taskContract);
+    if (reviewers.length !== (required ? 1 : 0) || reviewers.some((node) => node.action.id !== 'ai-analyze' || node.permissions.length !== 1 || node.permissions[0] !== 'ai.read' || node.resources.writes.length || node.resources.exclusive.length))
+      reject('PLAN_REVIEW_INVALID', 'Нужен отдельный trusted readonly plan reviewer для этой версии политики.');
+    if (required) {
+      const reviewer = reviewers[0];
+      const approve = plan.nodes.find((node) => node.action.id === 'human-approve');
+      if (!approve || !ancestors.get(approve.id).has(reviewer.id) || ancestors.get(reviewer.id).has(approve.id))
+        reject('PLAN_REVIEW_INVALID', 'Source authorization требует завершенного plan review.');
+      if (plan.nodes.some((node) => node.action.id === 'ai-implement' && !ancestors.get(node.id).has(reviewer.id)))
+        reject('PLAN_REVIEW_INVALID', 'Каждая source work требует plan review dependency.');
+    }
+  }
   if (!historical && plan.stage === 'planning') {
     if (autonomous) {
       const analyze = plan.nodes.filter((n) => n.action.id === 'ai-analyze');
@@ -265,7 +284,7 @@ export function assertPlanHash(plan, expectedHash) {
     reject('PLAN_INTEGRITY', 'Immutable plan hash не совпадает');
 }
 
-export function compilePlan(task, { runtimeHash, skills, resolveSkills = undefined, resolveReadPaths = undefined, contextHash = undefined, provider = undefined, checks = undefined, learningMode = 'after-stage', version = 1, parentPlanHash = null }) {
+export function compilePlan(task, { runtimeHash, skills, resolveSkills = undefined, resolveReadPaths = undefined, contextHash = undefined, workflowPolicy = undefined, provider = undefined, checks = undefined, learningMode = 'after-stage', version = 1, parentPlanHash = null, omitPlanReview = false }) {
   const nodes = [];
   const externalProvider = ['claude', 'cursor'].includes(provider);
   const aiReads = [...new Set([...task.scope, ...task.contextPaths, ...REQUIRED_AI_CONTEXT_PATHS])];
@@ -289,9 +308,10 @@ export function compilePlan(task, { runtimeHash, skills, resolveSkills = undefin
         exclusive: actionId === 'ai-implement' ? [...task.resources] : [],
       },
       retry: {
-        maxAttempts: Math.min(action.maxAttempts, task.limits.maxAttempts),
+        maxAttempts: safeAttempts(actionId, action, task, workflowPolicy),
         backoffMs: 1000,
       },
+      ...(workflowPolicy && actionId === 'ai-implement' ? { declaredNeeds: [] } : {}),
     });
   };
   if (externalProvider) add(
@@ -353,12 +373,13 @@ export function compilePlan(task, { runtimeHash, skills, resolveSkills = undefin
   if (resolveSkills) for (const node of nodes) node.skills = resolveSkills(node, task);
   if (resolveReadPaths) for (const node of nodes) node.resources.reads = resolveReadPaths(node, task);
   const selectedSkills = skills.filter((skill) => nodes.some((node) => node.skills.includes(skill.id)));
-  return validatePlan(
-    {
+  const candidate = {
       schemaVersion: task.schemaVersion,
       ...(task.schemaVersion === 3 ? { stage: 'execution', checks, checkRegistryHash: hashObject(checks),
         learning: { version: 1, initialMode: learningMode }, executionStages: buildExecutionStages(nodes) } : {}),
+      ...(task.schemaVersion === 2 && checks ? { checks, checkRegistryHash: hashObject(checks) } : {}),
       ...(contextHash ? { contextHash } : {}),
+      ...(workflowPolicy ? { workflowPolicy } : {}),
       taskHash: hashObject(task),
       version,
       parentPlanHash,
@@ -368,8 +389,8 @@ export function compilePlan(task, { runtimeHash, skills, resolveSkills = undefin
       policyHash: POLICY_HASH,
       skills: selectedSkills,
       nodes,
-    },
-    task,
-    { runtimeHash, skills, resolveSkills, resolveReadPaths, contextHash, provider, checks },
-  );
+    };
+  const reviewed = omitPlanReview ? candidate : attachSemanticPlanReview(candidate, task, { resolveSkills, resolveReadPaths });
+  reviewed.skills = skills.filter((skill) => reviewed.nodes.some((node) => node.skills.includes(skill.id)));
+  return validatePlan(reviewed, task, { runtimeHash, skills, resolveSkills, resolveReadPaths, contextHash, workflowPolicy, provider, checks, omitPlanReview });
 }

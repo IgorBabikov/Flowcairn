@@ -18,7 +18,9 @@ export function dependencyNodeIds(plan, node) {
 }
 
 export function taskContractForNode(task, plan, node, priorEvidence = null) {
-  const contract = plan.stage === 'planning' && priorEvidence?.analysis?.result?.analysis
+  const contract = plan.stage === 'planning' && plan.workflowPolicy === 'developer-v2' && plan.planningContractLocked
+    ? plan.taskContract
+    : plan.stage === 'planning' && priorEvidence?.analysis?.result?.analysis
     ? buildTaskContract(task, { analysis: priorEvidence.analysis.result.analysis })
     : plan.taskContract ?? buildTaskContract(task);
   const requirements = plan.taskContract && node.action?.id === 'ai-implement'

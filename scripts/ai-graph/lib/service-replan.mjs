@@ -7,6 +7,9 @@ import { buildTaskContract } from './task-contract.mjs';
 import { repairExecutionSteps } from './repair-decomposition.mjs';
 import { autonomyForNodes } from './autonomy-policy.mjs';
 import { singleExecutionStage } from './plan-checks.mjs';
+import { planningCorrection } from './plan-correction.mjs';
+import { validateExecutionPlanConsistency } from './execution-plan-consistency.mjs';
+import { projectSemanticCorrectionFeedback, validateSemanticCorrectionFeedback } from './semantic-correction-feedback.mjs';
 
 const fail = (code, message) => { throw new GraphError(code, message); };
 const unique = (values) => [...new Set(values)];
@@ -18,6 +21,8 @@ export async function replanRun(host, { state, task, plan, request, digest, acto
   // Validate the successor format before any supersession/binding transition.
   if (host.adapters.dataVersion === 3 && task.schemaVersion === 2) task = { ...task, schemaVersion: 3 };
   if (task.schemaVersion === 3) task = { ...task, learningMode: state.learning?.mode ?? task.learningMode ?? 'after-stage' };
+  // Routing, compilation and the successor must see the same feedback facts.
+  if (request.feedback) task = { ...task, planningFeedback: [...(task.planningFeedback ?? []), request.feedback] };
   const contextChange = discoveryChange ?? (request.contextSelection ? host.resolveContextSelection(task, request.contextSelection) : null);
   if (contextChange) task = { ...task, scope: contextChange.scope,
     contextNotes: contextChange.feedback, contextPaths: contextChange.contextPaths ?? originalTask.contextPaths };
@@ -26,7 +31,7 @@ export async function replanRun(host, { state, task, plan, request, digest, acto
     skills: host.adapters.skills(task),
     resolveSkills: host.adapters.resolveSkills,
     resolveReadPaths: host.adapters.resolveReadPaths,
-    contextHash: host.adapters.contextHash?.(task),
+    contextHash: host.adapters.contextHash?.(task), workflowPolicy: host.adapters.workflowPolicy,
     version: plan.version + 1,
     parentPlanHash: state.planHash,
     workflow: plan.workflow,
@@ -34,17 +39,36 @@ export async function replanRun(host, { state, task, plan, request, digest, acto
     checks: host.adapters.checkRegistry?.(),
     learningMode: state.learning?.mode ?? task.learningMode ?? 'after-stage',
     analysis: contextChange ? null : host.analysis(state, plan),
-    ...(plan.stage === 'execution' && plan.taskContract ? { taskContract: plan.taskContract } : {}),
+    ...((plan.stage === 'execution' || plan.planningContractLocked) && plan.taskContract ? { taskContract: plan.taskContract } : {}),
   }));
   let nextContract = plan.stage === 'execution' ? plan.taskContract : null;
   let nextDraft = request.draft ?? null;
   let nextStage = plan.stage;
   let planningTransitions = (state.planningTransitions ?? 0) + (discoveryChange ? 1 : 0);
+  let planCorrectionCycles = state.planCorrectionCycles;
   let planningEvidence = null;
   let analysisArtifact = null;
-  if (plan.stage === 'planning') {
+  const semanticReviewer = plan.nodes.find((node) => node.planReview);
+  const semanticFailure = semanticReviewer && state.nodes[semanticReviewer.id].status === 'failed' && state.nodes['approve-plan']?.status !== 'passed';
+  if (semanticFailure && !state.policyGrant && !request.draft) {
+    const receiptId = state.nodes[semanticReviewer.id].receipts.at(-1);
+    const receipt = receiptId && ReceiptSchema.parse(host.store.readObject('receipts', receiptId));
+    const correction = planningCorrection({ state, plan, receipt, task });
+    if (!correction.allowed) fail(correction.reason, 'Read-only исправление смыслового плана недоступно.');
+    planCorrectionCycles = correction.nextCycle;
+    nextContract = { ...plan.taskContract, requirements: plan.taskContract.requirements.map((item) => ({ ...item, workIds: [] })) };
+    nextStage = 'planning'; nextDraft = null;
+  } else if (plan.stage === 'planning') {
     if (request.draft) fail('PLANNING_DRAFT_DENIED', 'Planning компилирует только сохраненный AI proposal');
     const planner = plan.nodes.find((node) => node.action.id === 'ai-plan');
+    if (!contextChange && state.nodes[planner.id].status === 'failed') {
+      const receiptId = state.nodes[planner.id].receipts.at(-1);
+      const receipt = receiptId ? ReceiptSchema.parse(host.store.readObject('receipts', receiptId)) : null;
+      const correction = planningCorrection({ state, plan, receipt, task });
+      if (correction.reason === 'PLAN_CORRECTION_BUDGET_EXHAUSTED')
+        fail(correction.reason, 'Лимит исправлений read-only плана исчерпан; требуется уточнение задачи.');
+      if (correction.allowed) planCorrectionCycles = correction.nextCycle;
+    }
     if (!contextChange && state.nodes[planner.id].status === 'passed') {
       // A stale context cannot promote an old planning receipt into new write policyGrant.
       host.read(state.runId);
@@ -108,16 +132,15 @@ export async function replanRun(host, { state, task, plan, request, digest, acto
     host.assertConfiguredChecks(task, host.adapters.project, nextDraft);
     if (nextContract && request.draft) nextContract = buildTaskContract(task, { previousContract: nextContract,
       steps: nextDraft.nodes.filter((node) => node.action.id === 'ai-implement').map((node) => ({ id: node.id, nodeId: node.id, paths: node.resources.writes })) });
-    readPhase(() => validatePlan(
+    const checkedDraft = readPhase(() => validatePlan(
       { ...compilePlan(task, context).plan, ...(plan.workflow === 'autonomous' ? { workflow: 'autonomous', autonomy: autonomyForNodes(nextDraft.nodes), stage: nextStage } : {}), ...(nextContract ? { taskContract: nextContract } : {}), ...(task.schemaVersion === 3 ? { executionStages: nextStage === 'planning' ? null : singleExecutionStage(nextDraft.nodes, nextContract) } : {}), nodes: nextDraft.nodes, skills: context.skills.filter((skill) => nextDraft.nodes.some((node) => node.skills.includes(skill.id))) },
       task,
       context,
     ));
+    validateExecutionPlanConsistency(checkedDraft.plan);
   }
   const { schemaVersion: _, sourceHash: __, ...input } = task;
   if (nextStage === 'planning' && plan.workflow === 'autonomous' && task.intakeKind === 'natural') input.contextDiscovery = true;
-  if (request.feedback)
-    input.planningFeedback = [...(task.planningFeedback ?? []), request.feedback];
   let fingerprint = null;
   if (state.binding) {
     host.adapters.verifyBinding(state.binding);
@@ -154,6 +177,7 @@ export async function replanRun(host, { state, task, plan, request, digest, acto
     ...(analysisArtifact ? { analysisArtifact } : {}),
     retainedArtifacts: contextChange ? [] : unique([...state.planningArtifacts, ...plan.nodes.filter((node) => node.success.kind === 'analysis').flatMap((node) => state.nodes[node.id].artifacts)]),
     planningTransitions,
+    ...(planCorrectionCycles !== undefined ? { planCorrectionCycles } : {}),
     contextDiscoveryRound: (state.contextDiscoveryRound ?? 0) + (discoveryChange ? 1 : 0),
     feedback: {
       planningEvidence,
@@ -171,13 +195,21 @@ export async function replanRun(host, { state, task, plan, request, digest, acto
           receipts: state.nodes[n.id].receipts,
           changedFiles: state.nodes[n.id].changedFiles,
         })),
-      reviewFindings: plan.nodes
-        .filter((n) => n.success.kind === 'review')
-        .flatMap((n) => state.nodes[n.id].artifacts)
-        .map((hash) => ({
-          artifactId: hash,
-          content: host.artifact(hash).content,
-        })),
+      reviewFindings: plan.nodes.filter(n => n.success.kind === 'review' || n.planReview).flatMap(n => {
+        if (plan.workflowPolicy !== 'developer-v2' || !n.planReview)
+          return state.nodes[n.id].artifacts.map(hash => ({ artifactId: hash, content: host.artifact(hash).content }));
+        if (!['failed', 'uncertain'].includes(state.nodes[n.id].status)) return [];
+        const canonical = state.nodes[n.id].artifacts.map(hash => ({ hash, artifact: host.artifact(hash) }))
+          .filter(({ artifact }) => artifact.kind === 'analysis');
+        if (canonical.length > 1 || (!canonical.length && state.nodes[n.id].reason?.startsWith('PLAN_REVIEW_BLOCKED')))
+          fail('PLAN_REVIEW_FEEDBACK_INVALID', 'Canonical blocked plan review artifact отсутствует или неоднозначен.');
+        return canonical.map(({ hash, artifact }) => validateSemanticCorrectionFeedback(projectSemanticCorrectionFeedback({
+          artifactId: hash, receiptId: state.nodes[n.id].receipts.at(-1), artifact,
+          sourceRunId: state.runId, sourcePlanHash: state.planHash, sourceTaskHash: state.taskHash }), {
+          readArtifact: host.artifact, readReceipt: id => host.store.readObject('receipts', id), readPlan: id => host.store.readObject('plans', id),
+          currentPlan: plan,
+        }));
+      }),
     },
     draft: nextDraft,
     binding: state.binding,
@@ -224,6 +256,7 @@ export async function finishReplan(host, state, request, digest, actor, prior) {
     retainedArtifacts: preparation.retainedArtifacts ?? [],
     policyGrant: preparation.policyGrant ?? undefined,
     planningTransitions: preparation.planningTransitions ?? 0,
+    ...(preparation.planCorrectionCycles !== undefined ? { planCorrectionCycles: preparation.planCorrectionCycles } : {}),
     contextDiscoveryRound: preparation.contextDiscoveryRound ?? 0,
     sourceOverride: source,
     replanEvidence: preparation.feedback ?? null,

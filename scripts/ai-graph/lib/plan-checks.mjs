@@ -4,10 +4,10 @@ import { PlanChecksSchema } from './check-schemas.mjs';
 export { buildExecutionStages as singleExecutionStage } from './stage-plan.mjs';
 
 export function validatePlanChecks(plan, task, currentChecks = null) {
-  if (plan.schemaVersion !== 3) return;
+  if (plan.schemaVersion !== 3 && !plan.checks) return;
   const checks = PlanChecksSchema.parse(plan.checks);
   const ids = checks.definitions.map((check) => check.id);
-  if (task.schemaVersion !== 3 || hashObject(checks) !== plan.checkRegistryHash || new Set(ids).size !== ids.length ||
+  if (task.schemaVersion !== plan.schemaVersion || hashObject(checks) !== plan.checkRegistryHash || new Set(ids).size !== ids.length ||
       new Set(checks.bindings.map((check) => check.id)).size !== ids.length || checks.bindings.length !== ids.length ||
       checks.definitions.some((check) => checks.bindings.find((bound) => bound.id === check.id)?.definitionHash !== hashObject(check)) ||
       task.checks.some((id) => !ids.includes(id)) || new Set(task.checks).size !== task.checks.length)

@@ -15,9 +15,11 @@ export function repairExecutionSteps(plan, state, readReceipt) {
   const implementationIds = new Set(implementations.map((node) => node.id));
   const filePaths = state.workspaceFingerprint?.files.map((file) => file.path) ?? [];
   const steps = [], repairReadPaths = {}, isolatedReadStepIds = [], lastStepByNode = new Map();
+  const stepByNode = new Map(implementations.map((node, index) => [node.id, `fix-${index + 1}`]));
   for (const [index, node] of implementations.entries()) {
     const baseId = `fix-${index + 1}`;
-    const dependencies = node.needs.filter((id) => implementationIds.has(id)).map((id) => lastStepByNode.get(id));
+    const declared = ['developer-v1', 'developer-v2'].includes(plan.workflowPolicy) && Array.isArray(node.declaredNeeds) ? node.declaredNeeds : node.needs.filter((id) => implementationIds.has(id));
+    const dependencies = declared.map((id) => lastStepByNode.get(id));
     if (dependencies.some((id) => !id)) throw new Error('Implementation order is not topological');
     const writes = node.resources.writes;
     const directories = writes.filter((entry) => filePaths.some((file) => file.startsWith(`${entry}/`)));
@@ -32,7 +34,8 @@ export function repairExecutionSteps(plan, state, readReceipt) {
         .filter((entry) => filePaths.some((file) => file.startsWith(`${entry}/`))))
       : [];
     const inheritedPartition = partitionDirectories.length >= 10;
-    const split = timedOutWithoutChanges(state.nodes[node.id], readReceipt) &&
+    const preserveOutcome = ['developer-v1', 'developer-v2'].includes(plan.workflowPolicy) || node.produces !== undefined || node.consumes !== undefined;
+    const split = !preserveOutcome && timedOutWithoutChanges(state.nodes[node.id], readReceipt) &&
       writes.length > 12 && directories.length >= 10 && shared.length > 0 && shared.length <= 4;
     const parts = split ? group(directories, 5).map((chunk) => unique([...shared, ...chunk])) : [writes];
     const requirementIds = plan.taskContract?.requirements
@@ -41,7 +44,14 @@ export function repairExecutionSteps(plan, state, readReceipt) {
       const id = split ? `${baseId}-part-${partIndex + 1}` : baseId;
       const needs = partIndex === 0 ? dependencies : [steps.at(-1).id];
       steps.push({ id, title: split ? `${node.title.slice(0, 120)} (${partIndex + 1}/${parts.length})` : node.title,
-        outcome: node.outcome, paths, requirementIds, needs });
+        outcome: node.outcome, paths, requirementIds, needs,
+        ...(node.produces !== undefined ? { produces: structuredClone(node.produces) } : {}),
+        ...(node.consumes !== undefined ? { consumes: node.consumes.map((input) => {
+          const producerId = stepByNode.get(input.producerId);
+          if (!producerId) throw new Error('Interface producer is absent from repair plan');
+          return { ...input, producerId };
+        }) } : {}),
+      });
       const isolate = split || inheritedPartition;
       const restrictedDirectories = inheritedPartition ? partitionDirectories : directories;
       repairReadPaths[id] = isolate

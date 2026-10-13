@@ -130,6 +130,9 @@ export const SuccessContractSchema = z.strictObject({
   kind: z.enum(['gate', 'analysis', 'implementation', 'checks', 'review', 'handoff']),
   requiredArtifacts: z.array(ArtifactKind).max(10),
 });
+// Interfaces are bounded planning data, never executable actions or capabilities.
+export const ProducedInterfaceSchema = z.strictObject({ id: Id, contract: Text.regex(/\S/) });
+export const ConsumedInterfaceSchema = ProducedInterfaceSchema.extend({ producerId: Id });
 export const NodeDefinitionSchema = z.strictObject({
   id: Id,
   title: z.string().min(1).max(160),
@@ -152,11 +155,23 @@ export const NodeDefinitionSchema = z.strictObject({
     maxAttempts: z.number().int().min(1).max(3),
     backoffMs: z.number().int().min(0).max(60000),
   }),
+  // No defaults: parsing immutable historical nodes must preserve absent fields.
+  produces: z.array(ProducedInterfaceSchema).optional(),
+  consumes: z.array(ConsumedInterfaceSchema).optional(),
+  declaredNeeds: z.array(Id).optional(),
+  diagnoseFailure: z.literal(true).optional(),
+  planReview: z.literal(true).optional(),
 });
 export const GraphPlanV2Schema = z.strictObject({
+  workflowPolicy: z.enum(['developer-v1', 'developer-v2']).optional(),
+  // Explicit host registration may add report evidence to a new V2 plan.
+  // Absent fields on historical plans remain absent, with no parsing defaults.
+  checks: PlanChecksSchema.optional(),
+  checkRegistryHash: Hash.optional(),
   stage: z.enum(['planning', 'execution']).optional(),
   workflow: z.literal('autonomous').optional(),
   analysisArtifact: Hash.optional(),
+  planningContractLocked: z.literal(true).optional(),
   taskContract: TaskContractSchema.optional(),
   autonomy: z.strictObject({ maxRepairCycles: z.literal(2), maxDurationMs: z.number().int().min(1800000).max(7200000) }).optional(),
   contextHash: Hash.optional(),
@@ -247,6 +262,18 @@ export const AIReviewResultSchema = AIResultSchema.extend({
   reviewEvidenceHash: Hash,
   requirementAssessments: z.array(RequirementAssessmentSchema).optional(),
 });
+export const CheckVerificationSchema = z.strictObject({
+  version: z.literal(1), format: z.enum(['flowcairn-node-test/v1', 'flowcairn-xctest/v1', 'flowcairn-android-node/v1', 'playwright-json', 'jest-json', 'vitest-json', 'xcresult-summary-json']),
+  status: z.enum(['passed', 'failed', 'unverified']),
+  counts: z.strictObject({ total: z.number().int().min(0).nullable(), completed: z.number().int().min(0).nullable(),
+    passed: z.number().int().min(0).nullable(), failed: z.number().int().min(0).nullable(), skipped: z.number().int().min(0).nullable() }),
+  countsConfirmed: z.boolean(), assertionFailures: z.number().int().min(0),
+  scenarioIds: z.array(Hash).max(100000), reasonCodes: z.array(z.string().regex(/^[A-Z][A-Z0-9_]*$/)).max(100000),
+  reportHash: Hash, specHash: Hash, inputHash: Hash, adapterHash: Hash,
+  checkRegistryHash: Hash, definitionHash: Hash, toolchainHash: Hash,
+  artifactHash: Hash.optional(), environmentHash: Hash.optional(), artifactPath: RelativePath.optional(),
+  applicationArtifactPath: RelativePath.optional(), applicationArtifactHash: Hash.optional(),
+});
 export const CheckResultSchema = z.strictObject({
   id: Id,
   passed: z.boolean(),
@@ -254,6 +281,7 @@ export const CheckResultSchema = z.strictObject({
   durationMs: z.number().min(0),
   summary: z.string().max(2000),
   inputHash: Hash,
+  verification: CheckVerificationSchema.optional(),
 });
 export const ArtifactSchema = z.strictObject({
   schemaVersion: z.literal(2),
@@ -371,6 +399,7 @@ export const RunStateV2Schema = z.strictObject({
   planVersion: z.number().int().min(1),
   maxReplans: z.number().int().min(0).max(3),
   planningTransitions: z.number().int().min(0).max(100).optional(),
+  planCorrectionCycles: z.number().int().min(0).max(2).optional(),
   contextDiscoveryRound: z.number().int().min(0).max(4).optional(),
   policyGrant: z.strictObject({ runId: Id, planHash: Hash, receiptId: Hash, cycle: z.number().int().min(1).max(2), startedAt: z.iso.datetime() }).optional(),
   supersedesRunId: Id.nullable(),
@@ -530,6 +559,8 @@ export const PlanningStepSchema = z.strictObject({
   paths: z.array(RelativePath).min(1),
   readPaths: z.array(RelativePath).optional(),
   requirementIds: z.array(Id).optional(),
+  produces: z.array(ProducedInterfaceSchema).optional(),
+  consumes: z.array(ConsumedInterfaceSchema).optional(),
 });
 export const AIPlanningResultSchema = AIResultSchema.extend({
   steps: z.array(PlanningStepSchema),

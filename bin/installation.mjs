@@ -16,6 +16,10 @@ import { requireCodexReady } from './codex-setup.mjs';
 import { defaultProvider } from '../scripts/ai-graph/lib/platform.mjs';
 import { probeExternalProvider } from '../scripts/ai-graph/lib/providers.mjs';
 import { discoverWorkspaceManifests } from './workspaces.mjs';
+import { discoverCheckRecipe } from './check-recipes.mjs';
+import { projectCheckProfile } from '../scripts/ai-graph/lib/check-profile.mjs';
+import { discoverStackProfile } from '../scripts/ai-graph/lib/stack-profile.mjs';
+import { inferDevelopmentCapabilities } from '../scripts/ai-graph/lib/stack-capabilities.mjs';
 import { PROFILE, csv, existsNoFollow, git, projectRoot, readRegular, readCheckProfile } from './project-files.mjs';
 
 const OWNER_FILE = '.ai-orchestrator/flowcairn-install.json';
@@ -199,10 +203,16 @@ export function initializeProject(input, options = {}) {
   const discoveredChecks = pkg ? discoverProjectChecks(pkg) : { checks: [], checkScripts: {} };
   // An explicitly requested legacy worktree keeps its adapter, even without checks.
   const legacyWorktree = options['workspace-mode'] === 'worktree' && pkg !== null;
-  const generic = importedChecks !== null || existingProfile?.version === 2 ||
+  const baseGeneric = importedChecks !== null || existingProfile?.version === 2 ||
     (!existingProfile && options['package-manager'] === undefined && !legacyWorktree && !discoveredChecks.checks.length);
-  if (!generic && !pkg) fail('PACKAGE_JSON', 'Для выбранного адаптера npm scripts нужен package.json проекта.');
-  const manager = generic ? undefined : existingProfile?.packageManager ?? packageManager(root, pkg, options['package-manager']);
+  if (!baseGeneric && !pkg) fail('PACKAGE_JSON', 'Для выбранного адаптера npm scripts нужен package.json проекта.');
+  const manager = baseGeneric ? undefined : existingProfile?.packageManager ?? packageManager(root, pkg, options['package-manager']);
+  // Existing profiles and explicitly selected legacy/worktree adapters remain byte-for-byte unchanged.
+  const recipe = !existingProfile && !importedChecks && !baseGeneric && !legacyWorktree &&
+    options['package-manager'] === undefined && (options['check-mode'] ?? 'trusted-local') === 'trusted-local' &&
+    (options.checks === undefined || csv(options.checks).includes('tests')) && (!pkg.packageManager || manager === 'npm')
+    ? discoverCheckRecipe(root, pkg) : null;
+  const generic = baseGeneric || recipe?.status === 'ready';
   const gitCheckout = existsNoFollow(path.join(root, '.git'));
   const integrationBranch =
     existingProfile?.integrationBranch ?? options.branch ?? (gitCheckout ? git(root, ['branch', '--show-current']) : 'direct');
@@ -211,11 +221,18 @@ export function initializeProject(input, options = {}) {
       'BRANCH_REQUIRED',
       'Git находится в detached HEAD. Переключитесь на рабочую ветку или укажите --branch.',
     );
-  if (!generic) validatePackageManagerProject(root, manager, pkg);
+  if (!baseGeneric) validatePackageManagerProject(root, manager, pkg);
   const checkMode = options['check-mode'] ?? 'trusted-local';
   if (!['none', 'trusted-local', 'hardened'].includes(checkMode))
     fail('CHECK_MODE', 'Доступны check-mode: none, trusted-local или hardened.');
-  const checkProfile = importedChecks ?? (existingProfile?.version === 2 ? existingProfile.checkProfile : null) ??
+  const recipeProfile = recipe?.status === 'ready' ? (() => {
+    const retained = projectCheckProfile(root, { version: 1, packageManager: manager,
+      checks: discoveredChecks.checks, checkScripts: discoveredChecks.checkScripts, outputPaths: csv(options.outputs) });
+    return { ...recipe.checkProfile, requiredCheckIds: retained.requiredCheckIds,
+      definitions: retained.definitions.map((definition) => definition.id === 'tests' ? recipe.checkProfile.definitions[0]
+        : { ...definition, identityFiles: [definition.command.argv[0]] }) };
+  })() : null;
+  const checkProfile = importedChecks ?? (existingProfile?.version === 2 ? existingProfile.checkProfile : null) ?? recipeProfile ??
     { version: 1, requiredCheckIds: [], definitions: [], environment: [] };
   const checks = options.checks === undefined
     ? (checkMode !== 'none' ? generic ? checkProfile.requiredCheckIds : discoveredChecks.checks : [])
@@ -232,6 +249,18 @@ export function initializeProject(input, options = {}) {
     fail('WORKSPACE_MODE', 'Доступны режимы работы: direct или worktree.');
   if (generic && workspaceMode !== 'direct')
     fail('WORKSPACE_MODE', 'Профиль команд пока доступен в режиме direct. Явно выберите --workspace-mode direct.');
+  let manifests = existingProfile?.manifests ?? (generic && !recipeProfile ? csv(options.manifests)
+    : discoverManifests(root, pkg, manager, options.manifests));
+  // Whole-project inventory needs the explicit onboarding read consent. Explicit
+  // manifest lists and adopted profiles are retained; node scopes are discovered
+  // again by the planner and bound to the immutable source context.
+  if (!existingProfile && options['read-consent'] === true && options.manifests === undefined) {
+    const stack = discoverStackProfile(root, { scope: ['.'], manifestPaths: manifests });
+    manifests = [...new Set([...manifests, ...stack.evidence.filter(({ hash }) => hash !== null).map(({ path: file }) => file)])];
+  }
+  const capabilities = !existingProfile && generic && checkMode !== 'none'
+    ? inferDevelopmentCapabilities(root, { checkProfile: { ...checkProfile, requiredCheckIds: checks },
+      manifestPaths: manifests, readConsent: options['read-consent'] === true }) : [];
   const profile =
     existingProfile ??
     ProjectProfileSchema.parse({
@@ -243,10 +272,10 @@ export function initializeProject(input, options = {}) {
       checks,
       checkMode,
       ...(!generic && checks.length ? { checkScripts } : {}),
-      outputPaths: options.outputs === undefined && generic
+      outputPaths: generic && (options.outputs === undefined || recipeProfile)
         ? [...new Set(checkProfile.definitions.flatMap((definition) => definition.outputPaths))] : csv(options.outputs),
-      manifests: generic ? csv(options.manifests)
-        : discoverManifests(root, pkg, manager, options.manifests),
+      manifests,
+      developmentWorkflow: { version: 2, ...(capabilities.length ? { capabilities } : {}) },
       ...(options._skillManifest?.length ? { skillManifest: options._skillManifest } : {}),
       ...(['read-consent', 'test-policy', 'coverage'].some((key) => options[key] !== undefined) ? { onboarding: {
         version: 1, readConsent: options['read-consent'] === true,
@@ -295,6 +324,7 @@ export function initializeProject(input, options = {}) {
       dryRun: true,
       root,
       profile,
+      ...(recipe ? { checkRecipe: recipe } : {}),
       changes: [
         ...(existingProfile ? [] : [PROFILE]),
         ...(exclude === oldExclude ? [] : [`${LOCAL_EXCLUDE} (локально)`]),
@@ -377,12 +407,14 @@ export function initializeProject(input, options = {}) {
     adopted: Boolean(existingProfile),
     root,
     profile,
-    message:
+    ...(recipe ? { checkRecipe: recipe } : {}),
+    message: (
       existingProfile && exclude === oldExclude
         ? 'Локальное состояние создано по существующему профилю. Исходники не изменены; можно создать задачу.'
         : hasOnboardingConsent(root, profile)
           ? 'Проект настроен. Введите задачу: Flowcairn проведет анализ и подготовит план. Разработка начнется после вашего согласования плана.'
-          : 'Проект настроен. Для анализа задачи разрешите чтение и передачу AI через npx flowcairn setup.',
+          : 'Проект настроен. Для анализа задачи разрешите чтение и передачу AI через npx flowcairn setup.') +
+      (recipe?.status === 'unavailable' ? ` ${recipe.guidance}` : ''),
   };
 }
 

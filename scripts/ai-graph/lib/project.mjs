@@ -10,6 +10,7 @@ import { RelativePath } from './schemas.mjs';
 import { assertRuntimePlatform, assertProjectPlatform } from './platform.mjs';
 import { CheckProfileSchema, validateCheckProfile, isGenericProfile } from './check-profile.mjs';
 import { CheckIdSchema } from './check-schemas.mjs';
+import { DevelopmentWorkflowSchema, validateDevelopmentWorkflow } from './development-workflow.mjs';
 
 export const RUNTIME_ROOT = realpathSync(
   path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..'),
@@ -106,6 +107,7 @@ export const ProjectProfileV1Schema = z.strictObject({
     ),
   ),
   manifests: paths,
+  developmentWorkflow: DevelopmentWorkflowSchema.optional(),
   skillManifest: z.array(z.strictObject({
     id: z.string().regex(/^project-[a-z][a-z0-9-]{1,63}$/).refine((value) => value !== 'project-context'),
     path: safeProfilePath.refine((value) => value.endsWith('/SKILL.md')),
@@ -166,7 +168,11 @@ export const ProjectProfileV2Schema = ProjectProfileV1Schema.omit({ packageManag
       throw new Error();
   } catch { ctx.addIssue({ code: 'custom', message: 'Профиль не соответствует зарегистрированным проверкам и выходам.' }); }
 });
-export const ProjectProfileSchema = z.union([ProjectProfileV1Schema, ProjectProfileV2Schema]);
+export const ProjectProfileSchema = z.union([ProjectProfileV1Schema, ProjectProfileV2Schema]).superRefine((profile, ctx) => {
+  if (!profile.developmentWorkflow) return;
+  try { validateDevelopmentWorkflow(profile.developmentWorkflow, { projectSkills: profile.skillManifest ?? [], checks: profile.checks }); }
+  catch { ctx.addIssue({ code: 'custom', path: ['developmentWorkflow'], message: 'Workflow references must use pinned Skills and registered required checks.' }); }
+});
 
 export const PACKAGE_MANAGER_LOCKS = Object.freeze({ npm: 'package-lock.json', pnpm: 'pnpm-lock.yaml', yarn: 'yarn.lock' });
 

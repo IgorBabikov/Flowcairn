@@ -1,7 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { hashObject } from './io.mjs';
-import { ReceiptSchema, AIReviewResultSchema } from './schemas.mjs';
+import { ReceiptSchema, AIReviewResultSchema, AIResultSchema } from './schemas.mjs';
 import { safeReason } from './failure-reason.mjs';
+import { planningCorrection } from './plan-correction.mjs';
+import { classifyDevelopmentFailure } from './development-failure.mjs';
+
+const ImplementationRejectionSchema = AIResultSchema.pick({ summary: true, verdict: true, findings: true });
 
 /**
  * @typedef {object} DriverHost
@@ -45,7 +49,7 @@ export class AutonomousDriver {
         // after durable dependencies; #drive checks the original deadline first.
         const pendingRepair = state.policyGrant && plan.nodes.some((node) => node.action.id === 'human-approve' &&
           state.nodes[node.id].status === 'waiting-for-human' && node.needs.every((id) => state.nodes[id].status === 'passed'));
-        if (plan.stage === 'planning' || state.nodes['approve-plan']?.status === 'passed' || pendingRepair) this.schedule(runId);
+        if (plan.stage === 'planning' || state.nodes['approve-plan']?.status === 'passed' || pendingRepair || plan.workflowPolicy === 'developer-v2' && plan.nodes.some((node) => node.planReview && state.nodes[node.id].status === 'ready')) this.schedule(runId);
       } catch { /* Неисправное или устаревшее выполнение остается доступным только для диагностики. */ }
     }
   }
@@ -73,7 +77,7 @@ export class AutonomousDriver {
       }
       if (state.policyGrant && state.nodes['approve-plan']?.status !== 'passed') {
         if (this.#host.activatePolicyGrant(runId)) continue;
-        return;
+        if (!plan.nodes.some((node) => node.planReview)) return;
       }
       if (caps.run.run.allowed) {
         // The current drive owns every successor in this bounded pass.
@@ -92,36 +96,49 @@ export class AutonomousDriver {
         const failed = planner && state.nodes[planner.id];
         const receiptId = failed?.receipts.at(-1);
         const receipt = receiptId && ReceiptSchema.parse(this.#host.readReceipt(receiptId));
-        const reasonCode = failed?.reason?.split(':')[0];
-        if (failed?.status !== 'failed' || !['PLANNING_READ_SCOPE', 'CONTRACT_ANALYSIS_COVERAGE'].includes(reasonCode) ||
-            receipt?.phase !== 'finished' || receipt.termination?.stopped !== true ||
-            receipt.termination.uncertain || receipt.beforeFingerprint !== receipt.afterFingerprint) return;
-        const feedback = reasonCode === 'PLANNING_READ_SCOPE'
-          ? `Предыдущий план предложил чтение вне разрешенной области. Используй readPaths только внутри ${JSON.stringify([...new Set([...task.scope, ...task.contextPaths])].sort())}; не расширяй права.`
-          : 'Предыдущий план свел отдельные обязательные пункты анализа к одному требованию. Для каждого пункта создай отдельное mandatory requirement с проверкой и свяжи его с implementation step через requirementIds. Не расширяй scope или права.';
-        const next = await this.#host.command(runId, 'replan', { ...request, feedback }, { actor: state.actor });
+        const correction = planningCorrection({ state, plan, receipt, task });
+        if (!correction.allowed) return;
+        const next = await this.#host.command(runId, 'replan', { ...request, feedback: correction.feedback }, { actor: state.actor });
         runId = next.runId;
         continue;
       }
+      if (plan.stage === 'execution' && state.status === 'failed' && !state.policyGrant && state.nodes['approve-plan']?.status !== 'passed') {
+        const reviewer = plan.nodes.find((node) => node.planReview);
+        const id = reviewer && state.nodes[reviewer.id].receipts.at(-1);
+        const receipt = id && ReceiptSchema.parse(this.#host.readReceipt(id));
+        const correction = planningCorrection({ state, plan, receipt, task });
+        if (!correction.allowed) return;
+        const next = await this.#host.command(runId, 'replan', { ...request, feedback: correction.feedback }, { actor: state.actor });
+        runId = next.runId; continue;
+      }
       if (plan.stage === 'execution' && state.status === 'failed') {
         const failed = plan.nodes.filter((node) => state.nodes[node.id].status === 'failed');
-        const repairable = failed.length === 1 &&
-          (failed[0].action.id.startsWith('check-') || ['ai-review', 'ai-implement'].includes(failed[0].action.id));
+        if (failed.length !== 1) return;
         const definition = failed[0];
         const lastId = definition && state.nodes[definition.id].receipts.at(-1);
         const receipt = lastId && ReceiptSchema.parse(this.#host.readReceipt(lastId));
-        const semanticReview = definition?.action.id === 'ai-review' && state.nodes[definition.id].artifacts.some((id) => {
+        const currentArtifacts = receipt?.artifacts.filter((id) => state.nodes[definition.id].artifacts.includes(id)) ?? [];
+        const semanticReview = definition?.action.id === 'ai-review' && currentArtifacts.some((id) => {
           const artifact = this.#host.artifact(id);
           if (artifact.kind !== 'review-findings') return false;
           const result = AIReviewResultSchema.safeParse(JSON.parse(artifact.content));
-          return result.success && result.data.verdict === 'fail' && result.data.findings.some((finding) => finding.severity === 'blocking');
+          return result.success && result.data.verdict === 'fail' && result.data.reviewEvidenceHash === receipt.reviewEvidenceHash &&
+            result.data.findings.some((finding) => finding.severity === 'blocking');
         });
-        const knownCheck = definition?.action.id.startsWith('check-') && receipt?.checks.some((check) => check.exitCode !== null && check.exitCode !== 0 && !check.passed);
-        const rejectedImplementation = definition?.action.id === 'ai-implement' &&
-          receipt?.verdict === 'fail' && receipt.beforeFingerprint === receipt.afterFingerprint &&
-          receipt.changedFiles.length === 0;
-        if (!repairable || (!semanticReview && !knownCheck && !rejectedImplementation) ||
-            receipt?.phase !== 'finished' || !receipt.termination?.stopped || receipt.termination.uncertain) return;
+        const rejectedImplementation = definition?.action.id === 'ai-implement' && currentArtifacts.some((id) => {
+          const artifact = this.#host.artifact(id);
+          if (artifact.kind !== 'review-findings') return false;
+          const result = ImplementationRejectionSchema.safeParse(JSON.parse(artifact.content));
+          return result.success && result.data.verdict === 'fail';
+        });
+        const failure = classifyDevelopmentFailure({ state, plan, definition,
+          node: state.nodes[definition.id], receipt, semanticReview, rejectedImplementation });
+        // Markerless plans retain their established bounded check retry policy.
+        // Typed cause requirements apply to the explicitly opted-in developer policy.
+        const legacyCheck = !plan.workflowPolicy && definition.action.id.startsWith('check-') &&
+          receipt?.phase === 'finished' && receipt.termination?.stopped === true && !receipt.termination.uncertain &&
+          receipt.checks.some((check) => check.exitCode !== null && check.exitCode !== 0 && !check.passed);
+        if (!legacyCheck && !['source-repair', 'diagnosis-repair'].includes(failure.route)) return;
         const original = state.policyGrant ?? {
           runId: state.runId, planHash: state.planHash,
           receiptId: state.nodes['approve-plan'].receipts.at(-1),

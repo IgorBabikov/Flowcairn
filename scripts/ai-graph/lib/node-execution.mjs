@@ -1,3 +1,5 @@
+import { AIPlanReviewResultSchema, assessSemanticPlanReview } from './semantic-plan-review.mjs';
+import { resolvePlanReviewCitations } from './plan-citation-resolution.mjs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { GraphError, hashObject, now } from './io.mjs';
@@ -9,10 +11,13 @@ import { verifySkillsUsed } from './skills.mjs';
 import { buildReviewEvidence } from './review-evidence.mjs';
 import { boundPriorEvidence } from './bounded-context.mjs';
 import { selectAnalysisEvidence } from './analysis-evidence.mjs';
-import { normalizeRequirementReview, validateRequirementAssessments } from './requirement-verification.mjs';
+import { normalizeRequirementReview, validateRequirementAssessments, validatePlanReviewCitations } from './requirement-verification.mjs';
 import { projectContextMap } from './project-context-map.mjs';
 import { MAX_ANALYSIS_BYTES } from './context-limits.mjs';
 import { captureStageBefore, completeStageBoundary } from './stage-execution.mjs';
+import { captureCheckVerification, finishCheckVerification } from './check-verification.mjs';
+import { validateExecutionPlanConsistency } from './execution-plan-consistency.mjs';
+import { SemanticCorrectionFeedbackSchema, buildSemanticCorrectionInput, validateSemanticCorrectionFeedback } from './semantic-correction-feedback.mjs';
 
 const fail = (code, message) => { throw new GraphError(code, message); };
 const unique = (values) => [...new Set(values)];
@@ -77,14 +82,21 @@ export async function executeNode(host, state, task, plan, definition, signal) {
       result,
       aiOutput,
       reviewBundle,
+      correctionBundle = null,
       executionInvoked = false,
       processStarted = false,
       fencedAfter,
       after = null,
       verdict,
       reason = null;
+    let reportBefore = null, verificationReport, planCitationResolution;
     const started = performance.now();
     try {
+      if (definition.action.id === 'ai-implement') {
+        validateExecutionPlanConsistency(plan);
+        if (plan.workflowPolicy === 'developer-v2') host.validatePlanReviewGate(state, task, plan);
+        host.adapters.verifyWorkPreflight?.(state.binding.worktree, definition, task, plan);
+      }
       if (definition.action.id === 'workspace-check') {
         const assessment = host.adapters.inspectChanges(
           host.initialFingerprint(state.initialFingerprint),
@@ -124,21 +136,41 @@ export async function executeNode(host, state, task, plan, definition, signal) {
         if (definition.action.id.startsWith('ai-'))
           host.privateDirectory(path.join(host.root, '.ai-orchestrator', 'graph'), 'runner-tickets');
         const permittedFiles = before.files.filter((file) => pathAllowed(file.path, task));
-        const fixFindings = state.planningArtifacts.flatMap((id) => {
+        const retainedFindings = state.planningArtifacts.flatMap((id) => {
           const artifact = host.artifact(id);
           if (artifact.mediaType !== 'application/json') return [];
           const data = JSON.parse(artifact.content);
           return data.reviewFindings ?? [];
         });
-        if (Buffer.byteLength(JSON.stringify(fixFindings)) > 24 * 1024)
+        if (plan.workflowPolicy === 'developer-v2') for (const finding of retainedFindings)
+          if (finding.role === 'semantic-plan-correction-feedback') validateSemanticCorrectionFeedback(finding, {
+            readArtifact: host.artifact, readReceipt: id => host.store.readObject('receipts', id), readPlan: id => host.store.readObject('plans', id),
+            currentPlan: plan,
+          });
+        const semanticHistory = plan.workflowPolicy === 'developer-v2' && plan.stage !== 'planning'
+          ? retainedFindings.filter(item => item.role === 'semantic-plan-correction-feedback') : [];
+        const fixFindings = retainedFindings.filter(item => !semanticHistory.includes(item));
+        if (Buffer.byteLength(JSON.stringify(fixFindings)) > 24 * 1024 && plan.workflowPolicy === 'developer-v2' &&
+            plan.stage === 'planning' && ['ai-plan', 'ai-analyze'].includes(definition.action.id) &&
+            fixFindings.length && fixFindings.every(item => SemanticCorrectionFeedbackSchema.safeParse(item).success))
+          correctionBundle = buildSemanticCorrectionInput({ task, plan, feedback: fixFindings });
+        if (Buffer.byteLength(JSON.stringify(fixFindings)) > 24 * 1024 && !correctionBundle)
           fail('FIX_EVIDENCE_LIMIT', 'Полные review findings превышают bounded context; требуется более узкая задача');
+        const correctionArtifact = correctionBundle ? host.putArtifact('generated-doc', 'Полный immutable semantic correction input', correctionBundle.input) : null;
+        if (correctionArtifact) artifacts.push(correctionArtifact);
         const analysisEvidence = selectAnalysisEvidence({ state, plan, readArtifact: host.artifact,
           readReceipt: (id) => host.store.readObject('receipts', id) });
         let priorEvidence = {
           ...(task.contextDiscovery && plan.stage === 'planning' ? { contextInventory: projectContextMap(before.files, task, host.adapters.project?.outputPaths ?? [], state.contextDiscoveryRound ?? 0) } : {}),
           ...(analysisEvidence ? { analysis: analysisEvidence } : {}),
           feedback: task.planningFeedback ?? [],
-          reviewFindings: fixFindings,
+          reviewFindings: correctionBundle ? [] : fixFindings,
+          ...(semanticHistory.length ? { semanticCorrectionHistory: semanticHistory.map(item => ({
+            role: 'previous-plan-review-reference', artifactId: item.artifactId, receiptId: item.receiptId, artifactValueHash: item.artifactValueHash,
+            inputHash: item.inputHash, sourceRunId: item.sourceRunId, sourcePlanHash: item.sourcePlanHash, sourceTaskHash: item.sourceTaskHash,
+            context: 'Full corrective findings belong to prior readonly planning, not a fresh review verdict.' })) } : {}),
+          ...(correctionBundle ? { semanticCorrectionReference: { role: 'semantic-correction-input', hash: correctionBundle.hash,
+            bytes: correctionBundle.bytes, artifactId: correctionArtifact, artifactIds: fixFindings.map(item => item.artifactId) } } : {}),
           instructionMetadata: host.adapters.instructionMetadata?.(definition, task) ?? [],
           receipts: unique(Object.values(state.nodes).flatMap((n) => n.receipts)).slice(-64),
           workspaceFiles: permittedFiles.slice(0, 100),
@@ -163,7 +195,8 @@ export async function executeNode(host, state, task, plan, definition, signal) {
           fail('ANALYSIS_REQUIRED', 'План требует сохраненного результата анализа');
         priorEvidence = boundPriorEvidence({ task, plan, node: definition, state, priorEvidence,
           readReceipt: (hash) => ReceiptSchema.parse(host.store.readObject('receipts', hash)) });
-        if (definition.action.id === 'ai-review') {
+        if (definition.planReview) reviewBundle = host.planReviewBundle(state, task, plan);
+        else if (definition.action.id === 'ai-review') {
           reviewBundle = buildReviewEvidence({
             state,
             task,
@@ -175,6 +208,7 @@ export async function executeNode(host, state, task, plan, definition, signal) {
             readArtifact: (hash) => host.artifact(hash),
           });
         }
+        reportBefore = captureCheckVerification(state.binding.worktree, plan, definition);
         executionInvoked = true;
         result = await host.adapters.execute({
           root: host.root,
@@ -188,7 +222,7 @@ export async function executeNode(host, state, task, plan, definition, signal) {
           outputDirectory,
           signal,
           priorEvidence,
-          reviewEvidence: reviewBundle?.evidence ?? null,
+          reviewEvidence: correctionBundle?.input ?? (definition.planReview ? reviewBundle?.input : reviewBundle?.evidence) ?? null,
           ...(definition.action.id.startsWith('ai-') && externalProvider(host.adapters.project?.ai.provider)
             ? { providerConsent: host.providerConsent(state, task, plan) }
             : {}),
@@ -207,6 +241,8 @@ export async function executeNode(host, state, task, plan, definition, signal) {
           },
         });
       }
+      if (definition.action.id.startsWith('check-') && result.stopped && !result.uncertain)
+        verificationReport = finishCheckVerification(state.binding.worktree, plan, definition, reportBefore, before.hash, before);
       if (
         definition.action.id.startsWith('ai-') &&
         result.exitCode === 0 &&
@@ -215,10 +251,24 @@ export async function executeNode(host, state, task, plan, definition, signal) {
         !result.uncertain
       ) {
         assertJsonBounds(result.output);
-        aiOutput = (definition.action.id === 'ai-plan' ? AIPlanningResultSchema : definition.action.id === 'ai-analyze' && plan.workflow === 'autonomous' ? AIAnalysisResultSchema : reviewBundle ? AIReviewResultSchema : AIResultSchema).parse(result.output);
+        if (definition.planReview) artifacts.push(host.putArtifact('generated-doc', 'Digest исходного plan reviewer result', {
+          version: 1, role: 'plan-review-output-digest', inputHash: reviewBundle.hash,
+          reportedOutputHash: hashObject(result.output), fingerprintHash: before.hash,
+        }));
+        aiOutput = (definition.planReview ? AIPlanReviewResultSchema : definition.action.id === 'ai-plan' ? AIPlanningResultSchema : !definition.planReview && definition.action.id === 'ai-analyze' && plan.workflow === 'autonomous' ? AIAnalysisResultSchema : reviewBundle ? AIReviewResultSchema : AIResultSchema).parse(result.output);
+        if (correctionBundle && aiOutput.reviewEvidenceHash !== correctionBundle.hash)
+          fail('PLAN_REVIEW_FEEDBACK_INVALID', 'Readonly correction не подтвердил exact full feedback input.');
         if (definition.action.id === 'ai-plan' && aiOutput.verdict === 'pass' && !Reflect.get(aiOutput, 'contextRequests')?.length)
-          compileTaskProposal(task, aiOutput, { runtimeHash: host.adapters.identity(), skills: host.adapters.skills(task), resolveSkills: host.adapters.resolveSkills, resolveReadPaths: host.adapters.resolveReadPaths, contextHash: host.adapters.contextHash?.(task), provider: host.adapters.project?.ai.provider, analysis: host.analysis(state, plan), workflow: plan.workflow, checks: host.adapters.checkRegistry?.() });
-        if (reviewBundle) {
+          compileTaskProposal(task, aiOutput, { runtimeHash: host.adapters.identity(), skills: host.adapters.skills(task), resolveSkills: host.adapters.resolveSkills, resolveReadPaths: host.adapters.resolveReadPaths, contextHash: host.adapters.contextHash?.(task), workflowPolicy: host.adapters.workflowPolicy, provider: host.adapters.project?.ai.provider, analysis: host.analysis(state, plan), ...(plan.planningContractLocked ? { taskContract: plan.taskContract } : {}), workflow: plan.workflow, checks: host.adapters.checkRegistry?.() });
+        if (definition.planReview) {
+          const verified = host.planReviewBundle(state, task, plan);
+          if (verified.hash !== reviewBundle.hash) fail('PLAN_REVIEW_INVALID', 'Review input изменился во время readonly процесса.');
+          assessSemanticPlanReview(verified.input, aiOutput);
+          const resolved = resolvePlanReviewCitations({ output: aiOutput, rawOutput: result.output, inputHash: verified.hash,
+            node: definition, worktree: state.binding.worktree, fingerprint: before });
+          aiOutput = resolved.output; planCitationResolution = resolved.resolution;
+          validatePlanReviewCitations({ output: aiOutput, node: definition, worktree: state.binding.worktree, fingerprint: before });
+        } else if (reviewBundle) {
           const verified = buildReviewEvidence({
             state,
             task,
@@ -233,7 +283,7 @@ export async function executeNode(host, state, task, plan, definition, signal) {
             fail('REVIEW_EVIDENCE_MISMATCH', 'Review result не связан с полным evidence');
           validateRequirementAssessments({ output: aiOutput, plan, node: definition, worktree: state.binding.worktree, fingerprint: before });
         }
-        if (definition.action.id === 'ai-analyze' && plan.workflow === 'autonomous') {
+        if (!definition.planReview && definition.action.id === 'ai-analyze' && plan.workflow === 'autonomous') {
           if (Buffer.byteLength(JSON.stringify(aiOutput)) > MAX_ANALYSIS_BYTES) fail('ANALYSIS_LIMIT', 'Анализ превышает 32 KiB; нужен более краткий результат с сохранением всех требований');
           if (AIAnalysisResultSchema.parse(aiOutput).analysis.projectFacts.some((fact) => !definition.resources.reads.some((scope) => fact.path === scope.replace(/\/$/, '') || fact.path.startsWith(scope.replace(/\/$/, '') + '/'))))
             fail('ANALYSIS_SCOPE', 'Факты анализа выходят за объявленный контекст');
@@ -264,6 +314,7 @@ export async function executeNode(host, state, task, plan, definition, signal) {
           ) {
             if (!host.adapters.applyEdits)
               fail('PATCH_HANDLER_MISSING', 'Trusted patch handler недоступен');
+            host.adapters.verifyWorkPreflight?.(state.binding.worktree, definition, task, plan);
             fencedAfter = host.applyFencedEdits(
               state,
               task,
@@ -292,7 +343,12 @@ export async function executeNode(host, state, task, plan, definition, signal) {
       } else if (!assessment.allowed) {
         verdict = 'fail';
         reason = reason ?? 'Нарушена граница изменений';
-      } else if (result.exitCode !== 0 || result.failureReason) {
+      } else if (verificationReport && (verificationReport.status === 'unverified' ||
+          verificationReport.status === 'passed' && result.exitCode !== 0 ||
+          verificationReport.status === 'failed' && result.exitCode === 0)) {
+        verdict = 'uncertain';
+        reason = 'CHECK_REPORT_UNVERIFIED: Отчет и завершенный процесс не подтверждают обязательные сценарии.';
+      } else if (result.exitCode !== 0 || result.failureReason || verificationReport?.status === 'failed') {
         verdict = 'fail';
         reason = reason ?? host.sanitizeText(result.failureReason ?? 'Действие завершилось с ошибкой');
       } else if (definition.action.id.startsWith('ai-')) {
@@ -304,20 +360,25 @@ export async function executeNode(host, state, task, plan, definition, signal) {
         // warnings-only analysis has already identified a bounded local path, so
         // do not let an overly cautious model turn it into a terminal state.
         const continuableAnalysis =
-          definition.action.id === 'ai-analyze' &&
+          !definition.planReview && definition.action.id === 'ai-analyze' &&
           plan.workflow === 'autonomous' &&
           output.verdict === 'uncertain' &&
           !output.contextRequests?.length &&
           !output.findings.some((finding) => finding.severity === 'blocking');
+        const planAssessment = definition.planReview ? assessSemanticPlanReview(reviewBundle.input, output) : null;
+        if (planAssessment?.status !== 'consistent') {
+          if (planAssessment) reason = planAssessment.status === 'blocked' ? 'PLAN_REVIEW_BLOCKED' : 'PLAN_REVIEW_UNCERTAIN';
+        }
         const safe = {
           ...output,
           ...(continuableAnalysis ? { verdict: 'pass' } : {}),
+          ...(planAssessment ? { verdict: planAssessment.status === 'consistent' ? 'pass' : planAssessment.status === 'blocked' ? 'fail' : 'uncertain' } : {}),
           ...(output.contextRequests?.length ? { verdict: 'uncertain' } : {}),
           ...(output.contextRequests ? { contextRequests: output.contextRequests.map((item) => ({ ...item, reason: host.sanitizeText(item.reason) })) } : {}),
           summary: host.sanitizeText(output.summary),
           findings: output.findings.map((f) => ({ ...f, message: host.sanitizeText(f.message) })),
           plan: output.plan.map((p) => ({ ...p, outcome: host.sanitizeText(p.outcome) })),
-          ...(definition.action.id === 'ai-analyze' && plan.workflow === 'autonomous' ? { analysis: Object.fromEntries(Object.entries(AIAnalysisResultSchema.parse(output).analysis).map(([key, values]) => [key, key === 'projectFacts' ? values.map((value) => ({ path: value.path, fact: host.sanitizeText(value.fact) })) : values.map(host.sanitizeText)])) } : {}),
+          ...(!definition.planReview && definition.action.id === 'ai-analyze' && plan.workflow === 'autonomous' ? { analysis: Object.fromEntries(Object.entries(AIAnalysisResultSchema.parse(output).analysis).map(([key, values]) => [key, key === 'projectFacts' ? values.map((value) => ({ path: value.path, fact: host.sanitizeText(value.fact) })) : values.map(host.sanitizeText)])) } : {}),
           ...(definition.action.id === 'ai-plan' ? { steps: AIPlanningResultSchema.parse(output).steps.map((step) => ({ ...step, title: host.sanitizeText(step.title), outcome: host.sanitizeText(step.outcome) })) } : {}),
         };
         verdict =
@@ -327,7 +388,7 @@ export async function executeNode(host, state, task, plan, definition, signal) {
               ? 'uncertain'
               : 'fail';
         if (verdict !== 'pass') {
-          reason = host.sanitizeText(output.findings.find((finding) => finding.severity === 'blocking')?.message || output.summary || 'AI не подтвердил результат');
+          reason = planAssessment ? (planAssessment.status === 'blocked' ? 'PLAN_REVIEW_BLOCKED' : 'PLAN_REVIEW_UNCERTAIN') : host.sanitizeText(output.findings.find((finding) => finding.severity === 'blocking')?.message || output.summary || 'AI не подтвердил результат');
           if (action.kind === 'implementation')
             artifacts.push(host.putArtifact('review-findings', 'Почему реализация остановлена', {
               summary: safe.summary, verdict, findings: safe.findings,
@@ -335,6 +396,9 @@ export async function executeNode(host, state, task, plan, definition, signal) {
         }
         if (action.kind === 'analysis')
           artifacts.push(host.putArtifact('analysis', 'Анализ задачи', safe));
+        if (planCitationResolution) artifacts.push(host.putArtifact('generated-doc', 'Host resolution source anchors', {
+          ...planCitationResolution, verifiedOutputHash: hashObject(safe),
+        }));
         if (action.kind === 'review')
           artifacts.push(host.putArtifact('review-findings', 'Независимое review', safe));
         if (action.kind === 'implementation') {
@@ -377,12 +441,13 @@ export async function executeNode(host, state, task, plan, definition, signal) {
             durationMs: performance.now() - started,
             summary: 'Зарегистрированная проверка завершилась успешно',
             inputHash: before.hash,
+            ...(verificationReport ? { verification: verificationReport } : {}),
           };
           checks.push(check);
           artifacts.push(host.putArtifact(action.artifacts[0], definition.title, check));
         }
       }
-      if (definition.action.id.startsWith('check-') && (result.exitCode !== 0 || result.failureReason)) {
+      if (definition.action.id.startsWith('check-') && (result.exitCode !== 0 || result.failureReason || verificationReport && verificationReport.status !== 'passed')) {
         const check = {
           id: definition.id,
           passed: false,
@@ -390,6 +455,7 @@ export async function executeNode(host, state, task, plan, definition, signal) {
           durationMs: performance.now() - started,
           summary: reason ?? 'Проверка не пройдена',
           inputHash: before.hash,
+          ...(verificationReport ? { verification: verificationReport } : {}),
         };
         checks.push(check);
         artifacts.push(host.putArtifact(action.artifacts[0], definition.title, check));
@@ -407,7 +473,7 @@ export async function executeNode(host, state, task, plan, definition, signal) {
       reason = host.safeReason(error);
       verdict = 'uncertain';
       if (!processStarted && !result && error instanceof GraphError &&
-          ['RUNNER_PROMPT_LIMIT', 'AI_CONTEXT_LIMIT', 'INSTRUCTION_CONTEXT_LIMIT', 'CHECK_SHELL_CONFIG_UNSUPPORTED'].includes(error.code)) {
+          (!executionInvoked || ['RUNNER_PROMPT_LIMIT', 'AI_CONTEXT_LIMIT', 'INSTRUCTION_CONTEXT_LIMIT', 'CHECK_SHELL_CONFIG_UNSUPPORTED'].includes(error.code))) {
         // These errors are raised during command preparation, before a process is started.
         result = { exitCode: 1, stopped: true, uncertain: false,
           execution: { kind: 'preflight', processStarted: false, reason: error.code } };
@@ -451,7 +517,7 @@ export async function executeNode(host, state, task, plan, definition, signal) {
       failureReason: reason,
       beforeFingerprint: before.hash,
       afterFingerprint: after?.hash ?? null,
-      ...(reviewBundle ? { reviewEvidenceHash: reviewBundle.hash } : {}),
+      ...(reviewBundle || correctionBundle ? { reviewEvidenceHash: (reviewBundle ?? correctionBundle).hash } : {}),
       termination: result
         ? {
             stopped: result.stopped === true,
