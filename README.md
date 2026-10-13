@@ -2,7 +2,7 @@
 
 <img src="https://raw.githubusercontent.com/IgorBabikov/Flowcairn/main/.github/media/flowcairn-mark.svg" width="56" height="56" alt="Знак Flowcairn" />
 
-# Flowcairn
+# Flowcairn еще в разработке !
 
 ### AI выполняет задачу. Вы видите план, проверки и свой код.
 
