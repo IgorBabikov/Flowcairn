@@ -1,4 +1,5 @@
 import { hashObject } from './io.mjs';
+import { boundCheckVerification } from './check-verification.mjs';
 
 const unique = (items) => [...new Set(items)];
 const hash = (value) => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
@@ -98,11 +99,21 @@ export function deriveTaskProof({ state, task, plan, currentFingerprint, current
     if (definition.action.id.startsWith('check-')) {
       const requirementIds = compatible.filter((item) => item.verification.checkIds.includes(checkName(definition))).map((item) => item.id);
       const check = receipt.checks.find((item) => item.id === definition.id);
+      const registeredReport = record.execution.plan.checks?.definitions.find((item) => `check-${item.id}` === definition.action.id)?.report;
+      const developerPolicy = ['developer-v1', 'developer-v2'].includes(record.execution.plan.workflowPolicy);
+      const strictRequirement = developerPolicy && compatible.some((item) => item.mandatory && item.verification.checkIds.includes(checkName(definition)));
+      const verifiedReport = !registeredReport && !strictRequirement || check && registeredReport && boundCheckVerification(record.execution.plan, definition, check) &&
+        check.verification?.status === 'passed' && check.verification.countsConfirmed && check.verification.counts.completed > 0 &&
+        check.verification.counts.failed === 0 && check.verification.counts.passed === check.verification.counts.completed &&
+        check.verification.reasonCodes.length === 0;
       const passed = terminal(receipt) && receipt.verdict === 'pass' && check?.passed === true && check.exitCode === 0 &&
-        check.inputHash === receipt.beforeFingerprint && receipt.afterFingerprint === receipt.beforeFingerprint;
+        check.inputHash === receipt.beforeFingerprint && receipt.afterFingerprint === receipt.beforeFingerprint && verifiedReport;
       const failed = receipt.verdict === 'fail' && receipt.termination?.stopped === true && receipt.termination.uncertain === false &&
         check?.passed === false && check.exitCode !== null && check.exitCode !== 0;
-      const item = addEvidence(record, requirementIds, 'check', passed ? 'passed' : failed ? 'failed' : 'unavailable', check?.summary || receipt.failureReason || 'Проверка не предоставила подтвержденный результат');
+      // An unreported optional check can confirm command completion, but cannot
+      // claim that an optional behavior criterion was actually exercised.
+      const evidenceRequirements = developerPolicy && !registeredReport && !strictRequirement ? [] : requirementIds;
+      const item = addEvidence(record, evidenceRequirements, 'check', passed ? 'passed' : failed ? 'failed' : 'unavailable', check?.summary || receipt.failureReason || 'Проверка не предоставила подтвержденный результат');
       checkRecords.push({ record, item, checkId: checkName(definition) });
       if (failed) addFinding(record, requirementIds.length ? requirementIds : required.map((item) => item.id), item.summary, true, 'failed-check');
     }

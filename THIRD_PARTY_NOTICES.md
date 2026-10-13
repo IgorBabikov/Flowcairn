@@ -8,6 +8,8 @@ Flowcairn распространяется по [MIT](LICENSE). Ниже ука�
 
 Полные [лицензии](skills/licenses/) входят в пакет. [PROVENANCE.json](skills/PROVENANCE.json) закрепляет источники, commits, hashes и отличия адаптаций. Исполняемые scripts, ассеты и отдельный процесс управления работой из этих наборов не импортированы. React/composition artifacts из vercel-labs/agent-skills не включены: полный LICENSE конкретной версии не подтвержден.
 
+`workflow-test-quality` использует адаптированные методы TDD из mattpocock/skills и read-only test-gap-analysis из dotnet/skills (Copyright (c) .NET Foundation and Contributors, MIT). Закрепленные источники и полные notices приведены в [LICENSES.md](skills/workflow-test-quality/LICENSES.md); инструкция сохраняет согласованные test policy, scope и проверки Executor.
+
 ## Состав
 
 Состав соответствует текущим `package.json`, `package-lock.json` и production entrypoints интерфейса. Runtime-зависимости проверяются через `npm ls --omit=dev --all`, браузерные компоненты — через `inputs` esbuild metafile.

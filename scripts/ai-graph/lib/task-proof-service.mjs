@@ -3,6 +3,7 @@ import { RequirementAcceptanceReceiptSchema } from './schemas.mjs';
 import { selectAnalysisEvidence } from './analysis-evidence.mjs';
 import { deriveTaskProof } from './task-proof.mjs';
 import { requirementAcceptanceCapability } from './requirement-verification.mjs';
+import { verifyCurrentCheckArtifacts } from './check-artifact-current.mjs';
 
 const fail = (code, message) => { throw new GraphError(code, message); };
 
@@ -31,6 +32,7 @@ export function createTaskProofService(host) {
           host.verifyBinding(state.binding);
           if (state.toolchain && host.verifyToolchain) host.verifyToolchain(state.binding.worktree, state.toolchain);
           fingerprint = host.fingerprint(state.binding.worktree, state.toolchain);
+          verifyCurrentCheckArtifacts({ root: state.binding.worktree, state, plan, fingerprint, readReceipt: host.readReceipt });
         }
       } catch (error) { reason = reason ?? host.safeReason(error); }
       const proof = deriveTaskProof({ state, task, plan, currentFingerprint: fingerprint, currentReason: reason,
@@ -48,6 +50,7 @@ export function createTaskProofService(host) {
       if (state.binding) host.verifyBinding(state.binding);
       if (state.toolchain && host.verifyToolchain) host.verifyToolchain(state.binding.worktree, state.toolchain);
       const fingerprint = state.binding ? host.fingerprint(state.binding.worktree, state.toolchain) : null;
+      if (state.binding) verifyCurrentCheckArtifacts({ root: state.binding.worktree, state, plan, fingerprint, readReceipt: host.readReceipt });
       const capability = requirementAcceptanceCapability(state, plan, fingerprint, null, host.hasLock(runId));
       if (!capability.allowed) fail('REQUIREMENT_ACCEPTANCE_DENIED', capability.reason);
       if (request.resultHash !== fingerprint.hash) fail('REQUIREMENT_RESULT_CHANGED', 'Подтвердите актуальное состояние результата');

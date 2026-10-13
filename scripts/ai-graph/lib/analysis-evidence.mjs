@@ -11,7 +11,7 @@ export function selectAnalysisEvidence({ state, plan, readArtifact, readReceipt 
     if (!parsed.success || parsed.data.verdict !== 'pass' || parsed.data.findings.some((finding) => finding.severity === 'blocking')) return null;
     return { artifactId, result: parsed.data };
   };
-  const current = plan.nodes.filter((node) => node.action.id === 'ai-analyze' && state.nodes[node.id]?.status === 'passed');
+  const current = plan.nodes.filter((node) => node.action.id === 'ai-analyze' && !node.planReview && state.nodes[node.id]?.status === 'passed');
   if (current.length) {
     const receipts = current.flatMap((node) => [...state.nodes[node.id].receipts].reverse().flatMap((id) => {
       const parsed = ReceiptSchema.safeParse(readReceipt(id));

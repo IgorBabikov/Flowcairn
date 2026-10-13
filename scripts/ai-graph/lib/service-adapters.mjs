@@ -8,7 +8,7 @@ import { RUNTIME_ROOT, loadProjectProfile, projectContextPaths } from './project
 import { GraphError, hashObject } from './io.mjs';
 import { loadSkill } from './skills.mjs';
 import * as SkillsPolicy from './skills.mjs';
-import { SKILL_ROUTES } from './config.mjs';
+import { BUILTIN_SKILL_IDS, SKILL_ROUTES } from './config.mjs';
 import { resolveAction, pathAllowed } from './registry.mjs';
 import { verifySourceBundle } from './source.mjs';
 import { boundedProcess } from './bounded-process.mjs';
@@ -22,6 +22,7 @@ import { directAdapters } from './direct-adapters.mjs';
 import { taskContextInventory } from './intake.mjs';
 import { createReadContext } from './read-context.mjs';
 import { createLearningJobAdapter } from './learning-job-adapter.mjs';
+import { inspectMobileWorkPreflight } from './mobile-work-preflight.mjs';
 
 const fail = (code, message) => { throw new GraphError(code, message); };
 const unique = (values) => [...new Set(values)];
@@ -153,10 +154,15 @@ export async function defaultAdapters(root) {
   const resolveContext = Reflect.get(SkillsPolicy, 'resolveNodeSkills');
   const projectSkills = Reflect.get(profile, 'skillManifest') ?? [];
   const readContext = createReadContext();
-  const contextual = (action, scope) => {
+  const contextual = (action, scope, task, diagnoseFailure = false) => {
     const normalizedScope = scope.map((entry) => entry.replace(/\/$/, ''));
-    return readContext.memo(JSON.stringify(['skills', action, normalizedScope, profile.manifests, projectSkills]),
-      () => resolveContext(root, { action, scope: normalizedScope, manifestPaths: profile.manifests, projectSkills }));
+    return readContext.memo(JSON.stringify(['skills', action, normalizedScope, profile.manifests, projectSkills,
+      profile.developmentWorkflow ?? null, profile.developmentWorkflow ? task : null, diagnoseFailure]),
+      () => resolveContext(root, { action, scope: normalizedScope, manifestPaths: profile.manifests, projectSkills,
+        developmentWorkflow: profile.developmentWorkflow ?? null, task,
+        // Registration is checked separately by checkRegistry; this is not runtime acceptance.
+        availableCheckIds: profile.checkMode === 'none' ? [] : task?.checks ?? [],
+        checkDefinitions: profile.version === 2 ? profile.checkProfile.definitions : [], failureClass: diagnoseFailure ? 'scenario' : null }));
   };
   const instructionInspection = () => readContext.memo('instructions', () => {
     const inspection = rules?.inspectInstructions({ projectRoot: root });
@@ -176,10 +182,11 @@ export async function defaultAdapters(root) {
       ...relevantInstructions(scope, inspection).map((file) => file.path)]);
   };
   const resolveSkills = (node, task) => node.action.id.startsWith('ai-') && resolveContext
-    ? contextual(node.action.id, node.resources.writes.length ? node.resources.writes : task.scope).ids
+    ? contextual(node.action.id, node.resources.writes.length ? node.resources.writes : task.scope, task, node.diagnoseFailure === true).ids
     : node.action.id.startsWith('check-') ? [] : [...resolveAction(node.action.id).skills];
   const adapters = {
     dataVersion: 3,
+    workflowPolicy: profile.developmentWorkflow ? (profile.developmentWorkflow.version === 2 ? 'developer-v2' : 'developer-v1') : undefined,
     learningRunner: createLearningJobAdapter({ root, settings: () => loadProjectProfile(root).ai }),
     learningSourcePolicy: () => {
       const current = loadProjectProfile(root);
@@ -187,6 +194,7 @@ export async function defaultAdapters(root) {
     },
     checkRegistry: () => inspectProjectChecks(root, profile),
     project: profile,
+    verifyWorkPreflight: (worktree, node, task, plan) => inspectMobileWorkPreflight({ root: worktree, profile, node, task, plan }),
     withReadContext: readContext.run,
     taskContextInventory: () => taskContextInventory(root),
     identity: () => profile.workspaceMode === 'direct'
@@ -197,7 +205,17 @@ export async function defaultAdapters(root) {
     resolveReadPaths,
     skills: (task) => {
       if (!resolveContext || !task) return currentSkills(root);
-      const manifests = ['ai-plan', 'ai-analyze', 'ai-implement', 'ai-review'].flatMap((action) => contextual(action, task.scope).manifest);
+      if (profile.developmentWorkflow) {
+        const inside = (candidate, scope) => scope === '.' || candidate === scope || candidate.startsWith(`${scope}/`);
+        const eligible = projectSkills.filter((entry) => task.scope.some((scope) => entry.scope.some((candidate) => inside(scope, candidate) || inside(candidate, scope))));
+        // Inventory is not selection. A broad task can contain incompatible
+        // sibling versions while a narrow work selects a valid pinned specialist.
+        return [...BUILTIN_SKILL_IDS, ...eligible.map(({ id }) => id)].sort().map((id) => {
+          const skill = loadSkill(root, id, { projectSkills, developmentWorkflow: profile.developmentWorkflow });
+          return { id, path: skill.path, hash: skill.hash };
+        });
+      }
+      const manifests = ['ai-plan', 'ai-analyze', 'ai-implement', 'ai-review'].flatMap((action) => contextual(action, task.scope, task).manifest);
       return [...new Map(manifests.map((skill) => [skill.id, skill])).values()].sort((a, b) => a.id.localeCompare(b.id));
     },
     resolveSkills,
@@ -212,13 +230,13 @@ export async function defaultAdapters(root) {
         instructions: direct ? relevantInstructions(task.scope, inspection).map(stablePath) : inspection?.fingerprint ?? null,
         explicitMarkdown: direct ? explicitMarkdown.map(stablePath) : explicitMarkdown,
         skills: resolveContext ? ['ai-plan', 'ai-analyze', 'ai-implement', 'ai-review'].map((action) => {
-          const selected = contextual(action, task.scope);
+          const selected = contextual(action, task.scope, task);
           return direct ? selected.manifest : selected.context.hash;
         }) : null,
       });
     },
     skillContextPaths: (task) => resolveContext
-      ? ['ai-plan', 'ai-analyze', 'ai-implement', 'ai-review'].flatMap((action) => contextual(action, task.scope).context.evidence).filter((file) => file.hash).map((file) => file.path)
+      ? ['ai-plan', 'ai-analyze', 'ai-implement', 'ai-review'].flatMap((action) => contextual(action, task.scope, task).context.evidence).filter((file) => file.hash).map((file) => file.path)
       : [],
     capture: async (task, context = {}) => {
       const control = privateDirectory(root, '.ai-orchestrator');
@@ -298,7 +316,7 @@ export async function defaultAdapters(root) {
       process.kind === 'docker-check'
         ? dockerChecks.inspectCheckProcess({ root, process })
         : runner.inspectProcess({ root, process }),
-    loadSkills: (ids) => ids.map((id) => Reflect.apply(loadSkill, undefined, [root, id, { projectSkills }])),
+    loadSkills: (ids) => ids.map((id) => Reflect.apply(loadSkill, undefined, [root, id, { projectSkills, developmentWorkflow: profile.developmentWorkflow ?? null }])),
   };
   return profile.workspaceMode === 'direct' ? directAdapters(root, profile, adapters) : adapters;
 }

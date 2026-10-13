@@ -1,3 +1,6 @@
+import { AIPlanReviewResultSchema, buildSemanticPlanReviewInput, validateSemanticPlanReview, semanticPlanReviewRequired } from './semantic-plan-review.mjs';
+import { PlanCitationResolutionSchema, PlanReviewOutputDigestSchema, validatePlanCitationResolution } from './plan-citation-resolution.mjs';
+import { validatePlanReviewCitations } from './requirement-verification.mjs';
 import { inspectHostProcess } from './host-process.mjs';
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { realpathSync } from 'node:fs';
@@ -50,6 +53,7 @@ import { safeReason } from './failure-reason.mjs';
 import { autonomyForNodes } from './autonomy-policy.mjs';
 import { canReplanRejectedImplementation } from './manual-continuation.mjs';
 import { singleExecutionStage } from './plan-checks.mjs';
+import { validateExecutionPlanConsistency } from './execution-plan-consistency.mjs';
 import { assertLearningState } from './stage-execution.mjs';
 import { learningCommand, learningCommands } from './learning-control.mjs';
 import { learningMaterial, learningSource, learningUnavailable, openLearningCapability } from './learning-view.mjs';
@@ -279,6 +283,70 @@ export class WorkflowService {
       write: this.#write.bind(this), snapshot: this.snapshot.bind(this), sanitizeText, safeReason,
     });
   }
+  #planReviewBundle(state, task, plan) {
+    let planningArtifactHash = null, proposal = null;
+    for (const id of [...state.planningArtifacts].reverse()) {
+      const artifact = this.#artifact(id);
+      if (artifact.title !== 'Причины новой версии') continue;
+      const data = JSON.parse(artifact.content);
+      const candidate = data.planningEvidence?.artifactId;
+      if (candidate) {
+        const pinned = this.#artifact(candidate);
+        const raw = JSON.parse(pinned.content);
+        if (pinned.kind !== 'analysis' || !AIPlanningResultSchema.safeParse(raw).success)
+          fail('PLAN_REVIEW_INVALID', 'Pinned planning proposal не соответствует сохраненному artifact.');
+        planningArtifactHash = candidate; proposal = raw;
+      }
+      break;
+    }
+    return buildSemanticPlanReviewInput({ task, plan, planningArtifactHash, proposal });
+  }
+  #validatePlanReviewGate(state, task, plan) {
+    if (plan.workflowPolicy !== 'developer-v2' || plan.stage === 'planning') return;
+    const reviewer = plan.nodes.find((node) => node.planReview);
+    if (!reviewer) {
+      if (semanticPlanReviewRequired(task, plan.taskContract)) fail('PLAN_REVIEW_INVALID', 'Обязательный reviewer отсутствует.');
+      return;
+    }
+    const node = state.nodes[reviewer.id];
+    const id = node?.receipts.at(-1);
+    const receipt = id && ReceiptSchema.parse(this.store.readObject('receipts', id));
+    const bundle = this.#planReviewBundle(state, task, plan);
+    if (node?.status !== 'passed' || !receipt || receipt.phase !== 'finished' || receipt.verdict !== 'pass' ||
+        receipt.exitCode !== 0 || receipt.runId !== state.runId || receipt.nodeId !== reviewer.id ||
+        receipt.actionId !== 'ai-analyze' || receipt.actionVersion !== reviewer.action.version || receipt.planVersion !== plan.version || receipt.planHash !== state.planHash || receipt.taskHash !== state.taskHash ||
+        receipt.sourceHash !== state.sourceHash || receipt.runtimeHash !== plan.runtimeHash ||
+        receipt.termination?.stopped !== true || receipt.termination.uncertain !== false || receipt.termination.timedOut ||
+        receipt.termination.outputLimit || receipt.termination.signal !== null || receipt.changedFiles.length ||
+        receipt.beforeFingerprint !== receipt.afterFingerprint || receipt.beforeFingerprint !== state.initialFingerprint?.hash ||
+        receipt.reviewEvidenceHash !== bundle.hash)
+      fail('PLAN_REVIEW_INVALID', 'Нет актуального stopped readonly review receipt этого candidate.');
+    const results = receipt.artifacts.filter((hash) => node.artifacts.includes(hash)).flatMap((hash) => {
+      const artifact = this.#artifact(hash);
+      if (artifact.kind !== 'analysis') return [];
+      const parsed = AIPlanReviewResultSchema.safeParse(JSON.parse(artifact.content));
+      return parsed.success ? [parsed.data] : [];
+    });
+    if (results.length !== 1) fail('PLAN_REVIEW_INVALID', 'Нужен ровно один bound semantic review result.');
+    validateSemanticPlanReview(bundle.input, results[0]);
+    const resolutionArtifacts = receipt.artifacts.filter(hash => node.artifacts.includes(hash)).flatMap(hash => {
+      const artifact = this.#artifact(hash);
+      if (artifact.kind !== 'generated-doc') return [];
+      const data = JSON.parse(artifact.content);
+      return [data];
+    });
+    const resolutions = resolutionArtifacts.filter(data => PlanCitationResolutionSchema.safeParse(data).success);
+    if (resolutions.length !== 1) fail('PLAN_REVIEW_INVALID', 'Нет ровно одного host resolution artifact.');
+    const resolution = validatePlanCitationResolution({ output: results[0], resolution: resolutions[0],
+      inputHash: bundle.hash, fingerprint: this.#resolveFingerprint(state.initialFingerprint) });
+    const digests = resolutionArtifacts.filter(data => PlanReviewOutputDigestSchema.safeParse(data).success);
+    if (digests.length !== 1 || digests[0].inputHash !== bundle.hash ||
+        digests[0].fingerprintHash !== state.initialFingerprint.hash || digests[0].reportedOutputHash !== resolution.reportedOutputHash)
+      fail('PLAN_REVIEW_INVALID', 'Host resolution не связан с исходным model result digest.');
+    if (state.workspaceFingerprint?.hash === state.initialFingerprint?.hash)
+      validatePlanReviewCitations({ output: results[0], node: reviewer, worktree: state.binding.worktree,
+        fingerprint: this.#resolveFingerprint(state.workspaceFingerprint) });
+  }
   #analysis(state, plan) { return this.#proofService().analysis(state, plan); }
   #currentCheckRegistry() {
     try { return this.adapters.checkRegistry?.(); }
@@ -301,7 +369,7 @@ export class WorkflowService {
     let source = { state, plan };
     for (let depth = 0; depth < 24; depth++) {
       if (source.plan.stage === 'planning') {
-        for (const node of source.plan.nodes.filter((n) => ['ai-analyze','ai-plan'].includes(n.action.id))) {
+        for (const node of source.plan.nodes.filter((n) => !n.planReview && ['ai-analyze','ai-plan'].includes(n.action.id))) {
           if (!result.has(node.action.id)) {
             const actual = source.state.nodes[node.id];
             result.set(node.action.id, { nodeId: node.id, title: node.title, outcome: node.outcome, attempt: actual.attempts, durationMs: actual.durationMs, action: node.action.id, status: actual.status,
@@ -394,7 +462,7 @@ export class WorkflowService {
   }
   async #discoverPlanningContext(state, task, plan, request, caps) {
     if (!task.contextDiscovery || !this.#contextClarification(state, plan)) return null;
-    const definition = plan.nodes.find((node) => ['ai-analyze', 'ai-plan'].includes(node.action.id) &&
+    const definition = plan.nodes.find((node) => !node.planReview && ['ai-analyze', 'ai-plan'].includes(node.action.id) &&
       resultKind(state.nodes[node.id], (id) => this.store.readObject('receipts', id)) === 'semantic');
     if (!definition) return null;
     const artifactId = state.nodes[definition.id].artifacts.find((id) => this.#artifact(id).kind === 'analysis');
@@ -472,6 +540,7 @@ export class WorkflowService {
     if (state.nodes[definition.id].status === 'passed') return true;
     // Repair authorization does not replace consent to the new provider context.
     if (definition.needs.some((id) => state.nodes[id].status !== 'passed')) return false;
+    this.#validatePlanReviewGate(state, task, plan);
     const permissions = unique(plan.nodes.flatMap((node) => node.permissions));
     const receipt = this.#receipt(state, task, plan, definition, {
       phase: 'policy', verdict: 'pass', grantedPermissions: permissions,
@@ -503,6 +572,7 @@ export class WorkflowService {
       version: plan.version + 1, parentPlanHash: state.planHash, supersedesRunId: state.runId,
       workflow: 'autonomous', stage: 'planning', analysisArtifact, retainedArtifacts,
       planningTransitions: (state.planningTransitions ?? 0) + 1,
+      ...(state.planCorrectionCycles !== undefined ? { planCorrectionCycles: state.planCorrectionCycles } : {}),
       draft: null, binding: state.binding, fingerprint: state.workspaceFingerprint,
     });
     const prior = { digest, status: 'creating', resultRunId: newRunId, preparationHash };
@@ -583,6 +653,7 @@ export class WorkflowService {
       retainedArtifacts = [],
       policyGrant = undefined,
       planningTransitions = 0,
+      planCorrectionCycles = undefined,
       contextDiscoveryRound = 0,
       naturalIntakeHash = undefined,
       expectedSourceHash = undefined,
@@ -622,6 +693,7 @@ export class WorkflowService {
       retainedArtifacts,
       policyGrant: policyGrant ?? null,
       planningTransitions,
+      ...(planCorrectionCycles !== undefined ? { planCorrectionCycles } : {}),
       contextDiscoveryRound,
       naturalIntakeHash: naturalIntakeHash ?? null,
       actor,
@@ -644,7 +716,7 @@ export class WorkflowService {
         skills: this.adapters.skills(task),
         resolveSkills: this.adapters.resolveSkills,
         resolveReadPaths: this.adapters.resolveReadPaths,
-        contextHash: this.adapters.contextHash?.(task),
+        contextHash: this.adapters.contextHash?.(task), workflowPolicy: this.adapters.workflowPolicy,
         version,
         parentPlanHash,
         workflow,
@@ -663,6 +735,8 @@ export class WorkflowService {
         steps: proposal.nodes.filter((node) => node.action.id === 'ai-implement').map((node) => ({ id: node.id, nodeId: node.id, paths: node.resources.writes })),
       });
       if (proposal.schemaVersion === 3 && proposal.stage !== 'planning') proposal.executionStages = singleExecutionStage(proposal.nodes, proposal.taskContract);
+      if (proposal.nodes.some((node) => node.planReview) && !this.#hasReadConsent()) fail('ONBOARDING_REQUIRED', 'Plan review требует существующее согласие на readonly AI.');
+      validateExecutionPlanConsistency(proposal);
       return validatePlan(proposal, task, context).plan;
     });
     const planHash = this.store.putObject('plans', plan);
@@ -698,6 +772,7 @@ export class WorkflowService {
         planVersion: version,
         maxReplans: task.limits.maxReplans,
         planningTransitions,
+        ...(planCorrectionCycles !== undefined ? { planCorrectionCycles } : {}),
         contextDiscoveryRound,
         ...(naturalIntakeHash ? { naturalIntakeHash } : {}),
         supersedesRunId,
@@ -706,7 +781,7 @@ export class WorkflowService {
         status: 'pending',
         finalDisposition: null,
         nodes: initialNodes(plan),
-        permissions: workflow === 'autonomous' && stage === 'planning' ? ['ai.read'] : [],
+        permissions: workflow === 'autonomous' && stage === 'planning' || plan.nodes.some((node) => node.planReview) ? ['ai.read'] : [],
         ...(policyGrant ? { policyGrant } : {}),
         binding: null,
         workspaceFingerprint: null,
@@ -745,7 +820,7 @@ export class WorkflowService {
       plan,
       task,
       current
-        ? { runtimeHash: this.adapters.identity(), skills: this.adapters.skills(task), resolveSkills: this.adapters.resolveSkills, resolveReadPaths: this.adapters.resolveReadPaths, contextHash: this.adapters.contextHash?.(task), provider: this.adapters.project?.ai.provider, checks: this.#currentCheckRegistry() }
+        ? { runtimeHash: this.adapters.identity(), skills: this.adapters.skills(task), resolveSkills: this.adapters.resolveSkills, resolveReadPaths: this.adapters.resolveReadPaths, contextHash: this.adapters.contextHash?.(task), workflowPolicy: this.adapters.workflowPolicy, provider: this.adapters.project?.ai.provider, checks: this.#currentCheckRegistry() }
         : { mode: 'historical' },
     );
     if (current) this.#withReadContext(validateCurrentPlan);
@@ -798,19 +873,19 @@ export class WorkflowService {
       fail('STATE_INTEGRITY', 'Supersession требует новую run и stale state');
     if (
       state.permissions.length &&
-      !(plan.workflow === 'autonomous' && plan.stage === 'planning' &&
+      !((plan.workflow === 'autonomous' && plan.stage === 'planning' || plan.workflowPolicy === 'developer-v2' && plan.nodes.some((node) => node.planReview)) &&
         state.permissions.length === 1 && state.permissions[0] === 'ai.read' && (!current || this.#hasReadConsent())) &&
       !plan.nodes.some(
         (n) =>
           n.success.kind === 'gate' &&
-          n.needs.length === 0 &&
+          (n.needs.length === 0 || plan.workflowPolicy === 'developer-v2' && n.action.id === 'human-approve' && n.needs.every((id) => state.nodes[id].status === 'passed')) &&
           state.nodes[n.id].status === 'passed',
       )
     )
       fail('STATE_INTEGRITY', 'Permissions не подтверждены gate');
     if (state.policyGrant) this.#verifyAuthorization(state, task, plan);
     const hasProviderGate = plan.nodes.some((node) => node.action.id === 'human-provider-consent');
-    const initialPermissions = plan.workflow === 'autonomous' && plan.stage === 'planning' ? ['ai.read'] : [];
+    const initialPermissions = plan.workflow === 'autonomous' && plan.stage === 'planning' || plan.nodes.some((node) => node.planReview) ? ['ai.read'] : [];
     if (hasProviderGate) {
       const approved = plan.nodes.some((node) => node.action.id === 'human-approve' && state.nodes[node.id].status === 'passed');
       const expected = approved ? unique(plan.nodes.flatMap((node) => node.permissions)).sort() : initialPermissions;
@@ -853,7 +928,7 @@ export class WorkflowService {
             hashObject(plan.skills.filter((s) => definition.skills.includes(s.id))) ||
           // This gate precedes plan approval and never changes execution grants.
           hashObject(receipt.grantedPermissions) !== hashObject(
-            definition.action.id === 'human-provider-consent' ? initialPermissions : state.permissions)
+            definition.action.id === 'human-provider-consent' || definition.planReview ? initialPermissions : state.permissions)
         )
           fail(
             'RECEIPT_INTEGRITY',
@@ -981,7 +1056,7 @@ export class WorkflowService {
         (operation) => operation.resultRunId && operation.preparationHash,
       ),
     );
-    const capabilities = calculateCapabilities({ ...state, planVersion: state.planVersion - (state.planningTransitions ?? 0) }, plan, {
+    const capabilities = calculateCapabilities({ ...state, planVersion: state.planVersion - (state.planningTransitions ?? 0) - (state.planCorrectionCycles ?? 0) }, plan, {
       runner: this.adapters.runner,
       historical: plan.registryHash !== REGISTRY_HASH || plan.policyHash !== POLICY_HASH,
       orphan,
@@ -1015,6 +1090,16 @@ export class WorkflowService {
     if (!lock && canReplanRejectedImplementation(state, plan,
       (id) => ReceiptSchema.parse(this.store.readObject('receipts', id))))
       capabilities.run.requestReplan = { allowed: true, reason: null };
+    if (plan.workflowPolicy === 'developer-v2' && state.policyGrant && !state.activeOperation && !state.finalDisposition && !lock) {
+      const reviewer = plan.nodes.find((node) => node.planReview);
+      const node = reviewer && state.nodes[reviewer.id];
+      const id = node?.receipts.at(-1);
+      const receipt = id && ReceiptSchema.parse(this.store.readObject('receipts', id));
+      if (node?.status === 'failed' && node.reason === 'PLAN_REVIEW_BLOCKED' && receipt?.phase === 'finished' &&
+          receipt.termination?.stopped === true && !receipt.termination.uncertain && !receipt.changedFiles.length &&
+          receipt.beforeFingerprint === receipt.afterFingerprint)
+        capabilities.run.requestReplan = { allowed: true, reason: null };
+    }
     if (!state.binding && this.adapters.readiness) {
       const readiness = this.adapters.readiness(this.store.readObject('tasks', state.taskHash));
       if (!readiness.available)
@@ -1218,7 +1303,7 @@ export class WorkflowService {
         try {
           loaded = this.#read(runId, { current: false, verifySource: false });
           if (contextError) throw contextError;
-          validatePlan(loaded.plan, loaded.task, { ...context, skills: this.adapters.skills(loaded.task), contextHash: this.adapters.contextHash?.(loaded.task), provider: this.adapters.project?.ai.provider });
+          validatePlan(loaded.plan, loaded.task, { ...context, skills: this.adapters.skills(loaded.task), contextHash: this.adapters.contextHash?.(loaded.task), workflowPolicy: this.adapters.workflowPolicy, provider: this.adapters.project?.ai.provider });
         } catch (error) {
           reason = safeReason(error);
         }
@@ -1477,6 +1562,7 @@ export class WorkflowService {
         });
         providerConsentHash = this.store.putObject('provider-consents', consent);
       }
+      if (request.decision === 'approve' && definition.action.id === 'human-approve') this.#validatePlanReviewGate(state, task, plan);
       const receipt = this.#receipt(state, task, plan, definition, {
         phase: 'gate',
         grantedPermissions: request.decision === 'approve' && !providerGate ? required : state.permissions,
@@ -1677,8 +1763,9 @@ export class WorkflowService {
       if (deadlineTimer) clearTimeout(deadlineTimer);
       this.active.delete(runId);
     }
-    if (scheduleContinuation && plan.workflow === 'autonomous' && plan.stage === 'planning' &&
-        state.status === 'passed' && !state.stopRequested) this.#schedule(runId);
+    if (scheduleContinuation && plan.workflow === 'autonomous' && !state.stopRequested &&
+        (plan.stage === 'planning' && state.status === 'passed' || plan.workflowPolicy === 'developer-v2' && !state.policyGrant &&
+          plan.nodes.some((node) => node.planReview && state.nodes[node.id].status === 'failed' && state.nodes[node.id].reason === 'PLAN_REVIEW_BLOCKED'))) this.#schedule(runId);
     return this.snapshot(runId);
   }
 
@@ -1730,7 +1817,7 @@ export class WorkflowService {
           skills: this.adapters.skills(task),
       resolveSkills: this.adapters.resolveSkills,
       resolveReadPaths: this.adapters.resolveReadPaths,
-      contextHash: this.adapters.contextHash?.(task),
+      contextHash: this.adapters.contextHash?.(task), workflowPolicy: this.adapters.workflowPolicy,
       provider: this.adapters.project?.ai.provider,
           checks: this.adapters.checkRegistry?.(),
         });
@@ -1741,6 +1828,7 @@ export class WorkflowService {
         const unchanged = this.adapters.fingerprint(current.binding.worktree, current.toolchain);
         if (current.workspaceFingerprint?.hash !== before.hash || unchanged.hash !== before.hash)
           fail('WORKSPACE_DRIFT', 'Workspace изменился до применения patch');
+        this.#validatePlanReviewGate(current, task, plan);
         this.adapters.applyEdits(current.binding.worktree, before, definition, task, edits, moves, jsonTransfers);
         return this.adapters.fingerprint(current.binding.worktree, current.toolchain);
       }),
@@ -1751,6 +1839,7 @@ export class WorkflowService {
     return executeNode({ root: this.root, store: this.store, adapters: this.adapters,
       sanitizeText, safeReason, privateDirectory,
       analysis: this.#analysis.bind(this),
+      planReviewBundle: this.#planReviewBundle.bind(this), validatePlanReviewGate: this.#validatePlanReviewGate.bind(this),
       applyFencedEdits: this.#applyFencedEdits.bind(this),
       artifact: this.#artifact.bind(this),
       assertExecutionOwner: this.#assertExecutionOwner.bind(this),

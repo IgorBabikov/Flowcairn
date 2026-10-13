@@ -42,15 +42,15 @@ function citationMatcher(citation) {
   return { update: (chunk) => consume(chunk), finish: () => consume(undefined, true) };
 }
 
-// Quotes are evidence only after a complete hash, EOF and path/descriptor check.
-function readCitation(worktree, citation, fingerprint) {
-  RelativePath.parse(citation.path);
-  const expected = fingerprint.files.find((entry) => entry.path === citation.path);
+// Both strict citations and bounded anchor transport use this same physical read.
+export function scanVerifiedCitationFile(worktree, relativePath, fingerprint, { onChunk = undefined, onEnd = undefined, maxBytes = undefined } = {}) {
+  RelativePath.parse(relativePath);
+  const expected = fingerprint.files.find((entry) => entry.path === relativePath);
   if (!expected) fail('Цитата не относится к доступному проверенному исходнику');
   const root = realpathSync(worktree);
   const directories = [];
   let absolute = root;
-  for (const part of citation.path.split('/')) {
+  for (const part of relativePath.split('/')) {
     const stat = lstatHostSync(absolute, { bigint: true });
     if (!stat.isDirectory() || stat.isSymbolicLink() || !sameHostPath(realpathSync(absolute), absolute))
       fail('Цитата не может проходить через symlink');
@@ -60,9 +60,9 @@ function readCitation(worktree, citation, fingerprint) {
   try {
     const stat = lstatHostSync(absolute, { bigint: true });
     if (Number(stat.size) !== expected.size) fail('Исходник цитаты изменился');
-    const matcher = citationMatcher(citation);
-    const scanned = scanSourceFile(absolute, { expected: stat, classify: false, onChunk: matcher.update });
-    matcher.finish();
+    if (maxBytes !== undefined && expected.size > maxBytes) fail('Исходник превышает bounded citation limit');
+    const scanned = scanSourceFile(absolute, { expected: stat, classify: false, onChunk });
+    onEnd?.();
     if (scanned.size !== expected.size || scanned.hash !== expected.hash)
       fail('Хеш цитируемого исходника не совпадает с проверенным состоянием');
     for (const directory of directories) {
@@ -70,10 +70,17 @@ function readCitation(worktree, citation, fingerprint) {
       if (!current.isDirectory() || current.isSymbolicLink() || crossStatIdentity(current) !== directory.identity ||
           !sameHostPath(realpathSync(directory.path), directory.path)) fail('Путь цитаты изменился во время чтения');
     }
+    return scanned;
   } catch (error) {
     if (error.code === 'REQUIREMENT_EVIDENCE_INVALID') throw error;
     fail('Не удалось полностью прочитать неизменный исходник цитаты');
   }
+}
+
+// Final acceptance remains strict: it never relocates or normalizes indentation.
+export function readCitation(worktree, citation, fingerprint) {
+  const matcher = citationMatcher(citation);
+  scanVerifiedCitationFile(worktree, citation.path, fingerprint, { onChunk: matcher.update, onEnd: matcher.finish });
 }
 
 export function validateRequirementAssessments({ output, plan, node, worktree, fingerprint }) {
@@ -143,4 +150,17 @@ export function requirementAcceptanceCapability(state, plan, fingerprint, reason
     (!fingerprint || fingerprint.hash !== state.workspaceFingerprint?.hash ? 'Результат изменился; требуется повторная проверка' : null) ||
     (!plan.taskContract?.requirements.some((item) => item.verification.method === 'human') ? 'Нет требований с ручной приемкой' : null);
   return { allowed: !unavailable, reason: unavailable };
+}
+
+/** Plan citations ground a future plan; they do not assert implementation acceptance. */
+export function validatePlanReviewCitations({ output, node, worktree, fingerprint }) {
+  const citations = [...output.requirementAssessments, ...output.unknownAssessments].flatMap((item) => item.citations);
+  for (const citation of citations) {
+    try {
+      if (!includesPath(node.resources.reads, citation.path)) fail('Цитата plan review выходит за declared read context');
+      readCitation(worktree, citation, fingerprint);
+    } catch (error) {
+      throw new GraphError('PLAN_REVIEW_INVALID', error.message);
+    }
+  }
 }

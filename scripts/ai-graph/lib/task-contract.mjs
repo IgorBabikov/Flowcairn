@@ -5,6 +5,13 @@ import { contextPathAllowed, overlaps } from './registry.mjs';
 const unique = (values) => [...new Set(values)];
 const fail = (code, message) => { throw new GraphError(code, message); };
 const normalize = (value) => value.trim().replace(/\s+/g, ' ');
+// A final proposal removes only an explicit current-analysis protocol statement.
+// Unrecognized or enduring constraints stay intact; original task wording always wins.
+function enduringConstraints(task, analysis) {
+  const original = normalize(`${task.goal}\n${task.instructions}`).toLowerCase();
+  const stageOnly = /^(?:(?:the\s+)?current\s+analysis|analysis\s+(?:step|stage)|текущий\s+анализ|(?:текущий\s+)?этап\s+анализа)\s*(?:is|:|[-—])?\s*(?:read[- ]only|только\s+чтение|без\s+изменения\s+(?:файлов|исходников))(?:\s*[;,.]\s*edits\s*=\s*\[\])?\s*[.!]?$/i;
+  return (analysis?.constraints ?? []).filter((constraint) => original.includes(normalize(constraint).toLowerCase()) || !stageOnly.test(constraint));
+}
 const requirementId = (title) => `req-${hashObject(normalize(title)).slice(0, 16)}`;
 
 function referencedDetail(title, existingIds) {
@@ -151,7 +158,7 @@ export function buildTaskContract(task, { proposal = null, analysis = null, prev
     ...(decomposing ? { acceptanceHash: hashObject(task.acceptance) } : {}),
     requirements: bound,
     optionalImprovements: proposed?.optionalImprovements ?? [],
-    constraints: unique(proposed ? proposed.constraints : analysis?.constraints ?? []),
+    constraints: unique(proposed ? [...enduringConstraints(task, analysis), ...proposed.constraints] : analysis?.constraints ?? []),
     assumptions: proposed?.assumptions ?? [],
     unknowns: unique([...(analysis?.risks ?? []), ...(proposed?.unknowns ?? [])]),
     scope: [...task.scope], forbiddenPaths: [...task.forbiddenPaths], rigor: selectTaskRigor(task, analysis),

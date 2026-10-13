@@ -581,6 +581,130 @@
         "Drop universal word/typography choices, mandatory URL state sync, >50 list threshold and unsolicited dependencies"
       ],
       "discovery": "Direct upstream public guidance; exact skills.sh listing not found by Exa. Not represented as an installed catalogue skill."
+    },
+    {
+      "id": "tdd",
+      "repository": "https://github.com/mattpocock/skills",
+      "commit": "49dd158d1076134a641b33efb035946536778336",
+      "catalogueUrl": null,
+      "status": "adapted",
+      "sources": [
+        {
+          "path": "skills/engineering/tdd/SKILL.md",
+          "url": "https://raw.githubusercontent.com/mattpocock/skills/49dd158d1076134a641b33efb035946536778336/skills/engineering/tdd/SKILL.md",
+          "sha256": "5505d25bbaa8fc14a79e4d20163936958992a2995b7f1dd1d6197edc9ed722e0",
+          "bytes": 3629
+        },
+        {
+          "path": "skills/engineering/tdd/tests.md",
+          "url": "https://raw.githubusercontent.com/mattpocock/skills/49dd158d1076134a641b33efb035946536778336/skills/engineering/tdd/tests.md",
+          "sha256": "859f9e592c188fda4fc7277dd180e4ce9c7a2e13f6efe1f6f29eccc9d28c106a",
+          "bytes": 2214
+        },
+        {
+          "path": "skills/engineering/tdd/mocking.md",
+          "url": "https://raw.githubusercontent.com/mattpocock/skills/49dd158d1076134a641b33efb035946536778336/skills/engineering/tdd/mocking.md",
+          "sha256": "3ceb807fdf4a47d6a93d4d9a891e5ba6d362a6247bd08adc451feebfc17361ef",
+          "bytes": 1481
+        }
+      ],
+      "license": {
+        "spdx": "MIT",
+        "path": "LICENSE",
+        "url": "https://raw.githubusercontent.com/mattpocock/skills/49dd158d1076134a641b33efb035946536778336/LICENSE",
+        "sha256": "0e7ac423bf2c6e223b7c5b156f8cf72da49d748e56a1641402c31f22ad07dbb5",
+        "bundledPath": "skills/licenses/mattpocock-skills-MIT.txt"
+      },
+      "noticeReview": {
+        "skillSpecificNoticeFound": false,
+        "importedThirdPartyScriptsOrAssets": false
+      },
+      "dependencies": {
+        "importedExecutables": [],
+        "addedPackages": [],
+        "runtimeNetworkFetch": false,
+        "upstreamToolsOrSkills": [],
+        "disposition": "Only scoped method text; approved contract/test policy, registered project runner and Executor proof remain authoritative."
+      },
+      "targets": [
+        "skills/workflow-test-quality/SKILL.md"
+      ],
+      "applicability": {
+        "actions": [
+          "ai-implement",
+          "ai-review"
+        ],
+        "positive": "Behavior implementation; risk, defect or requested test-gap review",
+        "negative": "Static prose work, unrelated audits, arbitrary test/mutation execution"
+      },
+      "adaptationChanges": [
+        "Preserve keep/add and approved scope instead of per-test confirmation",
+        "Observe contracted public behavior and real dependency effects",
+        "Read-only counterexamples are candidates, not executed mutation evidence",
+        "No new lifecycle, scripts, agent metadata, test runner or rights"
+      ]
+    },
+    {
+      "id": "test-gap-analysis",
+      "repository": "https://github.com/dotnet/skills",
+      "commit": "9864ca798f9448ef954ad1f05baf0dfca6501d51",
+      "catalogueUrl": null,
+      "status": "adapted",
+      "sources": [
+        {
+          "path": "plugins/dotnet-test/skills/test-gap-analysis/SKILL.md",
+          "url": "https://raw.githubusercontent.com/dotnet/skills/9864ca798f9448ef954ad1f05baf0dfca6501d51/plugins/dotnet-test/skills/test-gap-analysis/SKILL.md",
+          "sha256": "14e37b66a3571065122a96d5c5da5048e1909eb0ee9223950bf312589c6f713a",
+          "bytes": 19563
+        },
+        {
+          "path": "plugins/dotnet-test/skills/test-gap-analysis/references/per-test-read-only.md",
+          "url": "https://raw.githubusercontent.com/dotnet/skills/9864ca798f9448ef954ad1f05baf0dfca6501d51/plugins/dotnet-test/skills/test-gap-analysis/references/per-test-read-only.md",
+          "sha256": "ce9582d6dccc52847c51f717818f049a831e6eed4e9cda6b1931f3bc21421bea",
+          "bytes": 6677
+        },
+        {
+          "path": "plugins/dotnet-test/skills/test-gap-analysis/references/mutation-catalog.md",
+          "url": "https://raw.githubusercontent.com/dotnet/skills/9864ca798f9448ef954ad1f05baf0dfca6501d51/plugins/dotnet-test/skills/test-gap-analysis/references/mutation-catalog.md",
+          "sha256": "38db5656c50813868692c9fff592e6c8cb928b3bfd574dab00674394d9a0e7ca",
+          "bytes": 3942
+        }
+      ],
+      "license": {
+        "spdx": "MIT",
+        "path": "LICENSE",
+        "url": "https://raw.githubusercontent.com/dotnet/skills/9864ca798f9448ef954ad1f05baf0dfca6501d51/LICENSE",
+        "sha256": "cfc21f5e8bd655ae997eec916138b707b1d290b83272c02a95c9f821b8c87310",
+        "bundledPath": "skills/licenses/dotnet-skills-MIT.txt"
+      },
+      "noticeReview": {
+        "skillSpecificNoticeFound": false,
+        "importedThirdPartyScriptsOrAssets": false
+      },
+      "dependencies": {
+        "importedExecutables": [],
+        "addedPackages": [],
+        "runtimeNetworkFetch": false,
+        "upstreamToolsOrSkills": [],
+        "disposition": "Only scoped method text; approved contract/test policy, registered project runner and Executor proof remain authoritative."
+      },
+      "targets": [
+        "skills/workflow-test-quality/SKILL.md"
+      ],
+      "applicability": {
+        "actions": [
+          "ai-implement",
+          "ai-review"
+        ],
+        "positive": "Behavior implementation; risk, defect or requested test-gap review",
+        "negative": "Static prose work, unrelated audits, arbitrary test/mutation execution"
+      },
+      "adaptationChanges": [
+        "Preserve keep/add and approved scope instead of per-test confirmation",
+        "Observe contracted public behavior and real dependency effects",
+        "Read-only counterexamples are candidates, not executed mutation evidence",
+        "No new lifecycle, scripts, agent metadata, test runner or rights"
+      ]
     }
   ],
   "notImported": [
@@ -665,10 +789,69 @@
       "path": "skills/testing/SKILL.md",
       "sha256": "becf207c2d6446eb726445694191c2e4445c26de0635bfa969859d5e68ef34a3",
       "bytes": 2685
+    },
+    {
+      "path": "skills/workflow-test-quality/SKILL.md",
+      "sha256": "8278dbc80051abff4b4baf99871f84ce78b9e5545aa47ff0519fa5297f82765a",
+      "bytes": 6472
     }
   ],
   "layers": {
     "developmentTeam": "Use existing installed specialist skills when applicable; no global duplicates installed",
     "shippedProduct": "Only adapted self-contained method text and license notices; no upstream tools/lifecycle"
-  }
+  },
+  "originalWorkflowMethods": [
+    {
+      "id": "workflow-planning",
+      "path": "skills/workflow-planning/SKILL.md",
+      "sha256": "bf3f00826f5bf697401b418da94e17b8a4a09ffd5335bf39110eeccf3bb6f47b",
+      "bytes": 1405,
+      "status": "original-flowcairn-guidance",
+      "license": "MIT",
+      "origin": "Current Flowcairn contracts and approved developer workflow design",
+      "importedUpstreamCode": false,
+      "importedExecutables": [],
+      "runtimeNetworkFetch": false,
+      "measuredAIEfficacy": "pending-independent-control-tasks"
+    },
+    {
+      "id": "workflow-reuse",
+      "path": "skills/workflow-reuse/SKILL.md",
+      "sha256": "29ad9077d80c44ed3369b635b0a0e59805afb2cfeef93a4529a6c5c4453c4485",
+      "bytes": 1294,
+      "status": "original-flowcairn-guidance",
+      "license": "MIT",
+      "origin": "Current Flowcairn contracts and approved developer workflow design",
+      "importedUpstreamCode": false,
+      "importedExecutables": [],
+      "runtimeNetworkFetch": false,
+      "measuredAIEfficacy": "pending-independent-control-tasks"
+    },
+    {
+      "id": "workflow-verification",
+      "path": "skills/workflow-verification/SKILL.md",
+      "sha256": "f58d732107e27d39337638ed0e91aa0f79f51a3e975e3ce6e78c5212bd943da0",
+      "bytes": 1569,
+      "status": "original-flowcairn-guidance",
+      "license": "MIT",
+      "origin": "Current Flowcairn contracts and approved developer workflow design",
+      "importedUpstreamCode": false,
+      "importedExecutables": [],
+      "runtimeNetworkFetch": false,
+      "measuredAIEfficacy": "pending-independent-control-tasks"
+    },
+    {
+      "id": "workflow-diagnosis",
+      "path": "skills/workflow-diagnosis/SKILL.md",
+      "sha256": "6a33a5e20164e82986d5111eaa22c16663f2df971e82b2c778cd7b358fb0d4c5",
+      "bytes": 1412,
+      "status": "original-flowcairn-guidance",
+      "license": "MIT",
+      "origin": "Current Flowcairn contracts and approved developer workflow design",
+      "importedUpstreamCode": false,
+      "importedExecutables": [],
+      "runtimeNetworkFetch": false,
+      "measuredAIEfficacy": "pending-independent-control-tasks"
+    }
+  ]
 }

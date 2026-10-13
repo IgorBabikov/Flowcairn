@@ -26,4 +26,5 @@ export const BUILTIN_SKILL_IDS = Object.freeze([...new Set([
   ...Object.values(SKILL_ROUTES).flat(),
   ...Object.values(CORE_SKILL_ROUTES).flat(),
   ...Object.values(DOMAIN_SKILLS),
+  'workflow-planning', 'workflow-reuse', 'workflow-verification', 'workflow-diagnosis', 'workflow-test-quality',
 ])]);

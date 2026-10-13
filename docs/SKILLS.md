@@ -18,11 +18,20 @@ Skill задает рекомендации для AI-действия. Конт
 | code-review | Независимый разбор artifact, калибровка findings, отдельная оценка требований | Read-only ai-review |
 | clean-implementation | Граница ответственности и один владелец состояния | Ai-implement, без необязательной перестройки проекта |
 | domain-frontend | Реальные состояния, focus/forms/motion и согласованный визуальный язык | Только frontend domain текущего действия |
+| workflow-planning | Связные outcomes, explicit dependencies и interfaces | Analyze/plan подходящей задачи |
+| workflow-reuse | Существующие компоненты, совместимость и конкретный capability gap | Analyze/plan, кроме routine текстовой правки |
+| workflow-verification | Реальный сценарий, outcome и ограничения evidence | Implement/review поведения |
+| workflow-diagnosis | Проверяемая причина и bounded correction или blocker | Bugfix и назначенный failure route |
+| workflow-test-quality | Наблюдаемое поведение, независимые expected values и проверяемые пробелы в assertions | Реализация поведения; рискованный, bugfix или явно запрошенный test-gap review |
 | implementation-lesson | Полнота разбора через steps/wholeFlow/limitations и самостоятельное рассуждение | По сохраненному материалу выбранной версии |
 
 Узкий TypeScript supplement находится внутри clean-implementation и code-review: действует только при затронутых TS-типах или границах runtime-данных. Он не переводит другие языки на TypeScript, не меняет compiler settings и не заменяет runtime validation проверкой типов.
 
 React/composition artifacts из vercel-labs/agent-skills не импортированы: metadata MIT без найденного полного LICENSE exact artifact недостаточно для подтверждения лицензии. Для web-interface-guidelines отдельная MIT-лицензия проверена.
+
+Четыре `workflow-*` метода — оригинальные инструкции Flowcairn, с отдельной provenance. Новых Superpowers Skills, scripts, hooks и адаптаций не добавлено; история существующих методов и лицензий сохраняется. Полные внешние наборы из исследований не становятся runtime registry автоматически.
+
+Отдельный `workflow-test-quality` адаптирует закрепленные TDD и .NET test-gap методы; [полные notices и hashes источников](../skills/workflow-test-quality/LICENSES.md) сохранены. Он уважает `keep` и разрешенный scope, различает read-only candidate gap и выполненный эксперимент. При обычном review без риска этот дополнительный метод не назначается.
 
 Проверки загрузки, positive/negative routing, hashes и drift подтверждают структурное подключение. Они не измеряют, насколько AI стал лучше выполнять задачи или насколько разработчик усвоил код. Для этого нужны отдельные контрольные задания с подготовленными fixtures, провайдером и бюджетом. Текущий lesson сохраняет ограничения своей схемы и не создает runtime observations без зарегистрированного extractor.
 
@@ -58,9 +67,44 @@ React/composition artifacts из vercel-labs/agent-skills не импортир�
 
 Flowcairn не назначает всем проектам 80% или 100% покрытия. Просьба не добавлять тесты не выключает уже обязательный script. Если необходимую проверку выполнить нельзя, результат остается неподтвержденным или требует предусмотренной контрактом личной приемки.
 
+## Маршрут и проектные специалисты
+
+Новый профиль использует `developmentWorkflow.version: 2`: задачи с поведением/риском получают отдельное read-only plan review до разрешения source write. `developmentWorkflow.version: 1` и профиль без developmentWorkflow сохраняют свои маршруты. Это версии policy, отдельные от формата project profile и Graph execution. [Порядок работы](DEVELOPER-WORKFLOW.md).
+
+Новый `init` выводит capabilities из уже зарегистрированных обязательных checks. Playwright дает browser recipe, native reports — соответствующий iOS/Android recipe; generic scenario reports требуют однозначный frontend/backend/mobile domain в рабочем каталоге проверки. Root check в смешанном monorepo не получает угаданный domain. Без согласия на чтение manifests generic capabilities не выводятся. Регистрация сохраняет acceptance `unverified`: достаточность assertions и результат устанавливаются только выполнением задачи.
+
+Owner может связать pinned project Skill с domain, framework major, видом задачи и capability. Specialist назначается только в своем scope/actions, при известных совместимых declarations и наличии зарегистрированных checks нужного report format. Неизвестные/противоречивые версии и отсутствующие prerequisites исключают его. Имя Skill не подтверждает compatibility или лицензию; новый import требует отдельной проверки содержимого, dependencies, compatibility и полной лицензии.
+
+Пример фрагмента project profile для уже выбранного React Skill:
+
+```json
+{
+  "developmentWorkflow": {
+    "version": 2,
+    "capabilities": [{ "id": "browser-scenario", "checkIds": ["browser"], "scope": ["src/web"] }],
+    "specialists": [{
+      "skillId": "project-react-guidance",
+      "domains": ["frontend"], "frameworks": ["react"], "majors": [19],
+      "taskKinds": ["behavior", "bugfix", "refactor", "design"],
+      "requires": ["browser-scenario"]
+    }]
+  },
+  "skillManifest": [{
+    "id": "project-react-guidance",
+    "path": ".agents/skills/react-guidance/SKILL.md",
+    "hash": "<точный SHA-256 выбранного SKILL.md>",
+    "scope": ["src/web"], "actions": ["ai-implement", "ai-review"]
+  }]
+}
+```
+
+Замените hash placeholder; это фрагмент, а не полный профиль или установка Skill. Check `browser` должен быть обязательным зарегистрированным check с `playwright-json` report. Файл Skill, references, лицензия и версия проверяются владельцем; source drift требует актуального плана. Инструкция не регистрирует executable и не расширяет permissions.
+
 ## Применимость и границы
 
 Domain routing использует поддерживаемые manifests и зависимости. Это выбор рекомендаций, а не обещание полноценного исполнителя для любого языка. Неизвестный стек получает общие инженерные правила. Текущий проверочный toolchain и его ограничения описаны [отдельно](LIMITATIONS.md).
+
+Stack profile сохраняет source hashes и scoped declarations. React major относится к зависимости, `android-gradle-plugin` — к AGP, `ios` — к deployment target, `swift-package` — к tools requirement, `dotnet` — к TFM. Это не installed SDK/compiler proof или гарантия minor compatibility. Flutter target platforms и Swift language/isolation settings не угадываются. В разрешенном scope bounded static inventory находит native/polyglot manifests, включая `.csproj` и Xcode projects; generated/private/hidden деревья исключены и требуют явных paths. Превышенный предел требует более узкого scope. JS packages сохраняют объявленный workspace inventory с его exclusions. Config, tests, Gradle, Swift и MSBuild при discovery не исполняются. Рекомендации для Android/RN/Expo/Flutter не означают готовый native verifier; [доступные report пути](CHECK-PROFILES.md) описаны отдельно.
 
 Проектные архитектурные правила действуют в своей области. Core/domain Skills заполняют пробелы и не требуют заменять существующий framework или компоненты. Любое указание передать секрет, запустить неизвестный executable или расширить scope остается вне разрешений.
 
@@ -70,4 +114,4 @@ Domain routing использует поддерживаемые manifests и з
 
 До согласования плана откройте его инструкции и назначенные Skills. После выполнения receipt показывает фактически назначенные hashes. Оценку результата проводите по требованиям и evidence, а не по заявлению модели о прочтении инструкций.
 
-[Конфигурация](CONFIGURATION.md) · [Контракт выполнения](FLOWCAIRN-WORKFLOW.md)
+[Конфигурация](CONFIGURATION.md) · [Developer workflow](DEVELOPER-WORKFLOW.md) · [Контракт выполнения](FLOWCAIRN-WORKFLOW.md)
